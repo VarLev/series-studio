@@ -13,12 +13,16 @@ export default function EpisodeTabs({
   initialLogline,
   initialSynopsis,
   shots,
+  synopsisModel,
+  breakdownModel,
 }: {
   episodeId: string;
   initialTitle: string;
   initialLogline: string;
   initialSynopsis: string;
   shots: ShotListItem[];
+  synopsisModel: string;
+  breakdownModel: string;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>(
     shots.length > 0 ? "Шоты" : "Сюжет",
@@ -55,6 +59,8 @@ export default function EpisodeTabs({
           initialSynopsis={initialSynopsis}
           shotsCount={shots.length}
           shotTitles={shots.map((s) => s.title)}
+          defaultSynopsisModel={synopsisModel}
+          defaultBreakdownModel={breakdownModel}
         />
       )}
 

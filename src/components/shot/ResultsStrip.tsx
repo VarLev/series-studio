@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cancelGeneration, retryGeneration } from "@/lib/actions/generate";
+import { deleteGeneration } from "@/lib/actions/deletes";
+import ConfirmButton from "@/components/ConfirmButton";
 
 export interface ResultItem {
   id: string;
@@ -123,6 +125,15 @@ export default function ResultsStrip({
               <span className="font-mono text-[10px] text-t300">
                 {g.credits != null ? `${g.credits} кр` : g.source}
               </span>
+              {!active && (
+                <ConfirmButton
+                  action={deleteGeneration.bind(null, g.id)}
+                  label="🗑"
+                  confirmLabel="Удалить?"
+                  className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
+                  armedClassName="text-danger"
+                />
+              )}
             </div>
 
             {failed && (

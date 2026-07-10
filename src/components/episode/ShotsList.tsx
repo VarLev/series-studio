@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useTransition } from "react";
 import { moveShot } from "@/lib/actions/shots";
+import { deleteAllShots } from "@/lib/actions/deletes";
 import { StatusPill, EmptyState } from "@/components/ui";
+import ConfirmButton from "@/components/ConfirmButton";
 
 export interface ShotListItem {
   id: string;
@@ -87,6 +89,16 @@ export default function ShotsList({
           </div>
         </div>
       ))}
+
+      {shots.length > 1 && (
+        <ConfirmButton
+          action={deleteAllShots.bind(null, episodeId)}
+          label={`Удалить все шоты (${shots.length})`}
+          confirmLabel="Точно удалить все шоты серии?"
+          doneToast="Шоты удалены"
+          className="mt-1 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
+        />
+      )}
     </div>
   );
 }

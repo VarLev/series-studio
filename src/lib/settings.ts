@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS = {
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;
 
+export { LLM_MODELS } from "./llm/models";
+
 export async function getSetting(key: SettingKey): Promise<string> {
   const db = await getDb();
   const rows = await db.select().from(settings).where(eq(settings.key, key));

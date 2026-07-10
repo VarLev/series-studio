@@ -4,10 +4,36 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateEpisode, generateSynopsis, breakdownEpisode, saveBreakdown } from "@/lib/actions/episodes";
 import type { Breakdown } from "@/lib/llm/contracts";
+import { LLM_MODELS } from "@/lib/llm/models";
 import BreakdownPreview from "./BreakdownPreview";
 import { SectionLabel } from "@/components/ui";
 
 type SaveState = "saved" | "saving" | "local" | "idle";
+
+function ModelSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const known = LLM_MODELS.some((m) => m.id === value);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="min-h-9 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none"
+      title="Модель Claude"
+    >
+      {LLM_MODELS.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.label} — {m.hint}
+        </option>
+      ))}
+      {!known && <option value={value}>{value}</option>}
+    </select>
+  );
+}
 
 export default function SynopsisEditor({
   episodeId,
@@ -16,6 +42,8 @@ export default function SynopsisEditor({
   initialSynopsis,
   shotsCount,
   shotTitles = [],
+  defaultSynopsisModel,
+  defaultBreakdownModel,
 }: {
   episodeId: string;
   initialTitle: string;
@@ -23,6 +51,8 @@ export default function SynopsisEditor({
   initialSynopsis: string;
   shotsCount: number;
   shotTitles?: string[];
+  defaultSynopsisModel: string;
+  defaultBreakdownModel: string;
 }) {
   const router = useRouter();
   const draftKey = `ss-draft:${episodeId}`;
@@ -31,6 +61,8 @@ export default function SynopsisEditor({
   const [synopsis, setSynopsis] = useState(initialSynopsis);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [brief, setBrief] = useState("");
+  const [synopsisModel, setSynopsisModel] = useState(defaultSynopsisModel);
+  const [breakdownModel, setBreakdownModel] = useState(defaultBreakdownModel);
   const [generating, setGenerating] = useState(false);
   const [breakingDown, setBreakingDown] = useState(false);
   const [preview, setPreview] = useState<Breakdown | null>(null);
@@ -94,7 +126,7 @@ export default function SynopsisEditor({
   async function onGenerate() {
     setGenerating(true);
     setError("");
-    const res = await generateSynopsis(episodeId, brief);
+    const res = await generateSynopsis(episodeId, brief, synopsisModel);
     setGenerating(false);
     if (res.ok) {
       setSynopsis(res.synopsis);
@@ -105,7 +137,7 @@ export default function SynopsisEditor({
   async function onBreakdown() {
     setBreakingDown(true);
     setError("");
-    const res = await breakdownEpisode(episodeId);
+    const res = await breakdownEpisode(episodeId, breakdownModel);
     setBreakingDown(false);
     if (res.ok) setPreview(res.breakdown);
     else setError(res.error);
@@ -176,6 +208,10 @@ export default function SynopsisEditor({
             placeholder="Задание для Claude: что должно случиться в этой серии?"
             className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
           />
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-t400">Модель сюжета:</span>
+            <ModelSelect value={synopsisModel} onChange={setSynopsisModel} />
+          </div>
           <button
             onClick={onGenerate}
             disabled={generating}
@@ -192,6 +228,10 @@ export default function SynopsisEditor({
           <div className="text-[11px] leading-relaxed text-t400">
             <span className="text-violet-600">✦</span>&nbsp; Claude прочитает сюжет, разобьёт его
             на группы шотов ≤ 15 сек и сам определит сущности в каждой.
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-t400">Модель раскадровки:</span>
+            <ModelSelect value={breakdownModel} onChange={setBreakdownModel} />
           </div>
           <button
             onClick={onBreakdown}

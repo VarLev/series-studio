@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
 import { listEpisodes, createEpisode } from "@/lib/actions/episodes";
+import { deleteEpisode, deleteAllEpisodes } from "@/lib/actions/deletes";
 import { getAllSettings } from "@/lib/settings";
 import { EmptyState } from "@/components/ui";
 import QueuePill from "@/components/QueuePill";
+import ConfirmButton from "@/components/ConfirmButton";
 
 export const dynamic = "force-dynamic";
 
@@ -38,30 +40,38 @@ export default async function EpisodesPage() {
 
       <div className="flex flex-col gap-2.5 px-4 pb-10">
         {episodes.map((ep) => (
-          <Link
+          <div
             key={ep.id}
-            href={`/episodes/${ep.id}`}
-            className="flex items-center gap-3.5 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3 hover:border-[var(--border-strong)] hover:bg-ink-600"
+            className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3 hover:border-[var(--border-strong)]"
           >
-            <div className="relative flex h-14 w-14 shrink-0 items-end overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 p-1.5">
-              <span className="chrome-text font-display text-[20px] font-bold leading-none tracking-[0.04em]">
-                {String(ep.number).padStart(2, "0")}
-              </span>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="eyebrow mb-1">Серия {String(ep.number).padStart(2, "0")}</div>
-              <div className="truncate text-[14px] font-semibold text-t100">
-                {ep.title || "Без названия"}
+            <Link href={`/episodes/${ep.id}`} className="flex min-w-0 flex-1 items-center gap-3.5">
+              <div className="relative flex h-14 w-14 shrink-0 items-end overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 p-1.5">
+                <span className="chrome-text font-display text-[20px] font-bold leading-none tracking-[0.04em]">
+                  {String(ep.number).padStart(2, "0")}
+                </span>
               </div>
-              <div className="mt-1 font-mono text-[10px] text-t400">
-                {ep.shotsTotal
-                  ? `${ep.shotsApproved} из ${ep.shotsTotal} шотов утверждено`
-                  : ep.synopsisMd
-                    ? "сюжет написан · не раскадрован"
-                    : "пустая серия"}
+              <div className="min-w-0 flex-1">
+                <div className="eyebrow mb-1">Серия {String(ep.number).padStart(2, "0")}</div>
+                <div className="truncate text-[14px] font-semibold text-t100">
+                  {ep.title || "Без названия"}
+                </div>
+                <div className="mt-1 font-mono text-[10px] text-t400">
+                  {ep.shotsTotal
+                    ? `${ep.shotsApproved} из ${ep.shotsTotal} шотов утверждено`
+                    : ep.synopsisMd
+                      ? "сюжет написан · не раскадрован"
+                      : "пустая серия"}
+                </div>
               </div>
-            </div>
-          </Link>
+            </Link>
+            <ConfirmButton
+              action={deleteEpisode.bind(null, ep.id)}
+              label="🗑"
+              confirmLabel="Удалить серию?"
+              doneToast="Серия удалена"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] text-[13px] text-t400 hover:border-[rgba(194,71,106,.4)] hover:text-danger disabled:opacity-50"
+            />
+          </div>
         ))}
 
         {episodes.length === 0 && (
@@ -79,6 +89,16 @@ export default async function EpisodesPage() {
             + Новая серия — начните с сюжета
           </button>
         </form>
+
+        {episodes.length > 1 && (
+          <ConfirmButton
+            action={deleteAllEpisodes}
+            label={`Удалить все серии (${episodes.length})`}
+            confirmLabel="Точно удалить ВСЕ серии и их содержимое?"
+            doneToast="Все серии удалены"
+            className="mt-2 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
+          />
+        )}
       </div>
     </main>
   );

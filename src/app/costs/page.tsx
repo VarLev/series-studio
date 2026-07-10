@@ -15,6 +15,8 @@ import { ScreenHeader, SectionLabel, EmptyState } from "@/components/ui";
 import KnowledgeIngest from "@/components/costs/KnowledgeIngest";
 import CatalogRefresh from "@/components/costs/CatalogRefresh";
 import LimitStepper from "@/components/costs/LimitStepper";
+import ConfirmButton from "@/components/ConfirmButton";
+import { deleteKnowledgeDoc, clearKnowledge } from "@/lib/actions/deletes";
 
 export const dynamic = "force-dynamic";
 
@@ -236,8 +238,24 @@ export default async function CostsPage() {
                 >
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-t200">{d.title}</span>
                   <span className="font-mono text-[9.5px] text-violet-300">{d.tags}</span>
+                  <ConfirmButton
+                    action={deleteKnowledgeDoc.bind(null, d.id)}
+                    label="🗑"
+                    confirmLabel="Удалить?"
+                    className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
+                    armedClassName="text-danger"
+                  />
                 </div>
               ))}
+              {docs.length > 1 && (
+                <ConfirmButton
+                  action={clearKnowledge}
+                  label={`Очистить базу знаний (${docs.length})`}
+                  confirmLabel="Точно очистить всю базу знаний?"
+                  doneToast="База знаний очищена"
+                  className="mt-1 min-h-10 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
+                />
+              )}
             </div>
           ) : (
             <EmptyState>

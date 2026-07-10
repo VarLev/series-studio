@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { EntityAvatar, ENTITY_TYPE_LABEL, EmptyState } from "@/components/ui";
 import { quickCreateEntity, type EntityType } from "@/lib/actions/entities";
+import { deleteAllEntities } from "@/lib/actions/deletes";
+import ConfirmButton from "@/components/ConfirmButton";
 
 export interface BibleItem {
   id: string;
@@ -95,6 +97,16 @@ export default function BibleList({ items }: { items: BibleItem[] }) {
               <span className="section-label">{TYPE_PLURAL[type]}</span>
               <span className="font-mono text-[10px] text-t400">{group.length}</span>
               <span className="flex-1" />
+              {items.filter((i) => i.type === type).length > 1 && (
+                <ConfirmButton
+                  action={deleteAllEntities.bind(null, type)}
+                  label="удалить все"
+                  confirmLabel="Удалить все?"
+                  doneToast={`Удалено: ${TYPE_PLURAL[type]}`}
+                  className="min-h-[30px] rounded-full border border-[var(--border-subtle)] px-3 text-[10px] font-semibold text-t400 hover:border-[rgba(194,71,106,.4)] hover:text-danger disabled:opacity-50"
+                  armedClassName="border-danger text-danger"
+                />
+              )}
               {/* spec §2.7: создаёт сущность с токеном CHAR_N/LOC_N/OBJ_N и сразу открывает карточку */}
               <button
                 onClick={() => {

@@ -188,6 +188,22 @@ body {
   animation: sheet-up 0.34s var(--ease-out);
 }
 
+@keyframes sheet-right {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@media (min-width: 1024px) {
+  .sheet-up {
+    animation: sheet-right 0.3s var(--ease-out);
+  }
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

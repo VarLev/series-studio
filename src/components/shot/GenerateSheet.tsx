@@ -26,6 +26,7 @@ export interface StartFrameOption {
 
 const QUALITY_COEF: Record<string, number> = { "480p": 0.6, "720p": 1, "1080p": 1.6 };
 const QUALITIES = ["480p", "720p", "1080p"] as const;
+const ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
 
 function estimateFor(model: CatalogModel, durationSec: number, quality: string): number | null {
   if (model.credits == null) return null;
@@ -66,6 +67,9 @@ export default function GenerateSheet({
   );
   const [duration, setDuration] = useState(Math.min(15, Math.max(4, groupDurationSec)));
   const [quality, setQuality] = useState<string>("720p");
+  const [aspect, setAspect] = useState<string>(
+    (ASPECTS as readonly string[]).includes(aspectRatio) ? aspectRatio : "16:9",
+  );
   // роль start-frame из референсов шота подставляется автоматически (spec §3.1)
   const [startFrame, setStartFrame] = useState<string>(defaultStartFrameId ?? "");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -110,7 +114,7 @@ export default function GenerateSheet({
         modelIds: [...selected],
         startFrameRefId: startFrame || undefined,
         durationSec: duration,
-        aspectRatio,
+        aspectRatio: aspect,
         quality,
         confirmed: confirmStep >= 2,
       });
@@ -219,6 +223,24 @@ export default function GenerateSheet({
         </div>
       )}
 
+      <div className="section-label mb-2 mt-3.5">Формат (соотношение сторон)</div>
+      <div className="flex flex-wrap gap-1.5">
+        {ASPECTS.map((a) => (
+          <button
+            key={a}
+            onClick={() => setAspect(a)}
+            className="min-h-9 flex-1 rounded-md border px-2 font-mono text-[11px] font-semibold"
+            style={{
+              borderColor: aspect === a ? "var(--border-strong)" : "var(--border-subtle)",
+              background: aspect === a ? "var(--ink-600)" : "none",
+              color: aspect === a ? "var(--text-100)" : "var(--text-400)",
+            }}
+          >
+            {a}
+          </button>
+        ))}
+      </div>
+
       <div className="section-label mb-2 mt-4">Start-frame (image-to-video)</div>
       {chosenFrame ? (
         <div className="flex items-center gap-2.5 rounded-lg border border-[rgba(192,138,62,.4)] bg-ink-700 p-2">
@@ -292,7 +314,7 @@ export default function GenerateSheet({
       <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5">
         <span className="text-[11px] text-t300">Оценка списания:</span>
         <span className="font-mono text-[10px] text-t400">
-          {duration}с · {quality} · {aspectRatio}
+          {duration}с · {quality} · {aspect}
         </span>
         <span className="flex-1" />
         <span className="font-mono text-[13px] font-semibold text-t100">

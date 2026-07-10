@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { asc, eq, inArray } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, shots, shotEntities, entities } from "@/lib/db";
+import { getAllSettings } from "@/lib/settings";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
 import EpisodeTabs from "@/components/episode/EpisodeTabs";
@@ -16,6 +17,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
   const db = await getDb();
   const [episode] = await db.select().from(episodes).where(eq(episodes.id, id));
   if (!episode) notFound();
+  const settings = await getAllSettings();
 
   const shotRows = await db
     .select()
@@ -82,6 +84,8 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         initialLogline={episode.logline}
         initialSynopsis={episode.synopsisMd}
         shots={shotItems}
+        synopsisModel={settings.llm_model_synopsis}
+        breakdownModel={settings.llm_model}
       />
     </main>
   );

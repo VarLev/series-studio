@@ -71,13 +71,17 @@ async function knowledgeContext(targetModel: string): Promise<string> {
 }
 
 /** U1/M2 — сгенерировать литературный сюжет эпизода */
-export async function llmSynopsis(episodeId: string, brief: string): Promise<string> {
+export async function llmSynopsis(
+  episodeId: string,
+  brief: string,
+  modelOverride?: string,
+): Promise<string> {
   const { rules, synopsisModel } = await seriesSystemBase();
   const prev = await previousEpisodesContext(episodeId);
   const bible = await bibleContext();
   return runText({
     kind: "synopsis",
-    model: synopsisModel,
+    model: modelOverride || synopsisModel,
     episodeId,
     maxTokens: 16000,
     system: `${rules}\n\n${prev}\n\n${bible}\n\nТы — сценарист сериала. Пиши литературный сюжет эпизода на русском языке, в формате markdown. Только сюжет, без предисловий.`,
@@ -86,13 +90,17 @@ export async function llmSynopsis(episodeId: string, brief: string): Promise<str
 }
 
 /** M2 — разбить сюжет на группы шотов ≤15 сек (JSON) */
-export async function llmBreakdown(episodeId: string, synopsis: string): Promise<Breakdown> {
+export async function llmBreakdown(
+  episodeId: string,
+  synopsis: string,
+  modelOverride?: string,
+): Promise<Breakdown> {
   const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext();
   return runJson(
     {
       kind: "breakdown",
-      model,
+      model: modelOverride || model,
       episodeId,
       maxTokens: 16000,
       system:

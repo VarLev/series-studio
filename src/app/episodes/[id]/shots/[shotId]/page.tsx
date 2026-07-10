@@ -16,6 +16,8 @@ import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog } from "@/lib/generation";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
+import ConfirmButton from "@/components/ConfirmButton";
+import { deleteShot, deleteAllGenerations } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
 import StyleChips from "@/components/shot/StyleChips";
 import ShotRefs from "@/components/shot/ShotRefs";
@@ -227,7 +229,10 @@ export default async function ShotPage(ctx: {
         backHref={`/episodes/${episodeId}`}
       />
 
-      <FilmStrip episodeId={episodeId} shots={stripShots} currentShotId={shotId} />
+      {/* кинолента — только на мобиле; на десктопе шоты в master-колонке (не дублируем) */}
+      <div className="lg:hidden">
+        <FilmStrip episodeId={episodeId} shots={stripShots} currentShotId={shotId} />
+      </div>
 
       <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[280px_1fr]">
         {/* master-колонка (spec §4, десктоп) */}
@@ -263,8 +268,8 @@ export default async function ShotPage(ctx: {
           </div>
         </aside>
 
-        {/* detail */}
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32">
+        {/* detail (на десктопе справа резервируем место под панель действий) */}
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32 lg:pb-6 lg:pr-[212px]">
           <div className="flex items-center gap-3.5">
             <div className="chrome-text font-display text-[46px] font-bold leading-[0.9] tracking-[0.03em]">
               {grpN}
@@ -279,6 +284,13 @@ export default async function ShotPage(ctx: {
                 {results.filter((r) => r.status === "done").length}
               </div>
             </div>
+            <ConfirmButton
+              action={deleteShot.bind(null, shotId)}
+              label="🗑"
+              confirmLabel="Удалить шот?"
+              doneToast="Шот удалён"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] text-[13px] text-t400 hover:border-[rgba(194,71,106,.4)] hover:text-danger disabled:opacity-50"
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -317,7 +329,22 @@ export default async function ShotPage(ctx: {
           />
 
           <div className="flex flex-col gap-1.5">
-            <SectionLabel hint={`${results.length}`}>Видео группы</SectionLabel>
+            <SectionLabel
+              hint={`${results.length}`}
+              right={
+                results.length > 0 ? (
+                  <ConfirmButton
+                    action={deleteAllGenerations.bind(null, shotId)}
+                    label="удалить все"
+                    confirmLabel="Удалить все результаты?"
+                    doneToast="Результаты удалены"
+                    className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-t400 hover:text-danger disabled:opacity-50"
+                  />
+                ) : undefined
+              }
+            >
+              Видео группы
+            </SectionLabel>
             {results.length ? (
               <ResultsStrip episodeId={episodeId} shotId={shotId} results={results} />
             ) : (

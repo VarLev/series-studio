@@ -12,7 +12,9 @@ import NanoBananaSheet from "./NanoBananaSheet";
 import { toast } from "@/components/Toaster";
 import { upscaleReference, editReference } from "@/lib/actions/generate";
 import { deleteReference, updateReferenceCaption } from "@/lib/actions/entities";
+import { deleteAllSeriesRefs } from "@/lib/actions/deletes";
 import { EmptyState } from "@/components/ui";
+import ConfirmButton from "@/components/ConfirmButton";
 
 export interface SeriesRef {
   id: string;
@@ -303,6 +305,16 @@ export default function SeriesRefs({
           </button>
         </div>
       </Sheet>
+
+      {refs.length > 1 && (
+        <ConfirmButton
+          action={deleteAllSeriesRefs.bind(null, episodeId)}
+          label={`Удалить все референсы (${refs.length})`}
+          confirmLabel="Точно удалить все референсы серии?"
+          doneToast="Референсы удалены"
+          className="mt-1 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
+        />
+      )}
 
       <NanoBananaSheet
         open={nanoOpen}
