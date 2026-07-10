@@ -1,0 +1,143 @@
+import { drizzle as drizzlePglite, type PgliteDatabase } from "drizzle-orm/pglite";
+import { drizzle as drizzlePostgres, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { sql } from "drizzle-orm";
+import * as schema from "./schema";
+
+export type DB = PgliteDatabase<typeof schema> | PostgresJsDatabase<typeof schema>;
+
+const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS entities (
+  id text PRIMARY KEY,
+  type text NOT NULL,
+  name text NOT NULL,
+  element_name text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  soul_id text,
+  archived boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "references" (
+  id text PRIMARY KEY,
+  entity_id text,
+  shot_id text,
+  episode_id text,
+  storage_path text NOT NULL,
+  caption text NOT NULL DEFAULT '',
+  source text NOT NULL DEFAULT 'upload',
+  role text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS episodes (
+  id text PRIMARY KEY,
+  number integer NOT NULL,
+  title text NOT NULL DEFAULT '',
+  logline text NOT NULL DEFAULT '',
+  synopsis_md text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'draft',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS shots (
+  id text PRIMARY KEY,
+  episode_id text NOT NULL,
+  order_index integer NOT NULL,
+  title text NOT NULL DEFAULT '',
+  duration_sec integer NOT NULL DEFAULT 15,
+  action_md text NOT NULL DEFAULT '',
+  camera_hint text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'draft',
+  winner_generation_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS shot_entities (
+  shot_id text NOT NULL,
+  entity_id text NOT NULL,
+  auto boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (shot_id, entity_id)
+);
+CREATE TABLE IF NOT EXISTS prompts (
+  id text PRIMARY KEY,
+  shot_id text NOT NULL,
+  version integer NOT NULL,
+  parent_id text,
+  target_model text NOT NULL DEFAULT 'kling-3.0',
+  text text NOT NULL,
+  negative_prompt text,
+  params_json text NOT NULL DEFAULT '{}',
+  feedback_note text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS generations (
+  id text PRIMARY KEY,
+  shot_id text NOT NULL,
+  prompt_id text,
+  provider text NOT NULL DEFAULT 'manual',
+  model text NOT NULL DEFAULT 'kling-web',
+  params_json text NOT NULL DEFAULT '{}',
+  status text NOT NULL DEFAULT 'done',
+  provider_job_id text,
+  result_storage_path text,
+  credits_spent integer,
+  error text,
+  source text NOT NULL DEFAULT 'api',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS knowledge_docs (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  source_file text NOT NULL,
+  content_md text NOT NULL,
+  tags text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key text PRIMARY KEY,
+  value text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS llm_usage (
+  id text PRIMARY KEY,
+  kind text NOT NULL,
+  model text NOT NULL,
+  input_tokens integer NOT NULL DEFAULT 0,
+  output_tokens integer NOT NULL DEFAULT 0,
+  episode_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+`;
+
+type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };
+
+async function createDb(): Promise<DB> {
+  let db: DB;
+  if (process.env.DATABASE_URL) {
+    const { default: postgres } = await import("postgres");
+    const client = postgres(process.env.DATABASE_URL, { max: 1, prepare: false });
+    db = drizzlePostgres(client, { schema });
+  } else {
+    // Local mode: embedded Postgres (PGlite), data lives in .data/pglite
+    const { PGlite } = await import("@electric-sql/pglite");
+    const path = await import("node:path");
+    const fs = await import("node:fs/promises");
+    const dataDir = path.join(process.cwd(), ".data", "pglite");
+    await fs.mkdir(dataDir, { recursive: true });
+    const client = new PGlite(dataDir);
+    db = drizzlePglite(client, { schema });
+  }
+  for (const stmt of SCHEMA_SQL.split(";")) {
+    const trimmed = stmt.trim();
+    if (trimmed) await db.execute(sql.raw(trimmed));
+  }
+  return db;
+}
+
+export function getDb(): Promise<DB> {
+  const g = globalThis as GlobalWithDb;
+  if (!g.__ssDb) {
+    g.__ssDb = createDb().catch((e) => {
+      g.__ssDb = undefined; // do not cache a failed init
+      throw e;
+    });
+  }
+  return g.__ssDb;
+}
+
+export * from "./schema";

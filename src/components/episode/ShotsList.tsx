@@ -1,0 +1,92 @@
+"use client";
+
+import Link from "next/link";
+import { useTransition } from "react";
+import { moveShot } from "@/lib/actions/shots";
+import { StatusPill, EmptyState } from "@/components/ui";
+
+export interface ShotListItem {
+  id: string;
+  orderIndex: number;
+  title: string;
+  action: string;
+  durationSec: number;
+  status: string;
+  entityNames: string[];
+}
+
+export default function ShotsList({
+  episodeId,
+  shots,
+}: {
+  episodeId: string;
+  shots: ShotListItem[];
+}) {
+  const [, startTransition] = useTransition();
+
+  if (!shots.length) {
+    return (
+      <div className="p-4">
+        <EmptyState>
+          Групп пока нет. Напишите сюжет во вкладке «Сюжет» и нажмите «Разбить на шоты».
+        </EmptyState>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5 p-4 pb-10">
+      {shots.map((shot, i) => (
+        <div
+          key={shot.id}
+          className="flex items-stretch gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-2.5 hover:border-[var(--border-strong)]"
+        >
+          <Link
+            href={`/episodes/${episodeId}/shots/${shot.id}`}
+            className="flex min-w-0 flex-1 items-center gap-3"
+          >
+            <div className="relative flex h-[60px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600">
+              <span className="chrome-text font-display text-[18px] font-bold">
+                {String(shot.orderIndex).padStart(2, "0")}
+              </span>
+              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(6,5,9,.85)] px-1.5 pb-1 pt-2 font-mono text-[9px] font-semibold text-t200">
+                {shot.durationSec}s
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-semibold text-t100">
+                {shot.title || shot.action.slice(0, 60) || "Без названия"}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <StatusPill status={shot.status} />
+                {shot.entityNames.length > 0 && (
+                  <span className="truncate font-mono text-[9.5px] text-t400">
+                    {shot.entityNames.join(" · ")}
+                  </span>
+                )}
+              </div>
+            </div>
+          </Link>
+          <div className="flex flex-col justify-center gap-1">
+            <button
+              aria-label="Выше"
+              disabled={i === 0}
+              onClick={() => startTransition(() => moveShot(shot.id, "up"))}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-25"
+            >
+              ↑
+            </button>
+            <button
+              aria-label="Ниже"
+              disabled={i === shots.length - 1}
+              onClick={() => startTransition(() => moveShot(shot.id, "down"))}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-25"
+            >
+              ↓
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

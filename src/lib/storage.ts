@@ -1,0 +1,70 @@
+/**
+ * Storage abstraction (ADR-001): local disk in dev, Supabase Storage when
+ * SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are set. DB stores only storage_path;
+ * URLs are always produced server-side (signed for Supabase, authed route locally).
+ */
+import path from "node:path";
+import fs from "node:fs/promises";
+
+const LOCAL_ROOT = () => path.join(process.cwd(), ".data", "storage");
+const BUCKET = process.env.SUPABASE_BUCKET || "media";
+
+function supabaseConfigured(): boolean {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+async function supabaseClient() {
+  const { createClient } = await import("@supabase/supabase-js");
+  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+}
+
+function sanitizeKey(key: string): string {
+  const normalized = key.replace(/\\/g, "/").replace(/\.\./g, "");
+  return normalized.replace(/^\/+/, "");
+}
+
+export async function putFile(key: string, data: Buffer, contentType: string): Promise<string> {
+  const safeKey = sanitizeKey(key);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(safeKey, data, { contentType, upsert: true });
+    if (error) throw new Error(`Supabase upload failed: ${error.message}`);
+  } else {
+    const filePath = path.join(LOCAL_ROOT(), safeKey);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, data);
+  }
+  return safeKey;
+}
+
+export async function getFileUrl(storagePath: string): Promise<string> {
+  const safeKey = sanitizeKey(storagePath);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(safeKey, 60 * 60);
+    if (error || !data) throw new Error(`Signed URL failed: ${error?.message}`);
+    return data.signedUrl;
+  }
+  return `/api/files/${safeKey}`;
+}
+
+export async function readLocalFile(storagePath: string): Promise<Buffer> {
+  const filePath = path.join(LOCAL_ROOT(), sanitizeKey(storagePath));
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(LOCAL_ROOT()))) throw new Error("Invalid path");
+  return fs.readFile(resolved);
+}
+
+export async function deleteFile(storagePath: string): Promise<void> {
+  const safeKey = sanitizeKey(storagePath);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    await supabase.storage.from(BUCKET).remove([safeKey]);
+  } else {
+    await fs.rm(path.join(LOCAL_ROOT(), safeKey), { force: true });
+  }
+}

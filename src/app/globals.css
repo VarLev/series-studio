@@ -1,26 +1,219 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Series Studio — design tokens
+   Ported from the "The Edge of Stigma" design system (_ds/tokens)
+   ============================================================ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Ink / backgrounds */
+  --ink-900: #060509;
+  --ink-800: #0a0810;
+  --ink-700: #0f0c16;
+  --ink-600: #15111d;
+  --ink-500: #1c1726;
+  --ink-400: #271f33;
+  --ink-300: #362c45;
+
+  /* Violet */
+  --violet-50: #efe7f6;
+  --violet-100: #d8c6e8;
+  --violet-200: #bfa2d8;
+  --violet-300: #a47fc6;
+  --violet-400: #8b5fb0;
+  --violet-500: #71479a;
+  --violet-600: #573577;
+  --violet-700: #3d2456;
+  --violet-800: #271638;
+
+  --magenta-400: #b25fd0;
+  --magenta-500: #9a47c0;
+
+  --chrome-hi: #f4f1f8;
+  --chrome-mid: #c8c2d4;
+  --chrome-lo: #8a8398;
+  --chrome-violet: #b9a6cf;
+
+  --text-100: #ece9f1;
+  --text-200: #c4bdd0;
+  --text-300: #948ca6;
+  --text-400: #645d75;
+
+  --danger: #c2476a;
+  --warning: #c08a3e;
+  --success: #4f8f7d;
+
+  --border-subtle: rgba(164, 127, 198, 0.12);
+  --border-default: rgba(164, 127, 198, 0.2);
+  --border-strong: rgba(164, 127, 198, 0.38);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 40px 110px rgba(0, 0, 0, 0.7);
+  --glow-violet-sm: 0 0 0 1px rgba(139, 95, 176, 0.35), 0 0 16px rgba(113, 71, 154, 0.35);
+  --glow-violet-md: 0 0 28px rgba(139, 95, 176, 0.45);
+  --focus-ring: 0 0 0 2px var(--ink-900), 0 0 0 4px var(--violet-400);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ink-900: var(--ink-900);
+  --color-ink-800: var(--ink-800);
+  --color-ink-700: var(--ink-700);
+  --color-ink-600: var(--ink-600);
+  --color-ink-500: var(--ink-500);
+  --color-ink-400: var(--ink-400);
+  --color-ink-300: var(--ink-300);
+  --color-violet-50: var(--violet-50);
+  --color-violet-100: var(--violet-100);
+  --color-violet-200: var(--violet-200);
+  --color-violet-300: var(--violet-300);
+  --color-violet-400: var(--violet-400);
+  --color-violet-500: var(--violet-500);
+  --color-violet-600: var(--violet-600);
+  --color-violet-700: var(--violet-700);
+  --color-violet-800: var(--violet-800);
+  --color-magenta-400: var(--magenta-400);
+  --color-magenta-500: var(--magenta-500);
+  --color-chrome-hi: var(--chrome-hi);
+  --color-chrome-mid: var(--chrome-mid);
+  --color-chrome-lo: var(--chrome-lo);
+  --color-t100: var(--text-100);
+  --color-t200: var(--text-200);
+  --color-t300: var(--text-300);
+  --color-t400: var(--text-400);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --font-ui: var(--font-golos), system-ui, sans-serif;
+  --font-display: var(--font-cinzel), serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-body: var(--font-garamond), Georgia, serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--ink-800);
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--ink-800);
+  color: var(--text-200);
+  font-family: var(--font-golos), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+
+::selection {
+  background: rgba(139, 95, 176, 0.4);
+}
+
+*:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-300);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Metallic display lettering (episode / group numbers, titles) */
+.chrome-text {
+  background: linear-gradient(
+    176deg,
+    var(--chrome-hi) 0%,
+    var(--chrome-mid) 30%,
+    var(--chrome-lo) 52%,
+    var(--chrome-violet) 70%,
+    var(--chrome-hi) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(113, 71, 154, 0.35));
+}
+
+.eyebrow {
+  font-weight: 600;
+  font-size: 9.5px;
+  line-height: 1;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--violet-300);
+}
+
+.section-label {
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-400);
+}
+
+@keyframes pulse-amber {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-amber {
+  animation: pulse-amber 1.6s infinite;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.sheet-up {
+  animation: sheet-up 0.34s var(--ease-out);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 0.26s var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-up,
+  .fade-in,
+  .pulse-amber {
+    animation: none;
+  }
+}
+
+/* token chips inside mono prompt text */
+.prompt-token {
+  color: var(--violet-100);
+  background: rgba(139, 95, 176, 0.16);
+  border: 1px solid rgba(139, 95, 176, 0.3);
+  border-radius: 3px;
+  padding: 0 3px;
+  font-weight: 600;
 }

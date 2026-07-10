@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Series Studio
 
-## Getting Started
+Персональный пульт производства AI-сериала (Этап 1 MVP по `TZ_series_studio.md`):
+библия сущностей, эпизоды и шоты, промпт-фабрика на Claude, копи-пак для kling.ai, PWA.
 
-First, run the development server:
+## Что уже работает (Этап 1)
+
+- **M1 Библия** — персонажи/локации/реквизит/стили, `element_name` с транслитерацией,
+  референсы (загрузка с телефона в 1 тап), поиск/фильтры/архив.
+- **M2 Эпизоды и шоты** — «Сгенерировать сюжет» (Claude, с контекстом прошлых серий),
+  автосохранение черновиков (localStorage + сервер), «Разбить на шоты» с предпросмотром
+  и правкой перед созданием карточек, перестановка ↑/↓.
+- **M3 Промпт-фабрика** — генерация промпта под целевую модель (для Kling — камера первым
+  предложением), неизменяемые версии, замечание → v(N+1), diff между версиями, ручной
+  редактор с чипами сущностей и движений камеры, база знаний из `/knowledge`.
+- **M6 Копи-пак** — промпт в буфер, панель референсов (скачать/поделиться), ссылка на
+  kling.ai, загрузка внешнего результата (`source: kling-web`) + «Победитель» → approved.
+- **PWA** — манифест, сервис-воркер, офлайн-страница, установка на Android.
+
+Этап 2 (генерация Higgsfield, очередь, кредиты) и Этап 3 (конвейер, Soul ID, экспорт) —
+заглушки с пояснениями в UI; слой адаптеров заложен в схеме БД (`generations.provider`).
+
+## Запуск локально
 
 ```bash
+npm install
+cp .env.example .env.local   # добавьте ANTHROPIC_API_KEY
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Без облачных переменных приложение работает полностью локально:
+БД — PGlite (встроенный Postgres) в `.data/pglite`, файлы — `.data/storage`.
+Без `ANTHROPIC_API_KEY` доступно всё, кроме LLM-кнопок (они показывают понятную ошибку).
+Без `APP_PASSWORD` вход не требуется (локальный режим).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## База знаний промпт-фабрики
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Положите материалы (банк промптов, Kling Camera Toolkit, глоссарий — в `.md`/`.txt`,
+PDF предварительно сконвертируйте) в папку `knowledge/`, затем на экране
+«Затраты и настройки» нажмите «Обновить базу знаний». Теги (kling/seedance/camera/…)
+определяются автоматически и влияют на то, какие выдержки попадут в системный промпт.
 
-## Learn More
+## Деплой (Vercel + Supabase, по ADR-001)
 
-To learn more about Next.js, take a look at the following resources:
+1. **Supabase**: создайте проект → возьмите pooled `DATABASE_URL` (порт 6543);
+   Storage → создайте bucket `media` (private); скопируйте `SUPABASE_URL`
+   и `SUPABASE_SERVICE_ROLE_KEY`. Схема таблиц создаётся автоматически при первом запросе.
+2. **Vercel**: импортируйте репозиторий, задайте переменные из `.env.example`
+   (`ANTHROPIC_API_KEY`, `APP_PASSWORD`, `DATABASE_URL`, `SUPABASE_*`).
+3. Видео 5–10 МБ укладываются в лимиты бесплатного тарифа Supabase
+   (50 МБ/файл, 1 ГБ хранилища, 5 ГБ/мес отдачи). При росте объёма слой хранилища
+   (`src/lib/storage.ts`) переключается на Cloudflare R2 без переписывания приложения.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Структура
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/lib/db          схема (TZ §5) + инициализация (PGlite | Supabase Postgres)
+src/lib/storage.ts  абстракция файлов (локальный диск | Supabase Storage)
+src/lib/llm         клиент Anthropic, zod-контракты (TZ §7), промпт-фабрика
+src/lib/actions     server actions (episodes, shots, prompts, entities, settings)
+src/app             экраны: /episodes, /bible, /queue, /costs + API upload/files
+knowledge/          база знаний промпт-фабрики (.md/.txt)
+```
 
-## Deploy on Vercel
+## Безопасность
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Все ключи — только в env на сервере (TZ §0.3). Файлы отдаются через авторизованный
+роут (`/api/files`) локально или signed URLs (Supabase). Один пользователь,
+вход по паролю (`APP_PASSWORD`), cookie HMAC.
