@@ -15,12 +15,14 @@ export default function SynopsisEditor({
   initialLogline,
   initialSynopsis,
   shotsCount,
+  shotTitles = [],
 }: {
   episodeId: string;
   initialTitle: string;
   initialLogline: string;
   initialSynopsis: string;
   shotsCount: number;
+  shotTitles?: string[];
 }) {
   const router = useRouter();
   const draftKey = `ss-draft:${episodeId}`;
@@ -109,8 +111,8 @@ export default function SynopsisEditor({
     else setError(res.error);
   }
 
-  async function onConfirmBreakdown(confirmed: Breakdown) {
-    await saveBreakdown(episodeId, confirmed);
+  async function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace") {
+    await saveBreakdown(episodeId, confirmed, mode);
     setPreview(null);
     router.refresh();
   }
@@ -128,7 +130,7 @@ export default function SynopsisEditor({
     return (
       <BreakdownPreview
         breakdown={preview}
-        replacing={shotsCount > 0}
+        existingTitles={shotTitles}
         onCancel={() => setPreview(null)}
         onConfirm={onConfirmBreakdown}
       />
@@ -200,7 +202,7 @@ export default function SynopsisEditor({
             {breakingDown
               ? "Claude раскадрирует…"
               : shotsCount > 0
-                ? `Пересобрать шоты (${shotsCount})`
+                ? "Раскадровать (готовые группы не дублируются)"
                 : "Разбить на шоты"}
           </button>
         </div>

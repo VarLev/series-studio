@@ -60,22 +60,33 @@ export async function breakdownEpisode(
   }
 }
 
-/** Пользователь подтвердил предпросмотр раскадровки → создаём карточки групп. */
-export async function saveBreakdown(episodeId: string, breakdown: Breakdown): Promise<void> {
+/**
+ * Пользователь подтвердил предпросмотр раскадровки → создаём карточки групп.
+ * Spec §2.2: повторный запуск НЕ дублирует готовые группы — по умолчанию новые
+ * группы добавляются после существующих (mode="append"); mode="replace" —
+ * явная пересборка с нуля.
+ */
+export async function saveBreakdown(
+  episodeId: string,
+  breakdown: Breakdown,
+  mode: "append" | "replace" = "append",
+): Promise<void> {
   await requireAuth();
   const db = await getDb();
   const allEntities = await db.select().from(entities);
   const byElement = new Map(allEntities.map((e) => [e.elementName.toLowerCase(), e.id]));
 
-  // Replace existing storyboard: delete previous shots of this episode
   const oldShots = await db.select().from(shots).where(eq(shots.episodeId, episodeId));
-  for (const s of oldShots) {
-    await db.delete(shotEntities).where(eq(shotEntities.shotId, s.id));
-    await db.delete(prompts).where(eq(prompts.shotId, s.id));
+  if (mode === "replace") {
+    for (const s of oldShots) {
+      await db.delete(shotEntities).where(eq(shotEntities.shotId, s.id));
+      await db.delete(prompts).where(eq(prompts.shotId, s.id));
+    }
+    await db.delete(shots).where(eq(shots.episodeId, episodeId));
   }
-  await db.delete(shots).where(eq(shots.episodeId, episodeId));
 
-  let index = 1;
+  let index =
+    mode === "append" ? Math.max(0, ...oldShots.map((s) => s.orderIndex)) + 1 : 1;
   for (const item of [...breakdown.shots].sort((a, b) => a.order - b.order)) {
     const shotId = crypto.randomUUID();
     await db.insert(shots).values({

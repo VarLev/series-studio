@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { revisePrompt, saveManualVersion, generateShotPrompt } from "@/lib/actions/prompts";
+import { toast } from "@/components/Toaster";
 import type { PromptVersion } from "@/components/shot/PromptBlock";
 
 /** Движения камеры (Kling Camera Toolkit) — быстрые вставки в позицию курсора. */
@@ -50,23 +51,45 @@ function diffLines(a: string, b: string): Array<{ text: string; kind: "same" | "
   return out;
 }
 
+export interface MentionItem {
+  token: string;
+  name: string;
+  sub: string;
+}
+
+/** @-упоминание перед курсором (spec §2.4). */
+function findMention(text: string, caret: number): { query: string; atIndex: number } | null {
+  let i = caret - 1;
+  while (i >= 0 && /[\wА-Яа-яЁё-]/.test(text[i])) i--;
+  if (i < 0 || text[i] !== "@") return null;
+  if (i > 0 && !/\s/.test(text[i - 1])) return null;
+  return { query: text.slice(i + 1, caret), atIndex: i };
+}
+
 export default function PromptEditor({
   shotId,
   episodeId,
   versions,
   insertEntities,
+  seriesRefs = [],
   initialNote = "",
+  initialVersionId = "",
 }: {
   shotId: string;
   episodeId: string;
   versions: PromptVersion[];
   insertEntities: Array<{ name: string; elementName: string }>;
+  seriesRefs?: Array<{ token: string; caption: string }>;
   initialNote?: string;
+  initialVersionId?: string;
 }) {
   const router = useRouter();
-  const [selectedId, setSelectedId] = useState(versions[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(
+    () => versions.find((v) => v.id === initialVersionId)?.id ?? versions[0]?.id ?? "",
+  );
   const selected = versions.find((v) => v.id === selectedId) ?? versions[0];
   const [text, setText] = useState(selected?.text ?? "");
+  const [caret, setCaret] = useState(0);
   const [note, setNote] = useState(initialNote);
   const [diffMode, setDiffMode] = useState(false);
   const [error, setError] = useState("");
@@ -74,8 +97,30 @@ export default function PromptEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const latest = versions[0];
 
+  const mention = useMemo(() => findMention(text, caret), [text, caret]);
+  const mentionItems: MentionItem[] = useMemo(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    const all: MentionItem[] = [
+      ...insertEntities.map((e) => ({
+        token: e.elementName,
+        name: e.name,
+        sub: "сущность",
+      })),
+      ...seriesRefs.map((r) => ({
+        token: r.token,
+        name: r.caption || r.token,
+        sub: "референс серии",
+      })),
+    ];
+    return all
+      .filter((i) => !q || i.token.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [mention, insertEntities, seriesRefs]);
+
   const diff = useMemo(() => {
     if (!diffMode || !selected) return [];
+    // spec §2.4: diff против родителя (v(N−1))
     const prev = versions.find((v) => v.version === selected.version - 1);
     return prev ? diffLines(prev.text, selected.text) : [];
   }, [diffMode, selected, versions]);
@@ -87,40 +132,95 @@ export default function PromptEditor({
     setText(v.text);
   }
 
+  function syncCaret() {
+    const el = textareaRef.current;
+    if (el) setCaret(el.selectionStart ?? 0);
+  }
+
+  /** Вставка с авто-пробелами (spec §2.4). */
   function insertAtCursor(snippet: string) {
     const el = textareaRef.current;
-    if (!el) {
-      setText((t) => t + snippet);
-      return;
-    }
-    const start = el.selectionStart ?? text.length;
-    const end = el.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + snippet + text.slice(end);
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const prefix = before && !/\s$/.test(before) ? " " : "";
+    const suffix = after && !/^\s/.test(after) ? " " : after ? "" : " ";
+    const inserted = prefix + snippet + suffix;
+    const next = before + inserted + after;
     setText(next);
+    const pos = start + inserted.length;
+    setCaret(pos);
     requestAnimationFrame(() => {
-      el.focus();
-      el.selectionStart = el.selectionEnd = start + snippet.length;
+      el?.focus();
+      if (el) el.selectionStart = el.selectionEnd = pos;
+    });
+  }
+
+  /** Вставка токена из @-упоминания — заменяет @query. */
+  function pickMention(item: MentionItem) {
+    if (!mention) return;
+    const el = textareaRef.current;
+    const before = text.slice(0, mention.atIndex);
+    const after = text.slice(caret);
+    const suffix = after && !/^\s/.test(after) ? " " : after ? "" : " ";
+    const next = before + item.token + suffix + after;
+    setText(next);
+    const pos = before.length + item.token.length + suffix.length;
+    setCaret(pos);
+    requestAnimationFrame(() => {
+      el?.focus();
+      if (el) el.selectionStart = el.selectionEnd = pos;
+    });
+  }
+
+  function insertAtSign() {
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const before = text.slice(0, start);
+    const prefix = before && !/\s$/.test(before) ? " " : "";
+    const next = before + prefix + "@" + text.slice(start);
+    setText(next);
+    const pos = start + prefix.length + 1;
+    setCaret(pos);
+    requestAnimationFrame(() => {
+      el?.focus();
+      if (el) el.selectionStart = el.selectionEnd = pos;
     });
   }
 
   function makeVersion() {
-    if (!note.trim() || !latest) return;
+    if (!note.trim()) {
+      setError("Напишите замечание — что исправить в новой версии");
+      return;
+    }
+    if (!latest) return;
     setError("");
     startTransition(async () => {
       const res = await revisePrompt(latest.id, note.trim());
       if (!res.ok) setError(res.error);
-      else router.push(`/episodes/${episodeId}/shots/${shotId}`);
+      else {
+        toast(`Версия v${latest.version + 1} создана`);
+        router.push(`/episodes/${episodeId}/shots/${shotId}`);
+      }
     });
   }
 
   function saveAsIs() {
+    if (text === selected?.text) {
+      toast("Изменений нет");
+      return;
+    }
     setError("");
     startTransition(async () => {
       const res = latest
-        ? await saveManualVersion(latest.id, text, note.trim())
+        ? await saveManualVersion(latest.id, text, note.trim() || "Ручная правка")
         : { ok: false as const, error: "Сначала сгенерируйте первую версию" };
       if (!res.ok) setError(res.error);
-      else router.push(`/episodes/${episodeId}/shots/${shotId}`);
+      else {
+        toast(`Сохранено как v${(latest?.version ?? 0) + 1} · ручная правка`);
+        router.push(`/episodes/${episodeId}/shots/${shotId}`);
+      }
     });
   }
 
@@ -134,7 +234,7 @@ export default function PromptEditor({
         <button
           onClick={() =>
             startTransition(async () => {
-              const res = await generateShotPrompt(shotId, "kling-3.0");
+              const res = await generateShotPrompt(shotId, "kling3_0");
               if (!res.ok) setError(res.error);
               else router.refresh();
             })
@@ -143,7 +243,7 @@ export default function PromptEditor({
           className="min-h-12 rounded-lg bg-violet-500 px-6 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
-          {pending ? "Фабрика работает…" : "Сгенерировать промпт (Kling 3.0)"}
+          {pending ? "Фабрика работает…" : "Собрать промпт · Claude"}
         </button>
         {error && <div className="text-[11px] text-danger">{error}</div>}
       </div>
@@ -221,15 +321,59 @@ export default function PromptEditor({
           ))}
         </div>
       ) : (
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          spellCheck={false}
-          autoCapitalize="off"
-          className="min-h-0 w-full flex-1 resize-none bg-ink-900 p-3.5 font-mono text-[12px] leading-[1.75] text-t100 outline-none"
-          style={{ caretColor: "var(--violet-100)" }}
-        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setCaret(e.target.selectionStart ?? 0);
+            }}
+            onKeyUp={syncCaret}
+            onClick={syncCaret}
+            spellCheck={false}
+            autoCapitalize="off"
+            className="min-h-0 w-full flex-1 resize-none bg-ink-900 p-3.5 font-mono text-[12px] leading-[1.75] text-t100 outline-none"
+            style={{ caretColor: "var(--violet-100)" }}
+          />
+          {/* @-упоминания (spec §2.4): сущности библии + референсы серии */}
+          {mention && (
+            <div
+              className="absolute inset-x-2 bottom-2 z-10 max-h-52 overflow-y-auto rounded-lg border border-[var(--border-strong)] bg-ink-700"
+              style={{ boxShadow: "var(--shadow-lg)" }}
+            >
+              <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-[var(--border-subtle)] bg-ink-700 px-3 py-2">
+                <span className="font-mono text-[10px] font-semibold text-magenta-400">
+                  @{mention.query}
+                </span>
+                <span className="flex-1" />
+                <span className="text-[9px] text-t400">сущности · референсы серии</span>
+              </div>
+              {mentionItems.map((item) => (
+                <button
+                  key={item.token}
+                  onClick={() => pickMention(item)}
+                  className="flex min-h-11 w-full items-center gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2 text-left hover:bg-ink-600"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[11.5px] font-medium text-t100">
+                      {item.name}
+                    </span>
+                    <span className="block text-[9px] text-t400">{item.sub}</span>
+                  </span>
+                  <span className="font-mono text-[10px] font-semibold text-violet-200">
+                    {item.token}
+                  </span>
+                </button>
+              ))}
+              {!mentionItems.length && (
+                <div className="px-3 py-2.5 text-[10.5px] text-t400">
+                  Ничего не найдено — продолжайте набирать или закройте @ пробелом.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ленты быстрых вставок */}
@@ -238,6 +382,12 @@ export default function PromptEditor({
           <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-t400">
             Сущности
           </span>
+          <button
+            onClick={insertAtSign}
+            className="min-h-7 shrink-0 rounded-md border border-[rgba(178,95,208,.32)] bg-[rgba(178,95,208,.08)] px-2.5 font-mono text-[10.5px] font-semibold text-magenta-400 hover:bg-[rgba(178,95,208,.16)]"
+          >
+            @ вставить…
+          </button>
           {insertEntities.map((e) => (
             <button
               key={e.elementName}
@@ -247,9 +397,6 @@ export default function PromptEditor({
               {e.elementName}
             </button>
           ))}
-          {!insertEntities.length && (
-            <span className="text-[10px] text-t400">нет сущностей у шота</span>
-          )}
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto px-3">
           <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-t400">
@@ -283,7 +430,7 @@ export default function PromptEditor({
         <div className="flex items-stretch gap-2">
           <button
             onClick={makeVersion}
-            disabled={pending || !note.trim()}
+            disabled={pending}
             className="min-h-[46px] flex-1 rounded-md bg-violet-500 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
@@ -291,7 +438,7 @@ export default function PromptEditor({
           </button>
           <button
             onClick={saveAsIs}
-            disabled={pending || text === selected?.text}
+            disabled={pending}
             className="min-h-[46px] rounded-md border border-[var(--border-default)] px-3 text-[10.5px] font-semibold leading-tight text-t200 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
           >
             Сохранить

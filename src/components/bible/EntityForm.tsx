@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { updateEntity, setEntityArchived, type EntityType } from "@/lib/actions/entities";
+import { updateEntity, setEntityArchived, deleteEntity, type EntityType } from "@/lib/actions/entities";
 import { SectionLabel } from "@/components/ui";
 
 export default function EntityForm({
@@ -21,6 +21,7 @@ export default function EntityForm({
   const [elementName, setElementName] = useState(entity.elementName);
   const [description, setDescription] = useState(entity.description);
   const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [, startTransition] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -108,6 +109,17 @@ export default function EntityForm({
           {entity.archived ? "Вернуть из архива" : "В архив"}
         </button>
       </div>
+
+      {/* spec §2.7: удаление — пропадает из библии и из чипов шотов */}
+      <button
+        onClick={() => {
+          if (confirmDelete) startTransition(() => deleteEntity(entity.id));
+          else setConfirmDelete(true);
+        }}
+        className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
+      >
+        {confirmDelete ? "Точно удалить? (пропадёт из чипов шотов)" : "Удалить сущность"}
+      </button>
     </div>
   );
 }

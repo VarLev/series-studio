@@ -17,12 +17,17 @@ export default async function QueuePage() {
     .from(generations)
     .orderBy(desc(generations.createdAt))
     .limit(200);
-  const shotIds = [...new Set(gens.map((g) => g.shotId))];
+  const shotIds = [...new Set(gens.map((g) => g.shotId).filter((x): x is string => Boolean(x)))];
   const shotRows = shotIds.length
     ? await db.select().from(shots).where(inArray(shots.id, shotIds))
     : [];
   const shotById = new Map(shotRows.map((s) => [s.id, s]));
-  const epIds = [...new Set(shotRows.map((s) => s.episodeId))];
+  const epIds = [
+    ...new Set([
+      ...shotRows.map((s) => s.episodeId),
+      ...gens.map((g) => g.episodeId).filter((x): x is string => Boolean(x)),
+    ]),
+  ];
   const epRows = epIds.length
     ? await db.select().from(episodes).where(inArray(episodes.id, epIds))
     : [];
@@ -32,19 +37,30 @@ export default async function QueuePage() {
   startOfDay.setHours(0, 0, 0, 0);
 
   const toItem = (g: (typeof gens)[number]) => {
-    const shot = shotById.get(g.shotId);
-    const ep = shot ? epById.get(shot.episodeId) : undefined;
+    const shot = g.shotId ? shotById.get(g.shotId) : undefined;
+    const ep = shot ? epById.get(shot.episodeId) : g.episodeId ? epById.get(g.episodeId) : undefined;
+    const params = JSON.parse(g.paramsJson || "{}") as { estimate?: number | null };
+    const label =
+      g.kind === "reference"
+        ? `Референс серии С${String(ep?.number ?? 0).padStart(2, "0")} · ${g.model}`
+        : shot
+          ? `С${String(ep?.number ?? 0).padStart(2, "0")} · Г${String(shot.orderIndex).padStart(2, "0")} — ${shot.title || shot.actionMd.slice(0, 40)}`
+          : "Шот удалён";
     return {
       id: g.id,
       status: g.status,
       model: g.model,
       credits: g.creditsSpent,
+      estimate: params.estimate ?? null,
       createdAt: g.createdAt.toISOString(),
       error: g.error ?? "",
-      label: shot
-        ? `С${String(ep?.number ?? 0).padStart(2, "0")} · Г${String(shot.orderIndex).padStart(2, "0")} — ${shot.title || shot.actionMd.slice(0, 40)}`
-        : "Шот удалён",
-      href: shot ? `/episodes/${shot.episodeId}/shots/${shot.id}` : "/episodes",
+      label,
+      href:
+        g.kind === "reference"
+          ? `/episodes/${g.episodeId}/refs`
+          : shot
+            ? `/episodes/${shot.episodeId}/shots/${shot.id}`
+            : "/episodes",
     };
   };
 

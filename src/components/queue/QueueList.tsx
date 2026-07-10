@@ -10,6 +10,7 @@ interface QueueItem {
   status: string;
   model: string;
   credits: number | null;
+  estimate?: number | null;
   createdAt: string;
   error: string;
   label: string;
@@ -73,6 +74,7 @@ export default function QueueList({
               </span>
               <span className="block font-mono text-[9.5px] text-t400">
                 {item.model}
+                {isActive && item.estimate != null ? ` · ≈${item.estimate} кр` : ""}
                 {item.error ? ` · ${item.error.slice(0, 60)}` : ""}
               </span>
             </Link>
@@ -80,7 +82,11 @@ export default function QueueList({
               <Elapsed since={item.createdAt} />
             ) : (
               <span className="font-mono text-[10px] text-t400">
-                {item.credits != null ? `${item.credits} кр` : ""}{" "}
+                {item.status === "done" && item.credits != null
+                  ? `−${item.credits} кр`
+                  : item.status !== "done"
+                    ? "отказ"
+                    : ""}{" "}
                 {new Date(item.createdAt).toLocaleTimeString("ru", {
                   hour: "2-digit",
                   minute: "2-digit",

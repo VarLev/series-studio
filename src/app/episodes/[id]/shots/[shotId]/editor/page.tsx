@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
-import { getDb, entities, prompts, shots, shotEntities, episodes } from "@/lib/db";
+import { getDb, entities, prompts, references, shots, shotEntities, episodes } from "@/lib/db";
 import { ScreenHeader } from "@/components/ui";
 import PromptEditor from "@/components/editor/PromptEditor";
 
@@ -9,11 +9,11 @@ export const dynamic = "force-dynamic";
 
 export default async function EditorPage(ctx: {
   params: Promise<{ id: string; shotId: string }>;
-  searchParams: Promise<{ reason?: string }>;
+  searchParams: Promise<{ reason?: string; v?: string }>;
 }) {
   await requireAuth();
   const { id: episodeId, shotId } = await ctx.params;
-  const { reason } = await ctx.searchParams;
+  const { reason, v } = await ctx.searchParams;
   const db = await getDb();
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot || shot.episodeId !== episodeId) notFound();
@@ -32,6 +32,14 @@ export default async function EditorPage(ctx: {
     .from(entities)
     .where(eq(entities.archived, false))
     .orderBy(asc(entities.name));
+
+  // референсы серии — для @-упоминаний (spec §2.4)
+  const seriesRefRows = await db
+    .select()
+    .from(references)
+    .where(
+      and(eq(references.episodeId, episodeId), isNull(references.shotId), isNull(references.entityId)),
+    );
 
   const grpN = String(shot.orderIndex).padStart(2, "0");
 
@@ -57,7 +65,11 @@ export default async function EditorPage(ctx: {
         insertEntities={allEntities
           .filter((e) => linkedIds.has(e.id))
           .map((e) => ({ name: e.name, elementName: e.elementName }))}
+        seriesRefs={seriesRefRows
+          .filter((r) => r.token)
+          .map((r) => ({ token: r.token!, caption: r.caption }))}
         initialNote={reason ? `Причина отказа генерации: ${reason}. Перепиши промпт так, чтобы избежать отказа.` : ""}
+        initialVersionId={v ?? ""}
       />
     </main>
   );

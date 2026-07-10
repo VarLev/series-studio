@@ -54,6 +54,7 @@ export default function EpisodeTabs({
           initialLogline={initialLogline}
           initialSynopsis={initialSynopsis}
           shotsCount={shots.length}
+          shotTitles={shots.map((s) => s.title)}
         />
       )}
 

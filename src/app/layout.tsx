@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Golos_Text, Cinzel, JetBrains_Mono, EB_Garamond } from "next/font/google";
 import "./globals.css";
 import SwRegister from "@/components/SwRegister";
+import Toaster from "@/components/Toaster";
+import AppNav from "@/components/nav/AppNav";
+import { ContentShell } from "@/components/nav/NavClient";
 
 const golos = Golos_Text({
   variable: "--font-golos",
@@ -46,7 +49,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className={`${golos.variable} ${cinzel.variable} ${jetbrains.variable} ${garamond.variable} antialiased`}
       >
-        {children}
+        <AppNav />
+        <ContentShell>{children}</ContentShell>
+        <Toaster />
         <SwRegister />
       </body>
     </html>

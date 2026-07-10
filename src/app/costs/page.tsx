@@ -14,6 +14,7 @@ import { saveSettings, logoutAction } from "@/lib/actions/settings";
 import { ScreenHeader, SectionLabel, EmptyState } from "@/components/ui";
 import KnowledgeIngest from "@/components/costs/KnowledgeIngest";
 import CatalogRefresh from "@/components/costs/CatalogRefresh";
+import LimitStepper from "@/components/costs/LimitStepper";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,10 @@ export default async function CostsPage() {
 
   // M7: кредиты по эпизоду и модели
   const perEpisode = epRows.map((ep) => {
-    const epGens = gens.filter((g) => episodeByShot.get(g.shotId) === ep.id);
+    // видео-задачи привязаны через шот, задачи-референсы — напрямую через episode_id
+    const epGens = gens.filter(
+      (g) => (g.shotId ? episodeByShot.get(g.shotId) : g.episodeId) === ep.id,
+    );
     const credits = epGens.reduce((sum, g) => sum + (g.creditsSpent ?? 0), 0);
     const byModel = new Map<string, number>();
     for (const g of epGens) {
@@ -50,6 +54,14 @@ export default async function CostsPage() {
   });
   const totalCredits = perEpisode.reduce((s, e) => s + e.credits, 0);
   const totalUsd = llmUsd(usage);
+  // за текущий месяц — весь сериал (spec §2.9)
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthCredits = gens
+    .filter((g) => g.createdAt >= monthStart)
+    .reduce((s, g) => s + (g.creditsSpent ?? 0), 0);
+  const monthUsd = llmUsd(usage.filter((u) => u.createdAt >= monthStart));
   const maxModelCredits = Math.max(
     1,
     ...perEpisode.flatMap((e) => [...e.byModel.values()]),
@@ -63,7 +75,6 @@ export default async function CostsPage() {
     { key: "llm_price_in", label: "Тариф LLM, $ за 1М входных токенов" },
     { key: "llm_price_out", label: "Тариф LLM, $ за 1М выходных токенов" },
     { key: "target_models", label: "Модели A/B по умолчанию (id через запятую)", hint: "из каталога ниже" },
-    { key: "credit_confirm_limit", label: "Подтверждать задачи дороже N кредитов", hint: "0 — не спрашивать" },
   ];
 
   return (
@@ -88,6 +99,11 @@ export default async function CostsPage() {
                 LLM Anthropic · {usage.length} вызовов
               </div>
             </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3.5 py-2.5 font-mono text-[11px] text-t300">
+            За текущий месяц (весь сериал):{" "}
+            <span className="text-t100">{monthCredits} кр</span> +{" "}
+            <span className="text-t100">${monthUsd.toFixed(2)} LLM</span>
           </div>
         </div>
 
@@ -188,6 +204,15 @@ export default async function CostsPage() {
               )}
             </label>
           ))}
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-t300">
+              Лимит подтверждения — задачи дороже требуют двухшагового подтверждения
+            </span>
+            <LimitStepper
+              name="credit_confirm_limit"
+              initial={Number(settings.credit_confirm_limit) || 50}
+            />
+          </label>
           <button
             type="submit"
             className="min-h-12 rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400"

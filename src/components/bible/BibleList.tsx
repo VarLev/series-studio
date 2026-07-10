@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { EntityAvatar, ENTITY_TYPE_LABEL, EmptyState } from "@/components/ui";
-import { createEntityAndOpen, type EntityType } from "@/lib/actions/entities";
+import { quickCreateEntity, type EntityType } from "@/lib/actions/entities";
 
 export interface BibleItem {
   id: string;
@@ -95,34 +95,18 @@ export default function BibleList({ items }: { items: BibleItem[] }) {
               <span className="section-label">{TYPE_PLURAL[type]}</span>
               <span className="font-mono text-[10px] text-t400">{group.length}</span>
               <span className="flex-1" />
+              {/* spec §2.7: создаёт сущность с токеном CHAR_N/LOC_N/OBJ_N и сразу открывает карточку */}
               <button
-                onClick={() => setAddingType(type)}
-                className="min-h-[30px] rounded-full border border-dashed border-[var(--border-default)] px-3 text-[10px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:text-violet-100"
+                onClick={() => {
+                  setAddingType(type);
+                  quickCreateEntity(type);
+                }}
+                disabled={addingType === type}
+                className="min-h-[30px] rounded-full border border-dashed border-[var(--border-default)] px-3 text-[10px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:text-violet-100 disabled:opacity-50"
               >
-                + Добавить
+                {addingType === type ? "Создание…" : "+ Добавить"}
               </button>
             </div>
-
-            {addingType === type && (
-              <form
-                action={createEntityAndOpen}
-                className="flex gap-2 rounded-lg border border-[var(--border-default)] bg-ink-700 p-2"
-              >
-                <input type="hidden" name="type" value={type} />
-                <input
-                  name="name"
-                  autoFocus
-                  placeholder="Имя (например: Саймон)"
-                  className="min-h-10 flex-1 rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 text-[13px] text-t100 outline-none"
-                />
-                <button
-                  type="submit"
-                  className="min-h-10 rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase text-white"
-                >
-                  Создать
-                </button>
-              </form>
-            )}
 
             {group.length === 0 && addingType !== type && (
               <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-2.5 text-[11px] text-t400">

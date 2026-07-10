@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS prompts (
 );
 CREATE TABLE IF NOT EXISTS generations (
   id text PRIMARY KEY,
-  shot_id text NOT NULL,
+  shot_id text,
+  episode_id text,
+  kind text NOT NULL DEFAULT 'video',
   prompt_id text,
   provider text NOT NULL DEFAULT 'manual',
   model text NOT NULL DEFAULT 'kling-web',
@@ -113,6 +115,12 @@ CREATE TABLE IF NOT EXISTS llm_usage (
   episode_id text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS token text;
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS width integer;
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS height integer;
+ALTER TABLE generations ADD COLUMN IF NOT EXISTS episode_id text;
+ALTER TABLE generations ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'video';
+ALTER TABLE generations ALTER COLUMN shot_id DROP NOT NULL;
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

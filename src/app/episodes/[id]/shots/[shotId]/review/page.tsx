@@ -28,7 +28,11 @@ export default async function ReviewPage(ctx: {
   const promptVersionById = new Map(versionRows.map((v) => [v.id, v.version]));
   const latest = versionRows[0] ?? null;
   const latestParams = latest
-    ? (JSON.parse(latest.paramsJson || "{}") as { aspect_ratio?: string; duration?: number })
+    ? (JSON.parse(latest.paramsJson || "{}") as {
+        aspect_ratio?: string;
+        duration?: number;
+        quality?: string;
+      })
     : {};
 
   const genRows = await db
@@ -73,6 +77,7 @@ export default async function ReviewPage(ctx: {
       shotId={shotId}
       shotLabel={`С${epN} · Г${grpN}`}
       shotTitle={shot.title || shot.actionMd.slice(0, 60)}
+      shotStatus={shot.status}
       candidates={candidates}
       initialId={g ?? null}
       entities={allEntities.map((e) => ({ id: e.id, name: e.name }))}
@@ -82,6 +87,7 @@ export default async function ReviewPage(ctx: {
       regenParams={{
         durationSec: latestParams.duration ?? shot.durationSec,
         aspectRatio: latestParams.aspect_ratio ?? "16:9",
+        quality: latestParams.quality ?? "720p",
       }}
     />
   );

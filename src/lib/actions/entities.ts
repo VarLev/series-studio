@@ -53,6 +53,56 @@ export async function createEntityAndOpen(formData: FormData): Promise<void> {
   redirect(`/bible/${id}`);
 }
 
+const TYPE_TOKEN_PREFIX: Record<EntityType, string> = {
+  character: "CHAR",
+  location: "LOC",
+  prop: "OBJ",
+  style: "STYLE",
+};
+
+/** Spec §2.7: «+ Добавить» создаёт сущность с токеном CHAR_N/LOC_N/OBJ_N и открывает карточку. */
+export async function quickCreateEntity(type: EntityType): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const rows = await db.select().from(entities).where(eq(entities.type, type));
+  const prefix = TYPE_TOKEN_PREFIX[type];
+  const max = rows.reduce((acc, e) => {
+    const n = e.elementName.match(new RegExp(`^${prefix}_(\\d+)$`, "i"))?.[1];
+    return n ? Math.max(acc, Number(n)) : acc;
+  }, 0);
+  const token = `${prefix}_${max + 1}`;
+  const id = crypto.randomUUID();
+  await db.insert(entities).values({
+    id,
+    type,
+    name: `Без имени ${max + 1}`,
+    elementName: token,
+    description: "",
+  });
+  revalidatePath("/bible");
+  redirect(`/bible/${id}`);
+}
+
+/** Spec §2.7: удаление сущности — пропадает из библии и из чипов шотов. */
+export async function deleteEntity(id: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const { shotEntities } = await import("@/lib/db");
+  await db.delete(shotEntities).where(eq(shotEntities.entityId, id));
+  const refs = await db.select().from(references).where(eq(references.entityId, id));
+  for (const ref of refs.filter((r) => !r.shotId)) {
+    await db.delete(references).where(eq(references.id, ref.id));
+    const still = await db
+      .select()
+      .from(references)
+      .where(eq(references.storagePath, ref.storagePath));
+    if (still.length === 0) await deleteFile(ref.storagePath).catch(() => {});
+  }
+  await db.delete(entities).where(eq(entities.id, id));
+  revalidatePath("/bible");
+  redirect("/bible");
+}
+
 export async function updateEntity(
   id: string,
   patch: { name?: string; elementName?: string; description?: string; type?: EntityType; soulId?: string },

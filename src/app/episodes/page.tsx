@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { listEpisodes, createEpisode } from "@/lib/actions/episodes";
 import { getAllSettings } from "@/lib/settings";
 import { EmptyState } from "@/components/ui";
+import QueuePill from "@/components/QueuePill";
 
 export const dynamic = "force-dynamic";
 
@@ -22,20 +23,17 @@ export default async function EpisodesPage() {
         </p>
       </div>
 
-      <nav className="flex gap-2 overflow-x-auto px-4 pb-4">
-        {[
-          { href: "/bible", label: "Библия" },
-          { href: "/queue", label: "Очередь" },
-          { href: "/costs", label: "Затраты и настройки" },
-        ].map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="shrink-0 rounded-md border border-[var(--border-default)] bg-ink-600 px-3.5 py-2.5 font-mono text-[11px] font-semibold text-violet-100 hover:border-[var(--border-strong)] hover:bg-ink-500"
-          >
-            {item.label}
-          </Link>
-        ))}
+      {/* быстрые входы в шапке (spec §2.1); основная навигация — таб-бар/сайдбар */}
+      <nav className="flex gap-2 px-4 pb-4">
+        <Link
+          href="/bible"
+          title="Библия сущностей"
+          className="shrink-0 rounded-md border border-[var(--border-default)] bg-ink-600 px-3.5 py-2.5 font-mono text-[11px] font-semibold text-violet-100 hover:border-[var(--border-strong)] hover:bg-ink-500"
+        >
+          ❖ Библия
+        </Link>
+        <span className="flex-1" />
+        <QueuePill />
       </nav>
 
       <div className="flex flex-col gap-2.5 px-4 pb-10">

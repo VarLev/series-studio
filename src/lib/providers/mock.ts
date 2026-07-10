@@ -19,6 +19,7 @@ interface MockJob {
   createdAt: number;
   model: string;
   fail: boolean;
+  isImage: boolean;
 }
 
 type GlobalWithJobs = typeof globalThis & { __ssMockJobs?: Map<string, MockJob> };
@@ -50,7 +51,8 @@ export class MockProvider implements GenerationProvider {
     const jobId = `mock-${crypto.randomUUID()}`;
     // промпт со словом "fail"/"nsfw" — искусственный отказ (для проверки error-path)
     const fail = /\b(fail|nsfw)\b/i.test(job.prompt);
-    jobs().set(jobId, { createdAt: Date.now(), model: job.model, fail });
+    const isImage = CATALOG_SEED.find((m) => m.id === job.model)?.kind === "image";
+    jobs().set(jobId, { createdAt: Date.now(), model: job.model, fail, isImage });
     return { jobId };
   }
 
@@ -69,7 +71,7 @@ export class MockProvider implements GenerationProvider {
     }
     return {
       status: "done",
-      resultUrls: [`mock://sample`],
+      resultUrls: [job.isImage ? "mock://sample-image" : "mock://sample"],
       credits: MOCK_CREDITS[job.model] ?? 10,
     };
   }
@@ -82,4 +84,8 @@ export class MockProvider implements GenerationProvider {
 /** Читает байты мок-результата (используется вместо скачивания с CDN). */
 export async function readMockSample(): Promise<Buffer> {
   return fs.readFile(path.join(process.cwd(), "public", "mock", "sample.mp4"));
+}
+
+export async function readMockImage(): Promise<Buffer> {
+  return fs.readFile(path.join(process.cwd(), "public", "mock", "sample-image.jpg"));
 }

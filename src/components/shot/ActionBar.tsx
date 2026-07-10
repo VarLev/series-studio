@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import CopyPackSheet, { type CopyPackRef } from "./CopyPackSheet";
 import GenerateSheet, { type CatalogModel, type StartFrameOption } from "./GenerateSheet";
@@ -17,8 +17,9 @@ export default function ActionBar({
   models,
   defaultModelIds,
   startFrames,
-  durationSec,
+  groupDurationSec,
   aspectRatio,
+  defaultStartFrameId,
 }: {
   episodeId: string;
   shotId: string;
@@ -30,11 +31,19 @@ export default function ActionBar({
   models: CatalogModel[];
   defaultModelIds: string[];
   startFrames: StartFrameOption[];
-  durationSec: number;
+  groupDurationSec: number;
   aspectRatio: string;
+  defaultStartFrameId: string | null;
 }) {
   const [copyPackOpen, setCopyPackOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
+
+  // hotkey G открывает шторку генерации (spec §5)
+  useEffect(() => {
+    const onOpen = () => hasPrompt && setGenerateOpen(true);
+    window.addEventListener("ss:open-generate", onOpen);
+    return () => window.removeEventListener("ss:open-generate", onOpen);
+  }, [hasPrompt]);
 
   const btnBase =
     "flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-semibold uppercase tracking-[0.1em] disabled:opacity-40";
@@ -42,7 +51,7 @@ export default function ActionBar({
   return (
     <>
       <div
-        className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-lg border-t border-[var(--border-default)] md:max-w-3xl"
+        className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-lg border-t border-[var(--border-default)] md:max-w-3xl lg:left-56 lg:mx-0 lg:max-w-none"
         style={{
           background: "linear-gradient(180deg, rgba(15,12,22,.94), rgba(6,5,9,.98))",
           backdropFilter: "blur(14px)",
@@ -88,8 +97,9 @@ export default function ActionBar({
         models={models}
         defaultModelIds={defaultModelIds}
         startFrames={startFrames}
-        durationSec={durationSec}
+        groupDurationSec={groupDurationSec}
         aspectRatio={aspectRatio}
+        defaultStartFrameId={defaultStartFrameId}
       />
 
       <CopyPackSheet

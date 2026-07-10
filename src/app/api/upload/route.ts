@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { isAuthenticated } from "@/lib/auth";
 import { putFile } from "@/lib/storage";
 import { getDb, references, generations, shots } from "@/lib/db";
+import { nextRefToken, probeImageSize, recalcShotStatus } from "@/lib/generation";
 import { eq } from "drizzle-orm";
 
 export const maxDuration = 60;
@@ -60,10 +61,8 @@ export async function POST(req: NextRequest) {
       resultStoragePath: storagePath,
       source: "kling-web",
     });
+    await recalcShotStatus(shotId);
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
-    if (shot && (shot.status === "prompted" || shot.status === "draft")) {
-      await db.update(shots).set({ status: "review" }).where(eq(shots.id, shotId));
-    }
     if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
     return NextResponse.json({ ok: true, id, storagePath });
   }
@@ -79,6 +78,17 @@ export async function POST(req: NextRequest) {
     buffer,
     file.type,
   );
+  // референс серии (без сущности и шота) получает токен REF_NN и размеры (spec §1)
+  const isSeriesRef = Boolean(episodeId && !entityId && !shotId);
+  const { width, height } = await probeImageSize(buffer);
+  const normalizedRole = role === "start_frame" || role === "composition" ? role : null;
+  if (shotId && normalizedRole === "start_frame") {
+    // start-frame один на шот — прежний становится композицией (spec §3.6)
+    await db
+      .update(references)
+      .set({ role: "composition" })
+      .where(eq(references.shotId, shotId));
+  }
   await db.insert(references).values({
     id,
     entityId,
@@ -87,9 +97,13 @@ export async function POST(req: NextRequest) {
     storagePath,
     caption: String(form.get("caption") ?? ""),
     source,
-    role: role === "start_frame" || role === "composition" ? role : null,
+    role: normalizedRole,
+    token: isSeriesRef ? await nextRefToken(episodeId!) : null,
+    width,
+    height,
   });
   if (entityId) revalidatePath(`/bible/${entityId}`);
+  if (episodeId) revalidatePath(`/episodes/${episodeId}/refs`);
   if (shotId) {
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);

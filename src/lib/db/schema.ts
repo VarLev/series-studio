@@ -25,8 +25,11 @@ export const references = pgTable("references", {
   episodeId: text("episode_id"),
   storagePath: text("storage_path").notNull(),
   caption: text("caption").notNull().default(""),
-  source: text("source").notNull().default("upload"), // upload | frame-grab | nano-banana
+  source: text("source").notNull().default("upload"), // upload | frame-grab | nano-banana | upscale | edit
   role: text("role"), // start_frame | composition | null
+  token: text("token"), // REF_NN — референсы серии (spec §1)
+  width: integer("width"),
+  height: integer("height"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -80,7 +83,10 @@ export const prompts = pgTable("prompts", {
 
 export const generations = pgTable("generations", {
   id: text("id").primaryKey(),
-  shotId: text("shot_id").notNull(),
+  // null для задач-референсов (kind = reference), привязанных только к эпизоду
+  shotId: text("shot_id"),
+  episodeId: text("episode_id"),
+  kind: text("kind").notNull().default("video"), // video | reference
   promptId: text("prompt_id"),
   provider: text("provider").notNull().default("manual"), // higgsfield | manual
   model: text("model").notNull().default("kling-web"),

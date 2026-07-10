@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import {
   getDb,
@@ -14,15 +15,18 @@ import {
 import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog } from "@/lib/generation";
-import { ScreenHeader, StatusPill, SectionLabel, EmptyState } from "@/components/ui";
+import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import EntityChips from "@/components/shot/EntityChips";
+import StyleChips from "@/components/shot/StyleChips";
 import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
 import ResultsStrip from "@/components/shot/ResultsStrip";
+import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
 import QueuePill from "@/components/QueuePill";
+import FilmStrip from "@/components/FilmStrip";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +40,32 @@ export default async function ShotPage(ctx: {
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot || shot.episodeId !== episodeId) notFound();
   const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
+
+  // все шоты серии — кинолента + master-список (spec §2.3/§4)
+  const allShots = await db
+    .select()
+    .from(shots)
+    .where(eq(shots.episodeId, episodeId))
+    .orderBy(asc(shots.orderIndex));
+  const shotIds = allShots.map((s) => s.id);
+  const shotRefsAll = shotIds.length
+    ? await db.select().from(references).where(inArray(references.shotId, shotIds))
+    : [];
+  const thumbByShot = new Map<string, string>();
+  for (const ref of shotRefsAll.sort((a) => (a.role === "start_frame" ? -1 : 0))) {
+    if (ref.shotId && !thumbByShot.has(ref.shotId)) {
+      thumbByShot.set(ref.shotId, await getFileUrl(ref.storagePath));
+    }
+  }
+  const stripShots = allShots.map((s) => ({
+    id: s.id,
+    orderIndex: s.orderIndex,
+    status: s.status,
+    thumbUrl: thumbByShot.get(s.id) ?? null,
+  }));
+  const shotIdx = allShots.findIndex((s) => s.id === shotId);
+  const prevShot = allShots[shotIdx - 1] ?? null;
+  const nextShot = allShots[shotIdx + 1] ?? null;
 
   const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
   const allEntities = await db
@@ -67,8 +97,13 @@ export default async function ShotPage(ctx: {
     linked: linkedIds.has(e.id),
     auto: links.find((l) => l.entityId === e.id)?.auto ?? false,
   }));
+  const styleChips = chipData
+    .filter((c) => c.type === "style")
+    .map((c) => ({ id: c.id, name: c.name, linked: c.linked }));
+  const entityChips = chipData.filter((c) => c.type !== "style");
 
-  const shotRefRows = await db.select().from(references).where(eq(references.shotId, shotId));
+  // референсы шота (с ролями)
+  const shotRefRows = shotRefsAll.filter((r) => r.shotId === shotId);
   const shotRefs = await Promise.all(
     shotRefRows.map(async (r) => ({
       id: r.id,
@@ -78,14 +113,31 @@ export default async function ShotPage(ctx: {
     })),
   );
 
+  // референсы серии (spec §1: один список на серию)
+  const seriesRefRows = await db
+    .select()
+    .from(references)
+    .where(
+      and(eq(references.episodeId, episodeId), isNull(references.shotId), isNull(references.entityId)),
+    )
+    .orderBy(asc(references.createdAt));
+  const seriesRefs = await Promise.all(
+    seriesRefRows.map(async (r) => ({
+      id: r.id,
+      url: await getFileUrl(r.storagePath),
+      label: r.token ?? r.caption ?? "REF",
+      sub: r.caption,
+    })),
+  );
+
   const bibleRefs = await Promise.all(
     entityRefs
       .filter((r) => r.entityId && linkedIds.has(r.entityId) && !r.shotId)
       .map(async (r) => ({
         id: r.id,
         url: await getFileUrl(r.storagePath),
-        caption: r.caption,
-        entityName: allEntities.find((e) => e.id === r.entityId)?.name ?? "",
+        label: allEntities.find((e) => e.id === r.entityId)?.name ?? "",
+        sub: r.caption,
       })),
   );
 
@@ -128,32 +180,39 @@ export default async function ShotPage(ctx: {
   const activeCount = results.filter((r) => r.status === "queued" || r.status === "running").length;
 
   const settings = await getAllSettings();
-  const catalog = (await getCatalog("video")).filter((m) => m.kind === "video");
+  const catalog = await getCatalog("video");
   const defaultModelIds = settings.target_models.split(",").map((m) => m.trim()).filter(Boolean);
 
   const epN = String(episode?.number ?? 0).padStart(2, "0");
   const grpN = String(shot.orderIndex).padStart(2, "0");
-  const tokens = chipData.filter((c) => c.linked).map((c) => c.elementName);
+  const tokens = [
+    ...chipData.filter((c) => c.linked).map((c) => c.elementName),
+    ...seriesRefRows.map((r) => r.token).filter((t): t is string => Boolean(t)),
+  ];
   const current = versions[0] ?? null;
   const currentParams = versionRows[0]
     ? (JSON.parse(versionRows[0].paramsJson || "{}") as { aspect_ratio?: string; duration?: number })
     : {};
 
-  // start-frame кандидаты: референсы шота (start_frame первыми) + кадры-референсы сущностей
+  // start-frame кандидаты: рефы шота (start_frame первым) + референсы серии
   const startFrames = [
     ...shotRefs
+      .slice()
       .sort((a, b) => (a.role === "start_frame" ? -1 : 0) - (b.role === "start_frame" ? -1 : 0))
       .map((r) => ({ id: r.id, url: r.url, label: r.caption || r.role })),
-    ...bibleRefs.slice(0, 6).map((r) => ({ id: r.id, url: r.url, label: r.entityName })),
+    ...seriesRefs.map((r) => ({ id: r.id, url: r.url, label: r.label })),
   ];
+  const defaultStartFrame = shotRefs.find((r) => r.role === "start_frame") ?? null;
 
   const copyPackRefs = [
     ...shotRefs.map((r) => ({ url: r.url, name: r.caption || r.role })),
-    ...bibleRefs.map((r) => ({ url: r.url, name: `${r.entityName}${r.caption ? " · " + r.caption : ""}` })),
+    ...bibleRefs.map((r) => ({ url: r.url, name: r.label })),
   ];
 
+  const shotHref = (s: { id: string }) => `/episodes/${episodeId}/shots/${s.id}`;
+
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
+    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:max-w-none">
       <ScreenHeader
         backHref={`/episodes/${episodeId}`}
         eyebrow={`Серия ${epN} · Группа ${grpN}`}
@@ -161,56 +220,113 @@ export default async function ShotPage(ctx: {
         right={<QueuePill />}
       />
       <GenPoller activeCount={activeCount} />
+      <ShotHotkeys
+        prevHref={prevShot ? shotHref(prevShot) : null}
+        nextHref={nextShot ? shotHref(nextShot) : null}
+        editorHref={`${shotHref(shot)}/editor`}
+        backHref={`/episodes/${episodeId}`}
+      />
 
-      <div className="flex flex-1 flex-col gap-4 p-4 pb-32">
-        <div className="flex items-center gap-3.5">
-          <div className="chrome-text font-display text-[46px] font-bold leading-[0.9] tracking-[0.03em]">
-            {grpN}
+      <FilmStrip episodeId={episodeId} shots={stripShots} currentShotId={shotId} />
+
+      <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[280px_1fr]">
+        {/* master-колонка (spec §4, десктоп) */}
+        <aside className="hidden overflow-y-auto border-r border-[var(--border-subtle)] p-3 lg:block">
+          <div className="section-label mb-2">Шоты серии</div>
+          <div className="flex flex-col gap-1.5">
+            {allShots.map((s) => {
+              const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
+              const active = s.id === shotId;
+              return (
+                <Link
+                  key={s.id}
+                  href={shotHref(s)}
+                  className="flex items-center gap-2 rounded-lg border px-2.5 py-2"
+                  style={{
+                    borderColor: active ? "var(--border-strong)" : "var(--border-subtle)",
+                    background: active ? "var(--ink-600)" : "none",
+                  }}
+                >
+                  <span className="chrome-text font-display text-[13px] font-bold">
+                    {String(s.orderIndex).padStart(2, "0")}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-t200">
+                    {s.title || s.actionMd.slice(0, 30)}
+                  </span>
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.status === "generating" ? "pulse-amber" : ""}`}
+                    style={{ background: st.color }}
+                  />
+                </Link>
+              );
+            })}
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <div>
-              <StatusPill status={shot.status} />
+        </aside>
+
+        {/* detail */}
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32">
+          <div className="flex items-center gap-3.5">
+            <div className="chrome-text font-display text-[46px] font-bold leading-[0.9] tracking-[0.03em]">
+              {grpN}
             </div>
-            <div className="font-mono text-[10.5px] tracking-[0.04em] text-t300">
-              {shot.durationSec} сек · {versions.length ? `промпт v${current!.version}` : "промпта нет"} ·{" "}
-              {results.filter((r) => r.status === "done").length} видео
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <div>
+                <StatusPill status={shot.status} />
+              </div>
+              <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
+                {shot.durationSec} сек ·{" "}
+                {versions.length ? `промпт v${current!.version}` : "промпта нет"} · видео{" "}
+                {results.filter((r) => r.status === "done").length}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel>Фрагмент сюжета</SectionLabel>
-          <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
-        </div>
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel>Фрагмент сюжета</SectionLabel>
+            <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel hint="определил Claude · правится вручную">Сущности</SectionLabel>
-          <EntityChips shotId={shotId} entities={chipData} />
-        </div>
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel hint="определил Claude · правится вручную">Сущности</SectionLabel>
+            <EntityChips shotId={shotId} entities={entityChips} />
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel hint="роль: start-frame · композиция">Референсы шота</SectionLabel>
-          <ShotRefs shotId={shotId} refs={shotRefs} bibleRefs={bibleRefs} />
-        </div>
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel hint="уходят в промпт-фабрику">Наборы стилей</SectionLabel>
+            <StyleChips shotId={shotId} styles={styleChips} />
+          </div>
 
-        <PromptBlock
-          shotId={shotId}
-          episodeId={episodeId}
-          versions={versions}
-          tokens={tokens}
-          targetModels={catalog.map((m) => m.id)}
-        />
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel hint="тап по бейджу — роль">Референсы шота</SectionLabel>
+            <ShotRefs
+              shotId={shotId}
+              episodeId={episodeId}
+              refs={shotRefs}
+              seriesRefs={seriesRefs}
+              bibleRefs={bibleRefs}
+              promptText={current?.text ?? shot.actionMd}
+            />
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <SectionLabel hint={`${results.length}`}>Видео группы</SectionLabel>
-          {results.length ? (
-            <ResultsStrip episodeId={episodeId} shotId={shotId} results={results} />
-          ) : (
-            <EmptyState>
-              Видео пока нет. Соберите промпт и нажмите «Генерировать» — задача уйдёт в Higgsfield,
-              результат появится здесь. Либо «Копи-пак» для ручной генерации на kling.ai.
-            </EmptyState>
-          )}
+          <PromptBlock
+            shotId={shotId}
+            episodeId={episodeId}
+            versions={versions}
+            tokens={tokens}
+            targetModels={catalog.map((m) => m.id)}
+          />
+
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel hint={`${results.length}`}>Видео группы</SectionLabel>
+            {results.length ? (
+              <ResultsStrip episodeId={episodeId} shotId={shotId} results={results} />
+            ) : (
+              <EmptyState>
+                Видео пока нет. Соберите промпт и нажмите «Генерировать» — задача уйдёт в
+                Higgsfield. Либо «Копи-пак» для ручной генерации на kling.ai.
+              </EmptyState>
+            )}
+          </div>
         </div>
       </div>
 
@@ -225,8 +341,9 @@ export default async function ShotPage(ctx: {
         models={catalog}
         defaultModelIds={defaultModelIds}
         startFrames={startFrames}
-        durationSec={currentParams.duration ?? shot.durationSec}
+        groupDurationSec={shot.durationSec}
         aspectRatio={currentParams.aspect_ratio ?? "16:9"}
+        defaultStartFrameId={defaultStartFrame?.id ?? null}
       />
     </main>
   );

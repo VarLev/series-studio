@@ -61,7 +61,7 @@ export async function removeShotEntity(shotId: string, entityId: string): Promis
   if (shot) revalidatePath(shotPath(shot.episodeId, shotId));
 }
 
-/** Прикрепить существующий референс библии к шоту (роль: start_frame | composition). */
+/** Прикрепить референс (серии или библии) к шоту (роль: start_frame | composition). */
 export async function attachReferenceToShot(
   shotId: string,
   referenceId: string,
@@ -71,14 +71,20 @@ export async function attachReferenceToShot(
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, referenceId));
   if (!ref) return;
+  if (role === "start_frame") {
+    // start-frame один на шот — прежний становится композицией (spec §3.6)
+    await db.update(references).set({ role: "composition" }).where(eq(references.shotId, shotId));
+  }
   await db.insert(references).values({
     id: crypto.randomUUID(),
     shotId,
     entityId: ref.entityId,
     storagePath: ref.storagePath,
-    caption: ref.caption,
+    caption: ref.caption || ref.token || "",
     source: ref.source,
     role,
+    width: ref.width,
+    height: ref.height,
   });
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, shotId));
@@ -102,6 +108,10 @@ export async function setShotReferenceRole(
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, referenceId));
   if (!ref?.shotId) return;
+  if (role === "start_frame") {
+    // start-frame один на шот (spec §3.6)
+    await db.update(references).set({ role: "composition" }).where(eq(references.shotId, ref.shotId));
+  }
   await db.update(references).set({ role }).where(eq(references.id, referenceId));
   const [shot] = await db.select().from(shots).where(eq(shots.id, ref.shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, ref.shotId));

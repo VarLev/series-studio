@@ -1,0 +1,44 @@
+"use client";
+
+import { useTransition } from "react";
+import { addShotEntity, removeShotEntity } from "@/lib/actions/shots";
+
+/** Наборы стилей (spec §2.3): переключаемые чипы, уходят в промпт-фабрику. */
+export default function StyleChips({
+  shotId,
+  styles,
+}: {
+  shotId: string;
+  styles: Array<{ id: string; name: string; linked: boolean }>;
+}) {
+  const [, startTransition] = useTransition();
+  if (!styles.length) {
+    return (
+      <span className="text-[10.5px] text-t400">
+        Стили создаются в библии (тип «Стиль») и включаются здесь чипами.
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {styles.map((s) => (
+        <button
+          key={s.id}
+          onClick={() =>
+            startTransition(() =>
+              s.linked ? removeShotEntity(shotId, s.id) : addShotEntity(shotId, s.id),
+            )
+          }
+          className="min-h-8 rounded-full border px-3 text-[11px] font-medium"
+          style={{
+            borderColor: s.linked ? "var(--border-strong)" : "var(--border-subtle)",
+            background: s.linked ? "rgba(139,95,176,.14)" : "none",
+            color: s.linked ? "var(--violet-100)" : "var(--text-400)",
+          }}
+        >
+          {s.name}
+        </button>
+      ))}
+    </div>
+  );
+}

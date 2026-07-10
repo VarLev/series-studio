@@ -1,14 +1,21 @@
 "use client";
 
+/**
+ * Шторка «Генерация» (spec §3.1): мультивыбор моделей с оценкой, бегунок 4–15 с,
+ * качество 480/720/1080p (Kling без 480 → авто-720), start-frame из референсов,
+ * оценка = база × (сек/5) × коэф. качества, двухшаговое подтверждение сверх лимита.
+ */
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
+import { toast } from "@/components/Toaster";
 import { startGeneration } from "@/lib/actions/generate";
 
 export interface CatalogModel {
   id: string;
   name: string;
   credits: number | null;
+  qualities: string[];
 }
 
 export interface StartFrameOption {
@@ -17,7 +24,19 @@ export interface StartFrameOption {
   label: string;
 }
 
-/** Шторка «Генерация» (UI TZ §4.3): чекбоксы моделей, start-frame, оценка кредитов. */
+const QUALITY_COEF: Record<string, number> = { "480p": 0.6, "720p": 1, "1080p": 1.6 };
+const QUALITIES = ["480p", "720p", "1080p"] as const;
+
+function estimateFor(model: CatalogModel, durationSec: number, quality: string): number | null {
+  if (model.credits == null) return null;
+  const q = model.qualities.includes(quality)
+    ? quality
+    : model.qualities.includes("720p")
+      ? "720p"
+      : (model.qualities[0] ?? quality);
+  return Math.round(model.credits * (durationSec / 5) * (QUALITY_COEF[q] ?? 1));
+}
+
 export default function GenerateSheet({
   open,
   onClose,
@@ -26,8 +45,9 @@ export default function GenerateSheet({
   models,
   defaultModelIds,
   startFrames,
-  durationSec,
+  groupDurationSec,
   aspectRatio,
+  defaultStartFrameId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -36,26 +56,39 @@ export default function GenerateSheet({
   models: CatalogModel[];
   defaultModelIds: string[];
   startFrames: StartFrameOption[];
-  durationSec: number;
+  groupDurationSec: number;
   aspectRatio: string;
+  defaultStartFrameId: string | null;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(defaultModelIds.filter((id) => models.some((m) => m.id === id))),
   );
-  const [startFrame, setStartFrame] = useState<string>("");
+  const [duration, setDuration] = useState(Math.min(15, Math.max(4, groupDurationSec)));
+  const [quality, setQuality] = useState<string>("720p");
+  // роль start-frame из референсов шота подставляется автоматически (spec §3.1)
+  const [startFrame, setStartFrame] = useState<string>(defaultStartFrameId ?? "");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmInfo, setConfirmInfo] = useState<{ estimate: number; limit: number } | null>(null);
+  const [confirmStep, setConfirmStep] = useState(0); // двухшаговое подтверждение
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
   const estimate = useMemo(
     () =>
-      [...selected].reduce((sum, id) => sum + (models.find((m) => m.id === id)?.credits ?? 0), 0),
-    [selected, models],
+      [...selected].reduce((sum, id) => {
+        const m = models.find((x) => x.id === id);
+        return sum + (m ? (estimateFor(m, duration, quality) ?? 0) : 0);
+      }, 0),
+    [selected, models, duration, quality],
   );
   const hasUnknown = [...selected].some(
     (id) => models.find((m) => m.id === id)?.credits == null,
   );
+  const klingFallback =
+    quality === "480p" &&
+    [...selected].some((id) => !(models.find((m) => m.id === id)?.qualities.includes("480p") ?? false));
+  const chosenFrame = startFrames.find((f) => f.id === startFrame) ?? null;
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -65,9 +98,10 @@ export default function GenerateSheet({
       return next;
     });
     setConfirmInfo(null);
+    setConfirmStep(0);
   }
 
-  function launch(confirmed: boolean) {
+  function launch() {
     setError("");
     startTransition(async () => {
       const res = await startGeneration({
@@ -75,16 +109,20 @@ export default function GenerateSheet({
         promptId,
         modelIds: [...selected],
         startFrameRefId: startFrame || undefined,
-        durationSec,
+        durationSec: duration,
         aspectRatio,
-        confirmed,
+        quality,
+        confirmed: confirmStep >= 2,
       });
       if (res.ok) {
+        toast(`Запущено задач: ${selected.size} · ≈${estimate}${hasUnknown ? "+?" : ""} кр`);
         setConfirmInfo(null);
+        setConfirmStep(0);
         onClose();
         router.refresh();
       } else if ("needsConfirm" in res && res.needsConfirm) {
         setConfirmInfo({ estimate: res.estimate, limit: res.limit });
+        setConfirmStep(1);
       } else if ("error" in res) {
         setError(res.error);
       }
@@ -95,27 +133,35 @@ export default function GenerateSheet({
     <Sheet open={open} onClose={onClose} title="Генерация · Higgsfield">
       <div className="section-label mb-2">Модели (A/B — отметьте несколько)</div>
       <div className="flex flex-col gap-1.5">
-        {models.map((m) => (
-          <label
-            key={m.id}
-            className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2"
-            style={{
-              borderColor: selected.has(m.id) ? "var(--border-strong)" : "var(--border-subtle)",
-              background: selected.has(m.id) ? "var(--ink-600)" : "none",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={selected.has(m.id)}
-              onChange={() => toggle(m.id)}
-              className="h-5 w-5 accent-[var(--violet-400)]"
-            />
-            <span className="flex-1 font-mono text-[12px] font-semibold text-t100">{m.name}</span>
-            <span className="font-mono text-[10.5px] text-t400">
-              {m.credits != null ? `~${m.credits} кр` : "кредиты: ?"}
-            </span>
-          </label>
-        ))}
+        {models.map((m) => {
+          const est = estimateFor(m, duration, quality);
+          return (
+            <label
+              key={m.id}
+              className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2"
+              style={{
+                borderColor: selected.has(m.id) ? "var(--border-strong)" : "var(--border-subtle)",
+                background: selected.has(m.id) ? "var(--ink-600)" : "none",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(m.id)}
+                onChange={() => toggle(m.id)}
+                className="h-5 w-5 accent-[var(--violet-400)]"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block font-mono text-[12px] font-semibold text-t100">{m.name}</span>
+                <span className="block font-mono text-[9px] text-t400">
+                  {m.qualities.join(" / ") || "—"}
+                </span>
+              </span>
+              <span className="font-mono text-[10.5px] text-t300">
+                {est != null ? `≈${est} кр` : "кр: ?"}
+              </span>
+            </label>
+          );
+        })}
         {!models.length && (
           <div className="text-[11.5px] text-t400">
             Каталог моделей пуст — обновите его на экране «Затраты и настройки».
@@ -123,49 +169,133 @@ export default function GenerateSheet({
         )}
       </div>
 
-      <div className="section-label mb-2 mt-4">Start-frame (image-to-video)</div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <button
-          onClick={() => setStartFrame("")}
-          className="flex h-[54px] w-[80px] shrink-0 items-center justify-center rounded-md border text-[10px] font-semibold"
-          style={{
-            borderColor: !startFrame ? "var(--border-strong)" : "var(--border-subtle)",
-            color: !startFrame ? "var(--text-100)" : "var(--text-400)",
-            background: !startFrame ? "var(--ink-600)" : "none",
-          }}
-        >
-          Нет
-        </button>
-        {startFrames.map((f) => (
+      <div className="mb-2 mt-4 flex items-baseline gap-2">
+        <span className="section-label">Длительность</span>
+        <span className="font-mono text-[12px] font-semibold text-t100">{duration} с</span>
+        {duration !== groupDurationSec && (
+          <span className="text-[9.5px] text-warning">
+            в раскадровке — {groupDurationSec} с
+          </span>
+        )}
+      </div>
+      <input
+        type="range"
+        min={4}
+        max={15}
+        step={1}
+        value={duration}
+        onChange={(e) => {
+          setDuration(Number(e.target.value));
+          setConfirmInfo(null);
+          setConfirmStep(0);
+        }}
+        className="w-full accent-[var(--violet-400)]"
+      />
+
+      <div className="section-label mb-2 mt-3.5">Качество</div>
+      <div className="flex gap-1.5">
+        {QUALITIES.map((q) => (
           <button
-            key={f.id}
-            onClick={() => setStartFrame(startFrame === f.id ? "" : f.id)}
-            className="relative w-[80px] shrink-0"
-            title={f.label}
+            key={q}
+            onClick={() => {
+              setQuality(q);
+              setConfirmInfo(null);
+              setConfirmStep(0);
+            }}
+            className="min-h-10 flex-1 rounded-md border font-mono text-[11.5px] font-semibold"
+            style={{
+              borderColor: quality === q ? "var(--border-strong)" : "var(--border-subtle)",
+              background: quality === q ? "var(--ink-600)" : "none",
+              color: quality === q ? "var(--text-100)" : "var(--text-400)",
+            }}
           >
-            <span
-              className="block h-[54px] overflow-hidden rounded-md border-2"
-              style={{
-                borderColor: startFrame === f.id ? "var(--warning)" : "var(--border-subtle)",
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={f.url} alt={f.label} className="h-full w-full object-cover" />
-            </span>
-            <span className="mt-0.5 block truncate text-left font-mono text-[8.5px] text-t400">
-              {f.label}
-            </span>
+            {q}
           </button>
         ))}
       </div>
+      {klingFallback && (
+        <div className="mt-1.5 text-[10px] text-warning">
+          Kling не поддерживает 480p — уйдёт в 720p автоматически.
+        </div>
+      )}
+
+      <div className="section-label mb-2 mt-4">Start-frame (image-to-video)</div>
+      {chosenFrame ? (
+        <div className="flex items-center gap-2.5 rounded-lg border border-[rgba(192,138,62,.4)] bg-ink-700 p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={chosenFrame.url}
+            alt=""
+            className="h-11 w-[72px] rounded-md border border-[var(--border-subtle)] object-cover"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12px] font-medium text-t100">
+              {chosenFrame.label}
+            </span>
+            <span className="block font-mono text-[9px] text-warning">start-frame</span>
+          </span>
+          <button
+            onClick={() => setPickerOpen(true)}
+            className="rounded-md border border-[var(--border-default)] px-2.5 py-1.5 text-[10px] font-semibold text-t200"
+          >
+            Выбрать
+          </button>
+          <button
+            aria-label="Сбросить start-frame"
+            onClick={() => setStartFrame("")}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-t400 hover:text-danger"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setPickerOpen(true)}
+          className="flex min-h-11 w-full items-center justify-center rounded-lg border border-dashed border-[var(--border-default)] text-[11px] text-t300 hover:border-[var(--border-strong)]"
+        >
+          Выбрать из референсов…
+        </button>
+      )}
+      {pickerOpen && (
+        <div className="mt-2 flex gap-2 overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-2">
+          {startFrames.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => {
+                setStartFrame(f.id);
+                setPickerOpen(false);
+              }}
+              className="w-[76px] shrink-0"
+            >
+              <span
+                className="block h-11 overflow-hidden rounded-md border-2"
+                style={{
+                  borderColor: startFrame === f.id ? "var(--warning)" : "var(--border-subtle)",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={f.url} alt="" className="h-full w-full object-cover" />
+              </span>
+              <span className="mt-0.5 block truncate text-center font-mono text-[8px] text-t400">
+                {f.label}
+              </span>
+            </button>
+          ))}
+          {!startFrames.length && (
+            <span className="px-2 py-3 text-[11px] text-t400">
+              Нет референсов — добавьте на карточке шота или в референсах серии.
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5">
-        <span className="text-[11px] text-t300">Параметры:</span>
-        <span className="font-mono text-[11px] text-t100">
-          {durationSec} сек · {aspectRatio}
+        <span className="text-[11px] text-t300">Оценка списания:</span>
+        <span className="font-mono text-[10px] text-t400">
+          {duration}с · {quality} · {aspectRatio}
         </span>
         <span className="flex-1" />
-        <span className="font-mono text-[12px] font-semibold text-t100">
+        <span className="font-mono text-[13px] font-semibold text-t100">
           ≈ {estimate}
           {hasUnknown ? "+?" : ""} кр
         </span>
@@ -173,14 +303,21 @@ export default function GenerateSheet({
 
       {confirmInfo && (
         <div className="mt-3 rounded-lg border border-[rgba(194,71,106,.5)] bg-[rgba(194,71,106,.1)] px-3 py-2.5 text-[12px] leading-relaxed text-[#e08aa4]">
-          Оценка ≈{confirmInfo.estimate} кр выше вашего лимита подтверждения ({confirmInfo.limit}{" "}
-          кр). Запустить всё равно?
+          ≈{confirmInfo.estimate} кр — выше лимита подтверждения ({confirmInfo.limit} кр).
+          {confirmStep === 1 ? " Нажмите ещё раз, чтобы точно запустить." : ""}
         </div>
       )}
       {error && <div className="mt-3 text-[11.5px] text-danger">{error}</div>}
 
       <button
-        onClick={() => launch(Boolean(confirmInfo))}
+        onClick={() => {
+          if (confirmInfo && confirmStep === 1) {
+            // второй шаг подтверждения (spec §3.1) — запуск только третьим нажатием
+            setConfirmStep(2);
+            return;
+          }
+          launch();
+        }}
         disabled={pending || selected.size === 0}
         className="mt-4 min-h-[52px] w-full rounded-lg text-[12px] font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-50"
         style={{
@@ -191,7 +328,9 @@ export default function GenerateSheet({
         {pending
           ? "Отправка…"
           : confirmInfo
-            ? `Подтвердить и запустить ${selected.size}`
+            ? confirmStep >= 2
+              ? `Точно запустить · ${confirmInfo.estimate} кр`
+              : `Подтвердить ${confirmInfo.estimate} кр`
             : `Запустить ${selected.size} ${selected.size === 1 ? "задачу" : "задачи"}`}
       </button>
     </Sheet>

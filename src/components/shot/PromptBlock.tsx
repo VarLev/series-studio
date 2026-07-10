@@ -142,13 +142,18 @@ export default function PromptBlock({
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="История версий">
         <div className="flex flex-col gap-2.5 pb-2">
           {versions.map((v) => (
-            <div key={v.id} className="rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3">
+            <button
+              key={v.id}
+              onClick={() => router.push(`/episodes/${episodeId}/shots/${shotId}/editor?v=${v.id}`)}
+              className="rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3 text-left hover:border-[var(--border-strong)]"
+            >
               <div className="mb-1.5 flex items-center gap-2">
                 <span className="font-mono text-[11px] font-semibold text-magenta-400">
                   v{v.version}
                 </span>
                 <span className="font-mono text-[9.5px] text-chrome-mid">{v.targetModel}</span>
                 <span className="ml-auto font-mono text-[9.5px] text-t400">
+                  {v.feedbackNote === "Ручная правка" ? "ручная правка" : "фабрика"} ·{" "}
                   {new Date(v.createdAt).toLocaleString("ru")}
                 </span>
               </div>
@@ -158,7 +163,7 @@ export default function PromptBlock({
               <div className="line-clamp-4 whitespace-pre-wrap font-mono text-[10.5px] leading-relaxed text-t400">
                 {v.text}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </Sheet>
