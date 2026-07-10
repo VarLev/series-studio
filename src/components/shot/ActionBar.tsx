@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import CopyPackSheet, { type CopyPackRef } from "./CopyPackSheet";
+import GenerateSheet, { type CatalogModel, type StartFrameOption } from "./GenerateSheet";
 
 /** Закреплённая нижняя панель действий карточки шота: [Редактор] [Генерировать ▾] [Копи-пак] */
 export default function ActionBar({
@@ -13,6 +14,11 @@ export default function ActionBar({
   promptId,
   copyPackRefs,
   hasPrompt,
+  models,
+  defaultModelIds,
+  startFrames,
+  durationSec,
+  aspectRatio,
 }: {
   episodeId: string;
   shotId: string;
@@ -21,12 +27,17 @@ export default function ActionBar({
   promptId: string;
   copyPackRefs: CopyPackRef[];
   hasPrompt: boolean;
+  models: CatalogModel[];
+  defaultModelIds: string[];
+  startFrames: StartFrameOption[];
+  durationSec: number;
+  aspectRatio: string;
 }) {
   const [copyPackOpen, setCopyPackOpen] = useState(false);
-  const [stage2Note, setStage2Note] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
 
   const btnBase =
-    "flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-semibold uppercase tracking-[0.1em]";
+    "flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-semibold uppercase tracking-[0.1em] disabled:opacity-40";
 
   return (
     <>
@@ -37,11 +48,6 @@ export default function ActionBar({
           backdropFilter: "blur(14px)",
         }}
       >
-        {stage2Note && (
-          <div className="border-b border-[var(--border-subtle)] px-4 py-2 text-[11px] text-t300">
-            Генерация через Higgsfield API — Этап 2. Пока используйте «Копи-пак» + kling.ai.
-          </div>
-        )}
         <div
           className="flex gap-2 px-3 py-2.5"
           style={{ paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}
@@ -54,10 +60,11 @@ export default function ActionBar({
             Редактор
           </Link>
           <button
-            onClick={() => setStage2Note((v) => !v)}
-            className={`${btnBase} border border-transparent bg-violet-800 text-t300`}
-            style={{ flex: 1.35 }}
-            title="Генерация внутри приложения — Этап 2"
+            onClick={() => setGenerateOpen(true)}
+            disabled={!hasPrompt}
+            className={`${btnBase} bg-violet-500 text-white hover:bg-violet-400`}
+            style={{ flex: 1.35, boxShadow: hasPrompt ? "var(--glow-violet-sm)" : "none" }}
+            title={hasPrompt ? "Запустить генерацию Higgsfield" : "Сначала соберите промпт"}
           >
             <span>⚡</span>
             Генерировать ▾
@@ -65,13 +72,25 @@ export default function ActionBar({
           <button
             onClick={() => setCopyPackOpen(true)}
             disabled={!hasPrompt}
-            className={`${btnBase} border border-[var(--border-default)] bg-ink-500 text-t100 hover:bg-ink-400 disabled:opacity-40`}
+            className={`${btnBase} border border-[var(--border-default)] bg-ink-500 text-t100 hover:bg-ink-400`}
           >
             <span>⧉</span>
             Копи-пак
           </button>
         </div>
       </div>
+
+      <GenerateSheet
+        open={generateOpen}
+        onClose={() => setGenerateOpen(false)}
+        shotId={shotId}
+        promptId={promptId}
+        models={models}
+        defaultModelIds={defaultModelIds}
+        startFrames={startFrames}
+        durationSec={durationSec}
+        aspectRatio={aspectRatio}
+      />
 
       <CopyPackSheet
         open={copyPackOpen}

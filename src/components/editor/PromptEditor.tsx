@@ -55,17 +55,19 @@ export default function PromptEditor({
   episodeId,
   versions,
   insertEntities,
+  initialNote = "",
 }: {
   shotId: string;
   episodeId: string;
   versions: PromptVersion[];
   insertEntities: Array<{ name: string; elementName: string }>;
+  initialNote?: string;
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState(versions[0]?.id ?? "");
   const selected = versions.find((v) => v.id === selectedId) ?? versions[0];
   const [text, setText] = useState(selected?.text ?? "");
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(initialNote);
   const [diffMode, setDiffMode] = useState(false);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();

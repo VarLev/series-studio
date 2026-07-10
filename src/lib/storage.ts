@@ -59,6 +59,30 @@ export async function readLocalFile(storagePath: string): Promise<Buffer> {
   return fs.readFile(resolved);
 }
 
+/** Читает байты файла из хранилища (для zip-экспорта и передачи референсов провайдеру). */
+export async function readFile(storagePath: string): Promise<Buffer> {
+  const safeKey = sanitizeKey(storagePath);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    const { data, error } = await supabase.storage.from(BUCKET).download(safeKey);
+    if (error || !data) throw new Error(`Supabase download failed: ${error?.message}`);
+    return Buffer.from(await data.arrayBuffer());
+  }
+  return readLocalFile(safeKey);
+}
+
+/**
+ * Скачивает результат с CDN провайдера в своё хранилище (TZ M5 — не зависеть
+ * от срока жизни их ссылок). Возвращает storage_path.
+ */
+export async function saveFromUrl(url: string, key: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Не удалось скачать результат (${res.status})`);
+  const contentType = res.headers.get("content-type") ?? "video/mp4";
+  const data = Buffer.from(await res.arrayBuffer());
+  return putFile(key, data, contentType);
+}
+
 export async function deleteFile(storagePath: string): Promise<void> {
   const safeKey = sanitizeKey(storagePath);
   if (supabaseConfigured()) {

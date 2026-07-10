@@ -103,6 +103,22 @@ export const knowledgeDocs = pgTable("knowledge_docs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Каталог моделей генерации (TZ §0.2: не хардкодить — получать программно
+ * и хранить в БД с возможностью обновления).
+ */
+export const videoModels = pgTable("video_models", {
+  id: text("id").primaryKey(), // provider model id, e.g. kling3_0
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("video"), // video | image
+  provider: text("provider").notNull().default("higgsfield"),
+  paramsJson: text("params_json").notNull().default("{}"), // allowed params/enums
+  credits: integer("credits"), // estimate per job, if known
+  active: boolean("active").notNull().default(true),
+  sortIndex: integer("sort_index").notNull().default(0),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

@@ -9,9 +9,11 @@ export const dynamic = "force-dynamic";
 
 export default async function EditorPage(ctx: {
   params: Promise<{ id: string; shotId: string }>;
+  searchParams: Promise<{ reason?: string }>;
 }) {
   await requireAuth();
   const { id: episodeId, shotId } = await ctx.params;
+  const { reason } = await ctx.searchParams;
   const db = await getDb();
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot || shot.episodeId !== episodeId) notFound();
@@ -55,6 +57,7 @@ export default async function EditorPage(ctx: {
         insertEntities={allEntities
           .filter((e) => linkedIds.has(e.id))
           .map((e) => ({ name: e.name, elementName: e.elementName }))}
+        initialNote={reason ? `Причина отказа генерации: ${reason}. Перепиши промпт так, чтобы избежать отказа.` : ""}
       />
     </main>
   );

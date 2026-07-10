@@ -13,6 +13,7 @@ import {
 } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
+import { getCatalog } from "@/lib/generation";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState } from "@/components/ui";
 import EntityChips from "@/components/shot/EntityChips";
 import ShotRefs from "@/components/shot/ShotRefs";
@@ -20,6 +21,8 @@ import PromptBlock from "@/components/shot/PromptBlock";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
 import ResultsStrip from "@/components/shot/ResultsStrip";
+import GenPoller from "@/components/GenPoller";
+import QueuePill from "@/components/QueuePill";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +45,6 @@ export default async function ShotPage(ctx: {
     .orderBy(asc(entities.name));
   const linkedIds = new Set(links.map((l) => l.entityId));
 
-  // avatar = first reference image of each entity
   const entityRefs = allEntities.length
     ? await db
         .select()
@@ -56,17 +58,15 @@ export default async function ShotPage(ctx: {
     }
   }
 
-  const chipData = await Promise.all(
-    allEntities.map(async (e) => ({
-      id: e.id,
-      name: e.name,
-      elementName: e.elementName,
-      type: e.type,
-      avatarUrl: avatarByEntity.get(e.id) ?? null,
-      linked: linkedIds.has(e.id),
-      auto: links.find((l) => l.entityId === e.id)?.auto ?? false,
-    })),
-  );
+  const chipData = allEntities.map((e) => ({
+    id: e.id,
+    name: e.name,
+    elementName: e.elementName,
+    type: e.type,
+    avatarUrl: avatarByEntity.get(e.id) ?? null,
+    linked: linkedIds.has(e.id),
+    auto: links.find((l) => l.entityId === e.id)?.auto ?? false,
+  }));
 
   const shotRefRows = await db.select().from(references).where(eq(references.shotId, shotId));
   const shotRefs = await Promise.all(
@@ -78,7 +78,6 @@ export default async function ShotPage(ctx: {
     })),
   );
 
-  // references available to attach (from linked entities' bible galleries)
   const bibleRefs = await Promise.all(
     entityRefs
       .filter((r) => r.entityId && linkedIds.has(r.entityId) && !r.shotId)
@@ -104,6 +103,7 @@ export default async function ShotPage(ctx: {
     feedbackNote: v.feedbackNote ?? "",
     createdAt: v.createdAt.toISOString(),
   }));
+  const promptVersionById = new Map(versionRows.map((v) => [v.id, v.version]));
 
   const genRows = await db
     .select()
@@ -121,17 +121,32 @@ export default async function ShotPage(ctx: {
       isVideo: Boolean(g.resultStoragePath?.match(/\.(mp4|webm|mov)$/i)),
       isWinner: shot.winnerGenerationId === g.id,
       createdAt: g.createdAt.toISOString(),
+      promptVersion: g.promptId ? (promptVersionById.get(g.promptId) ?? null) : null,
+      credits: g.creditsSpent,
     })),
   );
+  const activeCount = results.filter((r) => r.status === "queued" || r.status === "running").length;
 
   const settings = await getAllSettings();
-  const targetModels = settings.target_models.split(",").map((m) => m.trim()).filter(Boolean);
+  const catalog = (await getCatalog("video")).filter((m) => m.kind === "video");
+  const defaultModelIds = settings.target_models.split(",").map((m) => m.trim()).filter(Boolean);
+
   const epN = String(episode?.number ?? 0).padStart(2, "0");
   const grpN = String(shot.orderIndex).padStart(2, "0");
   const tokens = chipData.filter((c) => c.linked).map((c) => c.elementName);
   const current = versions[0] ?? null;
+  const currentParams = versionRows[0]
+    ? (JSON.parse(versionRows[0].paramsJson || "{}") as { aspect_ratio?: string; duration?: number })
+    : {};
 
-  // копи-пак: референсы шота + референсы задействованных сущностей
+  // start-frame кандидаты: референсы шота (start_frame первыми) + кадры-референсы сущностей
+  const startFrames = [
+    ...shotRefs
+      .sort((a, b) => (a.role === "start_frame" ? -1 : 0) - (b.role === "start_frame" ? -1 : 0))
+      .map((r) => ({ id: r.id, url: r.url, label: r.caption || r.role })),
+    ...bibleRefs.slice(0, 6).map((r) => ({ id: r.id, url: r.url, label: r.entityName })),
+  ];
+
   const copyPackRefs = [
     ...shotRefs.map((r) => ({ url: r.url, name: r.caption || r.role })),
     ...bibleRefs.map((r) => ({ url: r.url, name: `${r.entityName}${r.caption ? " · " + r.caption : ""}` })),
@@ -143,7 +158,9 @@ export default async function ShotPage(ctx: {
         backHref={`/episodes/${episodeId}`}
         eyebrow={`Серия ${epN} · Группа ${grpN}`}
         title={shot.title || "Группа шотов"}
+        right={<QueuePill />}
       />
+      <GenPoller activeCount={activeCount} />
 
       <div className="flex flex-1 flex-col gap-4 p-4 pb-32">
         <div className="flex items-center gap-3.5">
@@ -156,7 +173,7 @@ export default async function ShotPage(ctx: {
             </div>
             <div className="font-mono text-[10.5px] tracking-[0.04em] text-t300">
               {shot.durationSec} сек · {versions.length ? `промпт v${current!.version}` : "промпта нет"} ·{" "}
-              {results.length} видео
+              {results.filter((r) => r.status === "done").length} видео
             </div>
           </div>
         </div>
@@ -181,17 +198,17 @@ export default async function ShotPage(ctx: {
           episodeId={episodeId}
           versions={versions}
           tokens={tokens}
-          targetModels={targetModels}
+          targetModels={catalog.map((m) => m.id)}
         />
 
         <div className="flex flex-col gap-1.5">
           <SectionLabel hint={`${results.length}`}>Видео группы</SectionLabel>
           {results.length ? (
-            <ResultsStrip shotId={shotId} results={results} />
+            <ResultsStrip episodeId={episodeId} shotId={shotId} results={results} />
           ) : (
             <EmptyState>
-              Видео пока нет. Соберите промпт, затем «Копи-пак» — сгенерируйте на kling.ai и
-              загрузите результат сюда. Генерация внутри приложения — Этап 2.
+              Видео пока нет. Соберите промпт и нажмите «Генерировать» — задача уйдёт в Higgsfield,
+              результат появится здесь. Либо «Копи-пак» для ручной генерации на kling.ai.
             </EmptyState>
           )}
         </div>
@@ -205,6 +222,11 @@ export default async function ShotPage(ctx: {
         promptId={current?.id ?? ""}
         copyPackRefs={copyPackRefs}
         hasPrompt={Boolean(current)}
+        models={catalog}
+        defaultModelIds={defaultModelIds}
+        startFrames={startFrames}
+        durationSec={currentParams.duration ?? shot.durationSec}
+        aspectRatio={currentParams.aspect_ratio ?? "16:9"}
       />
     </main>
   );

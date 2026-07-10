@@ -17,8 +17,36 @@
   kling.ai, загрузка внешнего результата (`source: kling-web`) + «Победитель» → approved.
 - **PWA** — манифест, сервис-воркер, офлайн-страница, установка на Android.
 
-Этап 2 (генерация Higgsfield, очередь, кредиты) и Этап 3 (конвейер, Soul ID, экспорт) —
-заглушки с пояснениями в UI; слой адаптеров заложен в схеме БД (`generations.provider`).
+## Что уже работает (Этап 2 — генерация внутри)
+
+- **M4 Центр генерации** — общий интерфейс адаптера `GenerationProvider` (`src/lib/providers`);
+  `HiggsfieldProvider` поверх Cloud API (auth `Authorization: Key`, submit/status/cancel/upload,
+  вебхук) и `MockProvider` для локальной проверки без ключа. Каталог моделей хранится в БД
+  и обновляется программно (TZ §0.2, не хардкодится) — кнопка «Обновить каталог» на экране затрат.
+- **Шторка «Генерация»** — чекбоксы моделей (A/B — параллельный запуск), выбор start-frame
+  (нет / референс шота / кадр), оценка кредитов и предохранитель (красная плашка при
+  превышении лимита подтверждения).
+- **Очередь и поллинг** — статусы `queued→running→done/failed/nsfw`; поллинг клиентом (пока
+  открыт экран с активными задачами) и фоновым cron (`POST /api/generations/poll` с
+  `x-cron-secret`); вебхук `/api/webhooks/higgsfield`. Пилюля «⏳ N» в шапках.
+- **M5 Медиатека и ревью** — результаты скачиваются с CDN в своё хранилище (не зависят от
+  срока жизни ссылок); тёмный плеер с покадровой перемоткой ±1, «Взять кадр» (canvas →
+  референс сущности / start-frame следующего шота), A/B-переключение, «Замечание» → v(N+1) →
+  перегенерация, «Победитель» → approved. Галерея эпизода + «Скачать всё» (zip).
+- **M7 Учёт затрат** — дашборд: кредиты Higgsfield по эпизоду и модели (бары), $ за LLM
+  Anthropic по конфигурируемым тарифам, итог «серия обошлась в X кредитов + $Y LLM».
+
+Этап 3 (пакетная генерация всех prompted-шотов, обучение Soul ID, монтажный лист) — впереди.
+
+### Оплата (важно)
+
+- **Higgsfield** (видео) списывается с **кредитов подписки** — MCP/CLI/Cloud API используют тот
+  же пул, что и ручная работа на сайте (проверено на живой документации). Доплаты за API нет.
+- **Anthropic** (текст) — отдельный pay-per-use баланс; подписка Max не применяется (~$0.5–1.5
+  за эпизод на Sonnet).
+- Без `HIGGSFIELD_API_KEY` центр генерации работает на `MockProvider`: задача «генерируется»
+  ~12 сек и возвращает `public/mock/sample.mp4` — весь конвейер (постановка, поллинг,
+  скачивание, кредиты, ревью, галерея, zip) можно прогнать локально.
 
 ## Запуск локально
 
@@ -55,12 +83,31 @@ PDF предварительно сконвертируйте) в папку `kn
 
 ```
 src/lib/db          схема (TZ §5) + инициализация (PGlite | Supabase Postgres)
-src/lib/storage.ts  абстракция файлов (локальный диск | Supabase Storage)
+src/lib/storage.ts  абстракция файлов (локальный диск | Supabase Storage) + saveFromUrl
 src/lib/llm         клиент Anthropic, zod-контракты (TZ §7), промпт-фабрика
-src/lib/actions     server actions (episodes, shots, prompts, entities, settings)
-src/app             экраны: /episodes, /bible, /queue, /costs + API upload/files
+src/lib/providers   GenerationProvider (TZ M4): higgsfield, mock, каталог
+src/lib/generation  каталог, постановка задач, поллинг, приземление результатов
+src/lib/actions     server actions (episodes, shots, prompts, entities, settings, generate)
+src/app             экраны + API (upload, files, generations/poll, episodes/export, webhooks)
 knowledge/          база знаний промпт-фабрики (.md/.txt)
+public/mock         сэмпл для MockProvider
 ```
+
+## Фоновый поллинг в проде (Supabase pg_cron)
+
+Задайте `CRON_SECRET` и раз в минуту дергайте роут, только пока есть активные задачи:
+
+```sql
+select cron.schedule('ss-poll', '* * * * *', $$
+  select net.http_post(
+    url := 'https://<ваш-домен>/api/generations/poll',
+    headers := jsonb_build_object('x-cron-secret', '<CRON_SECRET>')
+  );
+$$);
+```
+
+Если у тарифа Higgsfield есть вебхуки — они предпочтительнее поллинга: указывайте
+`webhook_url` вида `https://<домен>/api/webhooks/higgsfield?secret=<CRON_SECRET>`.
 
 ## Безопасность
 

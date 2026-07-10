@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.110.0",
     "@electric-sql/pglite": "^0.5.4",
     "@supabase/supabase-js": "^2.110.2",
+    "archiver": "^8.0.0",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
     "postgres": "^3.4.9",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/archiver": "^8.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

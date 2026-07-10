@@ -89,6 +89,17 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
   tags text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS video_models (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  kind text NOT NULL DEFAULT 'video',
+  provider text NOT NULL DEFAULT 'higgsfield',
+  params_json text NOT NULL DEFAULT '{}',
+  credits integer,
+  active boolean NOT NULL DEFAULT true,
+  sort_index integer NOT NULL DEFAULT 0,
+  fetched_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value text NOT NULL

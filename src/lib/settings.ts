@@ -11,7 +11,9 @@ export const DEFAULT_SETTINGS = {
     "Сеттинг: университет Эшфорд. " +
     "Запреты: без явной эротики, без романтизации насилия.",
   credit_confirm_limit: "50",
-  target_models: "kling-3.0,seedance-2.0,grok-imagine",
+  target_models: "kling3_0,seedance_2_0",
+  llm_price_in: "3", // $ за 1М входных токенов (конфигурируемый тариф, TZ M7)
+  llm_price_out: "15", // $ за 1М выходных токенов
 } as const;
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;

@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import { asc, eq, inArray } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, shots, shotEntities, entities } from "@/lib/db";
+import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
 import EpisodeTabs from "@/components/episode/EpisodeTabs";
+import QueuePill from "@/components/QueuePill";
 import type { ShotListItem } from "@/components/episode/ShotsList";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +56,18 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         backHref="/episodes"
         eyebrow={`Серия ${epNumber}`}
         title={episode.title || "Без названия"}
+        right={
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={`/episodes/${episode.id}/gallery`}
+              title="Галерея утверждённых шотов"
+              className="flex min-h-8 items-center rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
+            >
+              ▦
+            </Link>
+            <QueuePill />
+          </div>
+        }
       />
       <EpisodeTabs
         episodeId={episode.id}

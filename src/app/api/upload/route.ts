@@ -72,6 +72,8 @@ export async function POST(req: NextRequest) {
   const shotId = (form.get("shotId") as string) || null;
   const episodeId = (form.get("episodeId") as string) || null;
   const role = (form.get("role") as string) || null;
+  const sourceRaw = String(form.get("source") ?? "upload");
+  const source = ["upload", "frame-grab"].includes(sourceRaw) ? sourceRaw : "upload";
   const storagePath = await putFile(
     `refs/${entityId ?? shotId ?? episodeId ?? "misc"}/${id}${extFor(file.type)}`,
     buffer,
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
     episodeId,
     storagePath,
     caption: String(form.get("caption") ?? ""),
-    source: "upload",
+    source,
     role: role === "start_frame" || role === "composition" ? role : null,
   });
   if (entityId) revalidatePath(`/bible/${entityId}`);
