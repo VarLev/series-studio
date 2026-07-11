@@ -10,9 +10,14 @@ function getClient(): Anthropic {
       "ANTHROPIC_API_KEY не задан — генерация текста недоступна. Добавьте ключ в .env.local.",
     );
   }
-  if (!client) client = new Anthropic();
+  // maxRetries:1 — стрим-запрос, зависший на сети, иначе молча ретраится дважды
+  // (дефолт 2), и кнопка «Claude пишет…» висит до timeout×3 ≈ получаса.
+  if (!client) client = new Anthropic({ maxRetries: 1 });
   return client;
 }
+
+/** Жёсткий потолок ожидания ответа модели (мс). Переопределяется LLM_TIMEOUT_MS. */
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 180_000;
 
 export interface LlmCall {
   kind: "synopsis" | "breakdown" | "prompt" | "revision";
@@ -44,18 +49,31 @@ async function recordUsage(
 
 export async function runText(call: LlmCall): Promise<string> {
   const anthropic = getClient();
-  const stream = anthropic.messages.stream({
-    model: call.model,
-    max_tokens: call.maxTokens ?? 8192,
-    system: call.system,
-    messages: [{ role: "user", content: call.user }],
-  });
-  const message = await stream.finalMessage();
-  await recordUsage(call, message.usage);
-  return message.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+  try {
+    const stream = anthropic.messages.stream(
+      {
+        model: call.model,
+        max_tokens: call.maxTokens ?? 8192,
+        system: call.system,
+        messages: [{ role: "user", content: call.user }],
+      },
+      // жёсткий потолок: подвисший стрим не держит кнопку «Claude пишет…» бесконечно
+      { signal: AbortSignal.timeout(LLM_TIMEOUT_MS) },
+    );
+    const message = await stream.finalMessage();
+    await recordUsage(call, message.usage);
+    return message.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+  } catch (e) {
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new Error(
+        `Claude не ответил за ${Math.round(LLM_TIMEOUT_MS / 1000)} с — попробуйте ещё раз или выберите модель Haiku (быстрее).`,
+      );
+    }
+    throw e;
+  }
 }
 
 function extractJson(text: string): string {

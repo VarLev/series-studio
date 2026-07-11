@@ -80,9 +80,18 @@ export default function SynopsisEditor({
   const [brief, setBrief] = useState("");
   const [generating, setGenerating] = useState(false);
   const [breakingDown, setBreakingDown] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [preview, setPreview] = useState<Breakdown | null>(null);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // счётчик секунд, пока Claude пишет — чтобы ожидание не выглядело зависанием
+  useEffect(() => {
+    if (!generating && !breakingDown) return;
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [generating, breakingDown]);
 
   function pickModel(kind: "synopsis" | "breakdown", model: string) {
     (kind === "synopsis" ? onSynopsisModelChange : onBreakdownModelChange)(model);
@@ -157,6 +166,7 @@ export default function SynopsisEditor({
   }
 
   async function onGenerate() {
+    setElapsed(0);
     setGenerating(true);
     setError("");
     const res = await generateSynopsis(episodeId, brief, synopsisModel);
@@ -168,6 +178,7 @@ export default function SynopsisEditor({
   }
 
   async function onBreakdown() {
+    setElapsed(0);
     setBreakingDown(true);
     setError("");
     const res = await breakdownEpisode(episodeId, breakdownModel);
@@ -271,7 +282,7 @@ export default function SynopsisEditor({
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
             {generating
-              ? t("Claude пишет сюжет…", "Claude is writing the story…")
+              ? t(`Claude пишет сюжет… ${elapsed}с`, `Claude is writing the story… ${elapsed}s`)
               : t("Сгенерировать сюжет", "Generate story")}
           </button>
         </div>
@@ -301,7 +312,7 @@ export default function SynopsisEditor({
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
             {breakingDown
-              ? t("Claude раскадрирует…", "Claude is storyboarding…")
+              ? t(`Claude раскадрирует… ${elapsed}с`, `Claude is storyboarding… ${elapsed}s`)
               : shotsCount > 0
                 ? t("Раскадровать (готовые группы не дублируются)", "Break down (existing groups are kept)")
                 : t("Разбить на шоты", "Break into shots")}
