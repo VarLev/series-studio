@@ -57,7 +57,7 @@ const MAX_IDENTITY_REFS = 4;
 export const MCP_CATALOG_SEED: ModelInfo[] = [
   {
     id: "kling3_0",
-    name: "Kling 3.0",
+    name: "Kling 3.0 Omni", // так модель называется в UI Higgsfield; референсы — через Elements
     kind: "video",
     params: {
       duration: "3-15",
@@ -135,7 +135,8 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
         const seed = MCP_CATALOG_SEED.find((s) => s.id === m.id);
         return {
           id: m.id,
-          name: m.name,
+          // имя из сида приоритетнее серверного («Kling v3.0» → «Kling 3.0 Omni»)
+          name: seed?.name ?? m.name,
           kind: "video" as const,
           params,
           credits: seed?.credits ?? null,
@@ -226,12 +227,12 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     return { status: "queued", resultUrls: [] };
   }
 
-  /** Локальный файл (start-frame) → media_upload (presigned PUT) → media_confirm → media_id. */
-  async uploadFile(data: Buffer, contentType: string): Promise<string> {
+  /** Локальный файл → media_upload (presigned PUT) → media_confirm → {media_id, https-URL}. */
+  async uploadMedia(data: Buffer, contentType: string): Promise<{ id: string; url: string }> {
     const ext = contentType.includes("png") ? "png" : "jpg";
     const res = await callMcpTool(
       "media_upload",
-      { method: "upload_url", filename: `start-frame.${ext}`, content_type: contentType },
+      { method: "upload_url", filename: `ref.${ext}`, content_type: contentType },
       { retry: true },
     );
     const uploadUrl = res.text.match(/https?:\/\/[^\s"']+/)?.[0];
@@ -247,7 +248,31 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     if (!put.ok) throw new Error(`media upload PUT: ${put.status}`);
     const confirm = await callMcpTool("media_confirm", { type: "image", media_id: mediaId }, { retry: true });
     if (confirm.isError) throw new Error(`media_confirm: ${confirm.text.slice(0, 200)}`);
-    return mediaId;
+    // presigned PUT URL без query = постоянный https-адрес медиа (нужен Elements)
+    return { id: mediaId, url: uploadUrl.split("?")[0] };
+  }
+
+  async uploadFile(data: Buffer, contentType: string): Promise<string> {
+    return (await this.uploadMedia(data, contentType)).id;
+  }
+
+  /**
+   * Reference Element — именованный многоразовый персонаж воркспейса Higgsfield.
+   * В промпте на него ссылаются плейсхолдером <<<element_id>>>; работает и с
+   * Seedance 2.0, и с Kling 3.0 (Omni) — подтверждено живыми сабмитами 2026-07-12.
+   */
+  async createElement(name: string, mediaId: string, mediaUrl: string): Promise<string> {
+    const res = await callMcpTool("show_reference_elements", {
+      action: "create",
+      name: name.slice(0, 32),
+      category: "character",
+      medias: [{ id: mediaId, url: mediaUrl, type: "media_input" }],
+    });
+    if (res.isError) throw new Error(`element create: ${res.text.slice(0, 250)}`);
+    // формат: «Created character "Simon" (<uuid>). Status: completed…»
+    const id = res.text.match(UUID_RE)?.[0];
+    if (!id) throw new Error(`element create: id не найден: ${res.text.slice(0, 250)}`);
+    return id;
   }
 
   /**

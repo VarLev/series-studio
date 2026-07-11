@@ -64,13 +64,10 @@ export async function deleteGeneration(genId: string): Promise<void> {
   const db = await getDb();
   const shotId = await deleteGenerationRow(genId);
   if (shotId) {
-    // если удалили победителя — снять пометку
-    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
-    if (shot?.winnerGenerationId === genId) {
-      await db.update(shots).set({ winnerGenerationId: null }).where(eq(shots.id, shotId));
-    }
+    // статус шота пересчитывается от оставшихся генераций (флаги winner на них)
     const { recalcShotStatus } = await import("@/lib/generation");
     await recalcShotStatus(shotId);
+    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
   }
 }
@@ -80,7 +77,6 @@ export async function deleteAllGenerations(shotId: string): Promise<void> {
   const db = await getDb();
   const gens = await db.select().from(generations).where(eq(generations.shotId, shotId));
   for (const g of gens) await deleteGenerationRow(g.id);
-  await db.update(shots).set({ winnerGenerationId: null }).where(eq(shots.id, shotId));
   const { recalcShotStatus } = await import("@/lib/generation");
   await recalcShotStatus(shotId);
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));

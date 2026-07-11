@@ -48,7 +48,7 @@ export default async function ReviewPage(ctx: {
         model: row.model,
         url: await getFileUrl(row.resultStoragePath!),
         isVideo: Boolean(row.resultStoragePath!.match(/\.(mp4|webm|mov)$/i)),
-        isWinner: shot.winnerGenerationId === row.id,
+        isWinner: row.winner,
         promptVersion: row.promptId ? (promptVersionById.get(row.promptId) ?? null) : null,
         credits: row.creditsSpent,
         source: row.source,

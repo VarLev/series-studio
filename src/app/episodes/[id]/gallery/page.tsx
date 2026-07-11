@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
@@ -8,7 +8,7 @@ import { ScreenHeader, EmptyState } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-/** M5 — галерея эпизода: approved-шоты по порядку + «скачать всё» (zip). */
+/** M5 — галерея эпизода: ВСЕ видео-победители (у шота их может быть несколько) + zip. */
 export default async function GalleryPage(ctx: { params: Promise<{ id: string }> }) {
   await requireAuth();
   const { id } = await ctx.params;
@@ -21,23 +21,36 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
     .from(shots)
     .where(eq(shots.episodeId, id))
     .orderBy(asc(shots.orderIndex));
-  const approved = shotRows.filter((s) => s.status === "approved" && s.winnerGenerationId);
-  const winnerIds = approved.map((s) => s.winnerGenerationId!) ?? [];
-  const gens = winnerIds.length
-    ? await db.select().from(generations).where(inArray(generations.id, winnerIds))
+  const shotById = new Map(shotRows.map((s) => [s.id, s]));
+  const winners = shotRows.length
+    ? await db
+        .select()
+        .from(generations)
+        .where(
+          and(
+            eq(generations.winner, true),
+            eq(generations.status, "done"),
+            inArray(generations.shotId, shotRows.map((s) => s.id)),
+          ),
+        )
     : [];
-  const genById = new Map(gens.map((g) => [g.id, g]));
+  // порядок: по шоту, внутри шота — по времени создания
+  winners.sort((a, b) => {
+    const ao = shotById.get(a.shotId!)?.orderIndex ?? 0;
+    const bo = shotById.get(b.shotId!)?.orderIndex ?? 0;
+    return ao - bo || a.createdAt.getTime() - b.createdAt.getTime();
+  });
 
   const items = await Promise.all(
-    approved.map(async (s) => {
-      const gen = genById.get(s.winnerGenerationId!);
-      return {
-        shot: s,
-        model: gen?.model ?? "",
-        url: gen?.resultStoragePath ? await getFileUrl(gen.resultStoragePath) : null,
-        isVideo: Boolean(gen?.resultStoragePath?.match(/\.(mp4|webm|mov)$/i)),
-      };
-    }),
+    winners
+      .filter((g) => g.shotId && g.resultStoragePath)
+      .map(async (g) => ({
+        genId: g.id,
+        shot: shotById.get(g.shotId!)!,
+        model: g.model,
+        url: await getFileUrl(g.resultStoragePath!),
+        isVideo: Boolean(g.resultStoragePath!.match(/\.(mp4|webm|mov)$/i)),
+      })),
   );
 
   const epN = String(episode.number).padStart(2, "0");
@@ -48,7 +61,7 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
       <ScreenHeader
         backHref={`/episodes/${id}`}
         eyebrow={`${t("Серия", "Episode")} ${epN}`}
-        title={t(`Галерея · ${items.length} утверждено`, `Gallery · ${items.length} approved`)}
+        title={t(`Галерея · ${items.length} побед.`, `Gallery · ${items.length} winners`)}
       />
       <div className="flex flex-col gap-3 p-4 pb-10">
         {items.length === 0 && (
@@ -60,9 +73,9 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
           </EmptyState>
         )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          {items.map(({ shot, url, isVideo }) => (
+          {items.map(({ genId, shot, url, isVideo, model }) => (
             <div
-              key={shot.id}
+              key={genId}
               className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-ink-700"
             >
               {url &&
@@ -79,7 +92,17 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
                 <span className="min-w-0 flex-1 truncate text-[11px] text-t200">
                   {shot.title || shot.actionMd.slice(0, 50)}
                 </span>
-                <span className="shrink-0 font-mono text-[9px] text-t400">{shot.durationSec}s</span>
+                <span className="shrink-0 font-mono text-[9px] text-t400">{model}</span>
+                {url && (
+                  <a
+                    href={url}
+                    download
+                    title={t("Скачать", "Download")}
+                    className="shrink-0 rounded px-1 text-[13px] text-t400 hover:text-violet-200"
+                  >
+                    ⬇
+                  </a>
+                )}
               </div>
             </div>
           ))}

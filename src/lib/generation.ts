@@ -181,6 +181,36 @@ interface UrlBundle {
   [key: string]: unknown;
 }
 
+/**
+ * Медиа референса у провайдера: {media_id, https-URL}. Кэшируется в settings —
+ * без кэша каждый запуск заново грузил те же мегабайты (12+ секунд на пару
+ * референсов) и умножал шансы сетевого флапа.
+ */
+async function mediaForReference(
+  refId: string,
+): Promise<{ id: string; url: string } | null> {
+  const db = await getDb();
+  const [ref] = await db.select().from(references).where(eq(references.id, refId));
+  if (!ref) return null;
+  const provider = await pickVideoProvider();
+  if (!provider.uploadMedia) return null;
+  const cacheKey = `hf_media2_${provider.name}_${refId}`;
+  const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
+  if (cached?.value) {
+    try {
+      return JSON.parse(cached.value) as { id: string; url: string };
+    } catch {}
+  }
+  const data = await readFile(ref.storagePath);
+  const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+  const media = await provider.uploadMedia(data, contentType);
+  await db
+    .insert(settings)
+    .values({ key: cacheKey, value: JSON.stringify(media) })
+    .onConflictDoUpdate({ target: settings.key, set: { value: JSON.stringify(media) } });
+  return media;
+}
+
 async function publicUrlForReference(refId: string): Promise<string | null> {
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
@@ -188,22 +218,43 @@ async function publicUrlForReference(refId: string): Promise<string | null> {
   const provider = await pickVideoProvider();
   // Локальный диск недоступен провайдеру извне — передаём байты через его upload API
   // (Cloud API → files/generate-upload-url; MCP → media_upload+confirm → media_id).
+  if (!process.env.SUPABASE_URL && provider.uploadMedia) {
+    return (await mediaForReference(refId))?.id ?? null;
+  }
   if (!process.env.SUPABASE_URL && provider.uploadFile) {
-    // media_id кэшируется: без кэша каждый запуск заново грузил те же мегабайты
-    // (12+ секунд на пару референсов) и умножал шансы сетевого флапа
-    const cacheKey = `hf_media_${provider.name}_${refId}`;
-    const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
-    if (cached?.value) return cached.value;
     const data = await readFile(ref.storagePath);
     const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
-    const mediaId = await provider.uploadFile(data, contentType);
-    await db
-      .insert(settings)
-      .values({ key: cacheKey, value: mediaId })
-      .onConflictDoUpdate({ target: settings.key, set: { value: mediaId } });
-    return mediaId;
+    return provider.uploadFile(data, contentType);
   }
   return getFileUrl(ref.storagePath);
+}
+
+/**
+ * Reference Element персонажа у Higgsfield (именованный, многоразовый):
+ * создаётся из фото-образа один раз, id кэшируется. В промпте на элемент
+ * ссылаются плейсхолдером <<<element_id>>> — работает и с Seedance, и с Kling.
+ */
+async function ensureEntityElement(
+  entityId: string,
+  name: string,
+  media: { id: string; url: string },
+): Promise<string | null> {
+  const db = await getDb();
+  const provider = await pickVideoProvider();
+  if (!provider.createElement) return null;
+  const cacheKey = `hf_element_${entityId}`;
+  const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
+  if (cached?.value) return cached.value;
+  try {
+    const elementId = await provider.createElement(name, media.id, media.url);
+    await db
+      .insert(settings)
+      .values({ key: cacheKey, value: elementId })
+      .onConflictDoUpdate({ target: settings.key, set: { value: elementId } });
+    return elementId;
+  } catch {
+    return null; // фолбэк — image_references (Seedance) или без референса (Kling)
+  }
 }
 
 /**
@@ -215,7 +266,7 @@ async function publicUrlForReference(refId: string): Promise<string | null> {
 async function identityRefs(
   shotId: string,
   referenceElementNames: string[],
-): Promise<Array<{ elementName: string; name: string; url: string }>> {
+): Promise<Array<{ entityId: string; elementName: string; name: string; refId: string }>> {
   const db = await getDb();
   const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
   if (!links.length) return [];
@@ -240,7 +291,7 @@ async function identityRefs(
   };
   chosen.sort((a, b) => order(a) - order(b));
 
-  const out: Array<{ elementName: string; name: string; url: string }> = [];
+  const out: Array<{ entityId: string; elementName: string; name: string; refId: string }> = [];
   for (const e of chosen) {
     const refs = await db
       .select()
@@ -248,38 +299,34 @@ async function identityRefs(
       .where(eq(references.entityId, e.id))
       .orderBy(asc(references.createdAt));
     if (!refs[0]) continue;
-    const url = await publicUrlForReference(refs[0].id);
-    if (url) out.push({ elementName: e.elementName, name: e.name, url });
+    out.push({ entityId: e.id, elementName: e.elementName, name: e.name, refId: refs[0].id });
   }
   return out;
 }
 
 /**
- * Seedance 2.0 ссылается на прикреплённые медиа ТОЛЬКО порядковыми токенами
- * @image1…@image9 (по порядку в medias). Именованные @Simon у Higgsfield
- * работают лишь для их библиотеки reference elements — через MCP такие
- * упоминания не резолвятся (красные в UI). Переписываем упоминания сущностей
- * в @imageN перед отправкой; в сохранённой версии промпта остаются имена.
+ * Подмена упоминаний персонажей в уходящем тексте промпта. Именованные @Simon
+ * Higgsfield не резолвит (красные в их UI) — рабочие привязки:
+ *  - <<<element_id>>> — reference element (Seedance И Kling 3.0 Omni);
+ *  - @imageN — порядковый номер прикреплённого медиа (только Seedance, фолбэк).
+ * Сохранённая версия промпта остаётся с читаемыми именами.
  */
-export function rewritePromptRefs(
+export function replaceMentions(
   prompt: string,
-  refs: Array<{ elementName: string; name: string }>,
+  mapping: Array<{ elementName: string; name: string; token: string }>,
   startFrameAttached: boolean,
 ): string {
   let text = prompt;
-  // start-frame занимает первый номер в порядке medias
-  const offset = startFrameAttached ? 1 : 0;
-  refs.forEach((r, i) => {
-    const token = `@image${offset + i + 1}`;
-    for (const raw of [r.elementName, r.name]) {
+  for (const m of mapping) {
+    for (const raw of [m.elementName, m.name]) {
       const bare = stripAt(raw);
       if (!bare) continue;
       // @Simon / @simon (граница слова — не захватываем соседние буквы)
-      text = text.replace(new RegExp(`@${escapeReg(bare)}(?![\\w-])`, "gi"), token);
+      text = text.replace(new RegExp(`@${escapeReg(bare)}(?![\\w-])`, "gi"), m.token);
     }
-  });
+  }
   if (startFrameAttached) {
-    // упоминания стартового кадра из шаблона (@Start / @Image1 уже совпадает)
+    // упоминания стартового кадра из шаблона (@Start; @Image1 уже совпадает)
     text = text.replace(/@start(?![\w-])/gi, "@image1");
   }
   return text;
@@ -363,14 +410,39 @@ export async function submitJobs(
     ? ((await publicUrlForReference(input.startFrameRefId)) ?? undefined)
     : undefined;
 
-  // фото-образы персонажей из библии → в задачу (image_references). Раньше
-  // не прикреплялись — видео шло без учёта внешности @Simon/@Craig (баг заказчика)
+  // Персонажи библии → reference elements Higgsfield (именованные, многоразовые,
+  // работают и с Seedance, и с Kling 3.0 Omni). Фолбэк при сбое создания
+  // элемента — image_references+@imageN (только Seedance).
   const promptParams = JSON.parse(prompt.paramsJson || "{}") as { reference_element_names?: string[] };
-  const refs = await identityRefs(input.shotId, promptParams.reference_element_names ?? []);
-  const characterRefUrls = refs.map((r) => r.url);
-  // Seedance понимает только порядковые @image1..@imageN — подменяем упоминания
-  // сущностей в уходящем тексте (сохранённая версия промпта остаётся с именами)
-  const promptWithTokens = rewritePromptRefs(prompt.text, refs, Boolean(startImageUrl));
+  const refsRaw = await identityRefs(input.shotId, promptParams.reference_element_names ?? []);
+  const resolved: Array<{
+    elementName: string;
+    name: string;
+    media: { id: string; url: string };
+    elementId: string | null;
+  }> = [];
+  for (const r of refsRaw) {
+    const media = await mediaForReference(r.refId).catch(() => null);
+    if (!media) continue;
+    const elementId = await ensureEntityElement(r.entityId, stripAt(r.elementName) || r.name, media);
+    resolved.push({ elementName: r.elementName, name: r.name, media, elementId });
+  }
+
+  /** Промпт и фолбэк-медиа для конкретной модели. */
+  function promptForModel(supportsImageRefs: boolean): { text: string; extraMedias: string[] } {
+    const mapping: Array<{ elementName: string; name: string; token: string }> = [];
+    const extraMedias: string[] = [];
+    let ordinal = startImageUrl ? 2 : 1; // start-frame занимает @image1
+    for (const r of resolved) {
+      if (r.elementId) {
+        mapping.push({ elementName: r.elementName, name: r.name, token: `<<<${r.elementId}>>>` });
+      } else if (supportsImageRefs) {
+        mapping.push({ elementName: r.elementName, name: r.name, token: `@image${ordinal++}` });
+        extraMedias.push(r.media.id);
+      }
+    }
+    return { text: replaceMentions(prompt.text, mapping, Boolean(startImageUrl)), extraMedias };
+  }
 
   const jobs: Array<{ model: string; jobId: string }> = [];
   for (const modelId of input.modelIds) {
@@ -386,22 +458,23 @@ export async function submitJobs(
     const exactCost = provider.preflightCost
       ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: prompt.text, ...params }).catch(() => null)
       : null;
-    // Kling не принимает image_references — ему уходит исходный текст с именами
-    const supportsIdentityRefs = !modelId.startsWith("kling");
+    // image_references (фолбэк без элемента) принимает только Seedance
+    const supportsImageRefs = !modelId.startsWith("kling");
+    const { text: modelPrompt, extraMedias } = promptForModel(supportsImageRefs);
     const sub = await provider.submit({
       model: virtual?.base ?? modelId,
-      prompt: supportsIdentityRefs && refs.length ? promptWithTokens : prompt.text,
+      prompt: modelPrompt,
       negativePrompt: prompt.negativePrompt ?? undefined,
       params,
       startImageUrl,
-      characterRefUrls,
+      characterRefUrls: extraMedias,
     });
     const paramsJson: UrlBundle = {
       ...params,
       quality,
       start_frame_ref: input.startFrameRefId ?? null,
-      // сколько фото-образов персонажей прикреплено к задаче (для карточки)
-      character_refs: modelId.startsWith("kling") ? 0 : characterRefUrls.length,
+      // сколько образов персонажей привязано к задаче (элементы + фолбэк-медиа)
+      character_refs: resolved.filter((r) => r.elementId).length + extraMedias.length,
       estimate: exactCost ?? estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
       estimate_exact: exactCost != null,
       _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
@@ -538,8 +611,10 @@ export async function recalcShotStatus(shotId: string): Promise<void> {
   const gens = await db.select().from(generations).where(eq(generations.shotId, shotId));
   const hasActive = gens.some((g) => g.status === "queued" || g.status === "running");
   const hasDone = gens.some((g) => g.status === "done");
+  // победителей может быть несколько — approved, если есть хотя бы один готовый
+  const hasWinner = gens.some((g) => g.winner && g.status === "done");
   let next: string;
-  if (shot.winnerGenerationId && hasDone) next = "approved";
+  if (hasWinner) next = "approved";
   else if (hasActive) next = "generating";
   else if (hasDone) next = "review";
   else {

@@ -63,6 +63,10 @@ export interface GenerationProvider {
   cancel?(ref: JobRef): Promise<void>;
   /** загрузить файл провайдеру, вернуть публичный URL/идентификатор для параметров */
   uploadFile?(data: Buffer, contentType: string): Promise<string>;
+  /** загрузка с возвратом и id, и https-URL (нужно для reference elements) */
+  uploadMedia?(data: Buffer, contentType: string): Promise<{ id: string; url: string }>;
+  /** создать именованный reference element (персонаж) из загруженного медиа → element_id */
+  createElement?(name: string, mediaId: string, mediaUrl: string): Promise<string>;
   /** байты синхронно сгенерированного результата (Google) по jobId */
   takeResult?(jobId: string): { data: Buffer; mimeType: string } | null;
   /** точная стоимость задачи в кредитах БЕЗ её создания (Higgsfield MCP get_cost) */

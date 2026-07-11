@@ -196,7 +196,7 @@ export default async function ShotPage(ctx: {
         error: g.error ?? "",
         url: g.resultStoragePath ? await getFileUrl(g.resultStoragePath) : null,
         isVideo: Boolean(g.resultStoragePath?.match(/\.(mp4|webm|mov)$/i)),
-        isWinner: shot.winnerGenerationId === g.id,
+        isWinner: g.winner,
         createdAt: g.createdAt.toISOString(),
         promptVersion: g.promptId ? (promptVersionById.get(g.promptId) ?? null) : null,
         credits: g.creditsSpent,

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
-import { setWinner } from "@/lib/actions/generations";
+import { toggleWinner } from "@/lib/actions/generations";
 import { revisePrompt } from "@/lib/actions/prompts";
 import { startGeneration } from "@/lib/actions/generate";
 import { useT } from "@/components/I18nProvider";
@@ -136,14 +136,19 @@ export default function ReviewPlayer({
     [candidates.length],
   );
 
+  // тумблер: победителей может быть несколько, повторное нажатие снимает ★
   const pickWinner = useCallback(() => {
-    if (!current || current.isWinner) return;
+    if (!current) return;
     startTransition(async () => {
-      await setWinner(shotId, current.id);
-      toast(t(`★ Победитель: ${current.model} — шот утверждён`, `★ Winner: ${current.model} — shot approved`));
+      const res = await toggleWinner(current.id);
+      toast(
+        res.winner
+          ? t(`★ Победитель: ${current.model} — попадёт в галерею`, `★ Winner: ${current.model} — goes to the gallery`)
+          : t(`☆ Снято: ${current.model}`, `☆ Unmarked: ${current.model}`),
+      );
       router.refresh();
     });
-  }, [current, router, shotId, t]);
+  }, [current, router, t]);
 
   // hotkeys (spec §5, e.code — независимо от раскладки)
   useEffect(() => {
@@ -521,13 +526,25 @@ export default function ReviewPlayer({
         >
           <span>📷</span>{t("Взять кадр", "Grab frame")}
         </button>
+        <a
+          href={current.url}
+          download
+          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c]"
+        >
+          <span>⬇</span>{t("Скачать", "Download")}
+        </a>
         <button
           onClick={pickWinner}
           disabled={pending}
-          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg bg-success text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-900 disabled:opacity-70"
+          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-semibold uppercase tracking-[0.08em] disabled:opacity-70"
+          style={{
+            background: current.isWinner ? "var(--success)" : "#141414",
+            border: current.isWinner ? "none" : "1px solid #2a2a2a",
+            color: current.isWinner ? "var(--ink-900)" : "#e6e6e6",
+          }}
         >
-          <span>★</span>
-          {current.isWinner ? t("Утверждён", "Approved") : t("Победитель", "Winner")}
+          <span>{current.isWinner ? "★" : "☆"}</span>
+          {current.isWinner ? t("Победитель ✓", "Winner ✓") : t("Победитель", "Winner")}
         </button>
       </div>
 

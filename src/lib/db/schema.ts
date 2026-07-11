@@ -99,6 +99,8 @@ export const generations = pgTable("generations", {
   model: text("model").notNull().default("kling-web"),
   paramsJson: text("params_json").notNull().default("{}"),
   status: text("status").notNull().default("done"), // queued | running | done | failed | nsfw
+  // победителей может быть несколько (замечание заказчика) — флаг на генерации
+  winner: boolean("winner").notNull().default(false),
   providerJobId: text("provider_job_id"),
   resultStoragePath: text("result_storage_path"),
   creditsSpent: integer("credits_spent"),

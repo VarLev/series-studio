@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cancelGeneration, probeGeneration, retryGeneration } from "@/lib/actions/generate";
+import { toggleWinner } from "@/lib/actions/generations";
 import { deleteGeneration } from "@/lib/actions/deletes";
 import ConfirmButton from "@/components/ConfirmButton";
 import { toast } from "@/components/Toaster";
@@ -198,13 +199,42 @@ export default function ResultsStrip({
                     </button>
                   </>
                 ) : (
-                  <ConfirmButton
-                    action={deleteGeneration.bind(null, g.id)}
-                    label="🗑"
-                    confirmLabel={t("Удалить?", "Delete?")}
-                    className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
-                    armedClassName="text-danger"
-                  />
+                  <>
+                    {g.status === "done" && g.url && (
+                      <>
+                        {/* тумблер победителя: их может быть несколько, все идут в галерею */}
+                        <button
+                          disabled={pending}
+                          title={g.isWinner ? t("Снять победителя", "Unmark winner") : t("Пометить победителем", "Mark as winner")}
+                          onClick={() =>
+                            startTransition(async () => {
+                              await toggleWinner(g.id);
+                              router.refresh();
+                            })
+                          }
+                          className="rounded px-1 text-[13px] disabled:opacity-50"
+                          style={{ color: g.isWinner ? "var(--success)" : "var(--text-400)" }}
+                        >
+                          {g.isWinner ? "★" : "☆"}
+                        </button>
+                        <a
+                          href={g.url}
+                          download
+                          title={t("Скачать видео", "Download video")}
+                          className="rounded px-1 text-[12px] text-t400 hover:text-violet-200"
+                        >
+                          ⬇
+                        </a>
+                      </>
+                    )}
+                    <ConfirmButton
+                      action={deleteGeneration.bind(null, g.id)}
+                      label="🗑"
+                      confirmLabel={t("Удалить?", "Delete?")}
+                      className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
+                      armedClassName="text-danger"
+                    />
+                  </>
                 )}
               </div>
             </div>
