@@ -1,5 +1,6 @@
 import type { GenerationProvider } from "./types";
 import { HiggsfieldProvider } from "./higgsfield";
+import { HiggsfieldMcpProvider } from "./higgsfieldMcp";
 import { MockProvider } from "./mock";
 import { GoogleImageProvider } from "./google";
 
@@ -7,9 +8,20 @@ export function providerConfigured(): boolean {
   return Boolean(process.env.HIGGSFIELD_API_KEY) && process.env.HIGGSFIELD_MOCK !== "1";
 }
 
-/** Видео-провайдер (Higgsfield или мок). */
+/** Видео-провайдер (Higgsfield Cloud API или мок) — синхронный выбор без БД. */
 export function getProvider(): GenerationProvider {
   return providerConfigured() ? new HiggsfieldProvider() : new MockProvider();
+}
+
+/**
+ * Видео-провайдер с учётом Higgsfield MCP: если аккаунт подключён (OAuth,
+ * кредиты ПОДПИСКИ) — видео идёт через MCP; иначе Cloud API (отдельный
+ * платный кошелёк) при ключе; иначе мок. Проверка подключения читает БД.
+ */
+export async function pickVideoProvider(): Promise<GenerationProvider> {
+  const { isConnected } = await import("@/lib/higgsfieldMcp");
+  if (await isConnected()) return new HiggsfieldMcpProvider();
+  return getProvider();
 }
 
 /** Google для Nano Banana дешевле и бережёт кредиты Higgsfield под видео.

@@ -12,7 +12,11 @@ import {
   shots,
   videoModels,
 } from "@/lib/db";
-import { getProvider, getImageProvider, providerConfigured, googleImageConfigured } from "@/lib/providers";
+import {
+  getImageProvider,
+  googleImageConfigured,
+  pickVideoProvider,
+} from "@/lib/providers";
 import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
@@ -29,7 +33,7 @@ const VIRTUAL_MODELS: Record<string, { base: string; params: Record<string, stri
 };
 
 export async function refreshCatalog(): Promise<{ count: number; source: string }> {
-  const provider = getProvider();
+  const provider = await pickVideoProvider();
   const imageProvider = getImageProvider();
   const videoModelsList = (await provider.listModels()).filter((m) => m.kind === "video");
   // виртуальные видео-строки (Seedance Fast) — из сида, если провайдер их не отдал
@@ -47,8 +51,9 @@ export async function refreshCatalog(): Promise<{ count: number; source: string 
   const providerByKind = (kind: string) => (kind === "image" ? imageProvider.name : provider.name);
 
   const db = await getDb();
-  // при смене image-провайдера чистим старые image-строки (иначе останутся чужие модели)
-  await db.delete(videoModels).where(eq(videoModels.kind, "image"));
+  // полная пересборка: при смене провайдера (mock → MCP) старые строки каталога
+  // (лишние Kling, чужие image-модели) не должны оставаться в выборе
+  await db.delete(videoModels);
   let sort = 0;
   for (const m of models) {
     await db
@@ -170,9 +175,10 @@ async function publicUrlForReference(refId: string): Promise<string | null> {
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
   if (!ref) return null;
-  const provider = getProvider();
-  // Локальный диск недоступен провайдеру извне — передаём байты через его upload API.
-  if (providerConfigured() && !process.env.SUPABASE_URL && provider.uploadFile) {
+  const provider = await pickVideoProvider();
+  // Локальный диск недоступен провайдеру извне — передаём байты через его upload API
+  // (Cloud API → files/generate-upload-url; MCP → media_upload+confirm → media_id).
+  if (!process.env.SUPABASE_URL && provider.uploadFile) {
     const data = await readFile(ref.storagePath);
     const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
     return provider.uploadFile(data, contentType);
@@ -221,7 +227,7 @@ export interface SubmitInput {
 
 export async function submitJobs(input: SubmitInput): Promise<{ submitted: number }> {
   const db = await getDb();
-  const provider = getProvider();
+  const provider = await pickVideoProvider();
   const [prompt] = await db.select().from(prompts).where(eq(prompts.id, input.promptId));
   if (!prompt) throw new Error("Промпт не найден");
   const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
@@ -463,7 +469,7 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
   updated: number;
 }> {
   const db = await getDb();
-  const videoProvider = getProvider();
+  const videoProvider = await pickVideoProvider();
   const imageProvider = getImageProvider();
   let rows = await db
     .select()

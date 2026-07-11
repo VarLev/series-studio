@@ -205,12 +205,24 @@ export async function disconnect(): Promise<void> {
 async function withMcp<T>(fn: (client: Client) => Promise<T>): Promise<T> {
   const token = await getAccessToken();
   if (!token) throw new Error("Higgsfield не подключён — нажмите «Подключить» в настройках");
-  const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
-    requestInit: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const client = new Client({ name: "series-studio", version: "1.0.0" });
+  // connect ретраим всегда (сеть флапает); сам fn — ответственность вызывающего
+  let client: Client | null = null;
+  let lastErr: unknown;
+  for (let i = 0; i < 3 && !client; i++) {
+    try {
+      const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const c = new Client({ name: "series-studio", version: "1.0.0" });
+      await c.connect(transport);
+      client = c;
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+    }
+  }
+  if (!client) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   try {
-    await client.connect(transport);
     return await fn(client);
   } finally {
     await client.close().catch(() => {});
@@ -240,18 +252,33 @@ export interface McpCallResult {
   isError: boolean;
 }
 
-/** Вызов инструмента; результат MCP — контент-блоки, собираем текст. */
+/**
+ * Вызов инструмента; результат MCP — контент-блоки, собираем текст.
+ * retry — ТОЛЬКО для идемпотентных вызовов (каталог, статус, импорт медиа);
+ * generate_* не ретраим, чтобы не задвоить списание кредитов.
+ */
 export async function callMcpTool(
   name: string,
   args: Record<string, unknown>,
+  opts?: { retry?: boolean },
 ): Promise<McpCallResult> {
-  return withMcp(async (client) => {
-    const res = await client.callTool({ name, arguments: args });
-    const content = Array.isArray(res.content) ? res.content : [];
-    const text = content
-      .map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : ""))
-      .filter(Boolean)
-      .join("\n");
-    return { text, isError: Boolean(res.isError) };
-  });
+  const attempts = opts?.retry ? 3 : 1;
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await withMcp(async (client) => {
+        const res = await client.callTool({ name, arguments: args });
+        const content = Array.isArray(res.content) ? res.content : [];
+        const text = content
+          .map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : ""))
+          .filter(Boolean)
+          .join("\n");
+        return { text, isError: Boolean(res.isError) };
+      });
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
