@@ -16,6 +16,7 @@ import { upscaleReference, editReference } from "@/lib/actions/generate";
 import { deleteReference } from "@/lib/actions/entities";
 import { SectionLabel, EmptyState } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
+import { formatImageCost, type ImageModelMeta } from "@/lib/imageModels";
 import type { ShotListItem } from "./ShotsList";
 
 export interface StoryboardItem {
@@ -47,6 +48,8 @@ export interface StoryboardData {
   pendingCount: number;
   /** Шаблон промпта листа из настроек (tpl_storyboard, с плейсхолдерами). */
   template: string;
+  /** доступные image-модели (Nano Banana Pro/Light или Higgsfield). */
+  imageModels: ImageModelMeta[];
 }
 
 const FRAME_OPTIONS = [4, 9] as const;
@@ -157,9 +160,11 @@ export default function StoryboardTab({
 }) {
   const router = useRouter();
   const t = useT();
+  const en = t("ru", "en") === "en";
   const [scopeId, setScopeId] = useState<string>(""); // "" = вся серия
   const [frames, setFrames] = useState<(typeof FRAME_OPTIONS)[number]>(9);
   const [resolution, setResolution] = useState<(typeof RESOLUTIONS)[number]["id"]>("2k");
+  const [model, setModel] = useState(data.imageModels[0]?.id ?? "");
   const [promptEdited, setPromptEdited] = useState<string | null>(null);
   const [attach, setAttach] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -184,7 +189,8 @@ export default function StoryboardTab({
     [data.template, scope, frames, shots, attachedRefs],
   );
   const prompt = promptEdited ?? autoPrompt;
-  const credits = RESOLUTIONS.find((r) => r.id === resolution)?.credits ?? 6;
+  const activeModel = data.imageModels.find((m) => m.id === model) ?? data.imageModels[0];
+  const cost = activeModel ? formatImageCost(activeModel.id, resolution, en) : "";
 
   function submit() {
     setError("");
@@ -192,6 +198,7 @@ export default function StoryboardTab({
       const res = await generateStoryboard({
         episodeId,
         shotId: scopeId || null,
+        model: activeModel?.id,
         frames,
         resolution,
         prompt,
@@ -200,8 +207,8 @@ export default function StoryboardTab({
       if (res.ok) {
         toast(
           t(
-            `Раскадровка поставлена · ${credits} кр — лист появится здесь и в референсах`,
-            `Storyboard queued · ${credits} cr — the sheet will appear here and in references`,
+            `Раскадровка поставлена · ${cost} — лист появится здесь и в референсах`,
+            `Storyboard queued · ${cost} — the sheet will appear here and in references`,
           ),
         );
         router.refresh();
@@ -344,12 +351,41 @@ export default function StoryboardTab({
                   >
                     {r.label}
                   </span>
-                  <span className="font-mono text-[8.5px] text-t400">{r.credits} кр</span>
+                  <span className="font-mono text-[8.5px] text-t400">
+                    {formatImageCost(activeModel?.id ?? "", r.id, en)}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
         </div>
+
+        {data.imageModels.length > 1 && (
+          <div className="flex flex-col gap-1">
+            <span className="section-label">{t("Модель", "Model")}</span>
+            <div className="flex gap-1.5">
+              {data.imageModels.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setModel(m.id)}
+                  className="flex min-h-10 flex-1 flex-col items-center justify-center rounded-md border px-1"
+                  style={{
+                    borderColor: activeModel?.id === m.id ? "var(--border-strong)" : "var(--border-subtle)",
+                    background: activeModel?.id === m.id ? "var(--ink-600)" : "none",
+                  }}
+                >
+                  <span
+                    className="text-[11px] font-semibold"
+                    style={{ color: activeModel?.id === m.id ? "var(--text-100)" : "var(--text-400)" }}
+                  >
+                    {m.label.replace("Nano Banana ", "")}
+                  </span>
+                  <span className="font-mono text-[8px] text-t400">{en ? m.hintEn : m.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <SectionLabel
@@ -427,7 +463,7 @@ export default function StoryboardTab({
         >
           {pending
             ? t("Отправка…", "Submitting…")
-            : t(`Сгенерировать раскадровку · ${credits} кр`, `Generate storyboard · ${credits} cr`)}
+            : t(`Сгенерировать раскадровку · ${cost}`, `Generate storyboard · ${cost}`)}
         </button>
       </div>
 

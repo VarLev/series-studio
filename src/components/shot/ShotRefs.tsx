@@ -11,6 +11,7 @@ import {
   setShotReferenceRole,
 } from "@/lib/actions/shots";
 import { useT } from "@/components/I18nProvider";
+import type { ImageModelMeta } from "@/lib/imageModels";
 
 interface ShotRef {
   id: string;
@@ -39,6 +40,7 @@ export default function ShotRefs({
   seriesRefs,
   bibleRefs,
   promptText,
+  imageModels = [],
 }: {
   shotId: string;
   episodeId: string;
@@ -46,6 +48,7 @@ export default function ShotRefs({
   seriesRefs: PickerRef[];
   bibleRefs: PickerRef[];
   promptText: string;
+  imageModels?: ImageModelMeta[];
 }) {
   const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -235,6 +238,7 @@ export default function ShotRefs({
         onClose={() => setNanoOpen(false)}
         episodeId={episodeId}
         prefillPrompt={promptText}
+        models={imageModels}
       />
     </>
   );

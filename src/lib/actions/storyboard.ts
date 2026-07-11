@@ -6,11 +6,9 @@ import { getDb, references, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { getCatalog, nextRefToken, submitReferenceJob } from "@/lib/generation";
 import { putFile, readFile } from "@/lib/storage";
+import { imageModelMeta } from "@/lib/imageModels";
 
 type Result = { ok: true } | { ok: false; error: string };
-
-/** Стоимость листа Nano Banana по разрешению (как в NanoBananaSheet). */
-const RESOLUTION_CREDITS: Record<string, number> = { "1k": 4, "2k": 6, "4k": 10 };
 
 /**
  * Лист раскадровки (spec-дополнение заказчика): вертикальное изображение 9:16
@@ -24,6 +22,7 @@ export async function generateStoryboard(input: {
   resolution: "1k" | "2k" | "4k";
   prompt: string;
   refIds: string[];
+  model?: string;
 }): Promise<Result> {
   await requireAuth();
   try {
@@ -32,8 +31,15 @@ export async function generateStoryboard(input: {
       return { ok: false, error: "В сетке может быть 4 или 9 кадров" };
     }
     const catalog = await getCatalog("image");
-    const model = catalog.find((m) => m.id.includes("nano_banana")) ?? catalog[0];
+    const model =
+      (input.model && catalog.find((m) => m.id === input.model)) ??
+      catalog.find((m) => m.id.includes("nano_banana")) ??
+      catalog[0];
     if (!model) return { ok: false, error: "В каталоге нет image-моделей" };
+    const meta = imageModelMeta(model.id);
+    const value = meta?.cost[input.resolution] ?? Object.values(meta?.cost ?? {})[0] ?? 6;
+    const usd = meta?.unit === "usd" ? value : null;
+    const credits = meta?.unit === "usd" ? null : value;
 
     let caption = `Раскадровка ${input.frames === 9 ? "3×3" : "2×2"} · вся серия`;
     if (input.shotId) {
@@ -53,7 +59,8 @@ export async function generateStoryboard(input: {
       resolution: input.resolution,
       sourceRefIds: input.refIds.length ? input.refIds : undefined,
       sourceTag: "storyboard",
-      credits: RESOLUTION_CREDITS[input.resolution] ?? 6,
+      credits,
+      usd,
       sbGrid: input.frames,
       sbShotId: input.shotId ?? null,
       caption,

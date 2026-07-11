@@ -66,6 +66,17 @@ export default async function CostsPage() {
     .filter((g) => g.createdAt >= monthStart)
     .reduce((s, g) => s + (g.creditsSpent ?? 0), 0);
   const monthUsd = llmUsd(usage.filter((u) => u.createdAt >= monthStart));
+  // Nano Banana через Google — оплата в $ (хранится в paramsJson.usd)
+  const googleUsd = (rows: typeof gens) =>
+    rows.reduce((sum, g) => {
+      try {
+        return sum + (Number((JSON.parse(g.paramsJson || "{}") as { usd?: number }).usd) || 0);
+      } catch {
+        return sum;
+      }
+    }, 0);
+  const totalGoogleUsd = googleUsd(gens);
+  const monthGoogleUsd = googleUsd(gens.filter((g) => g.createdAt >= monthStart));
   const maxModelCredits = Math.max(
     1,
     ...perEpisode.flatMap((e) => [...e.byModel.values()]),
@@ -113,7 +124,19 @@ export default async function CostsPage() {
             {t("За текущий месяц (весь сериал):", "This month (whole series):")}{" "}
             <span className="text-t100">{monthCredits} {t("кр", "cr")}</span> +{" "}
             <span className="text-t100">${monthUsd.toFixed(2)} LLM</span>
+            {monthGoogleUsd > 0 && (
+              <>
+                {" "}
+                + <span className="text-t100">${monthGoogleUsd.toFixed(2)} Nano&nbsp;Banana</span>
+              </>
+            )}
           </div>
+          {totalGoogleUsd > 0 && (
+            <div className="rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3.5 py-2.5 font-mono text-[11px] text-t300">
+              {t("Nano Banana (Google), всего:", "Nano Banana (Google), total:")}{" "}
+              <span className="text-t100">${totalGoogleUsd.toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         {/* M7 — по эпизодам */}

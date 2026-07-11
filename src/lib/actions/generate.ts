@@ -17,6 +17,22 @@ import {
   type SubmitInput,
 } from "@/lib/generation";
 import { getProvider } from "@/lib/providers";
+import { imageModelMeta } from "@/lib/imageModels";
+
+/** Стоимость картинки: $ для Google, кредиты для Higgsfield. */
+function imageCost(modelId: string, resolution: string): { usd: number | null; credits: number | null } {
+  const meta = imageModelMeta(modelId);
+  const value = meta?.cost[resolution] ?? Object.values(meta?.cost ?? {})[0] ?? 0;
+  return meta?.unit === "usd" ? { usd: value, credits: null } : { usd: null, credits: value };
+}
+
+/** Модель картинок по умолчанию — первая доступная в каталоге (Pro при Google). */
+async function defaultImageModel(preferred?: string): Promise<string> {
+  const catalog = await getCatalog("image");
+  if (preferred && catalog.some((m) => m.id === preferred)) return preferred;
+  const nano = catalog.find((m) => m.id.includes("nano_banana")) ?? catalog[0];
+  return nano?.id ?? "nano_banana_pro";
+}
 
 type Result<T = undefined> =
   | { ok: true; data?: T; needsConfirm?: false }
@@ -63,22 +79,22 @@ export async function startNanoBanana(input: {
   prompt: string;
   aspectRatio: string;
   resolution: "1k" | "2k" | "4k";
+  model?: string;
 }): Promise<Result> {
   await requireAuth();
   try {
     if (!input.prompt.trim()) return { ok: false, error: "Опишите изображение" };
-    const catalog = await getCatalog("image");
-    const model = catalog.find((m) => m.id.includes("nano_banana")) ?? catalog[0];
-    if (!model) return { ok: false, error: "В каталоге нет image-моделей" };
-    const cost = { "1k": 4, "2k": 6, "4k": 10 }[input.resolution];
+    const modelId = await defaultImageModel(input.model);
+    const { usd, credits } = imageCost(modelId, input.resolution);
     await submitReferenceJob({
       episodeId: input.episodeId,
-      model: model.id,
+      model: modelId,
       prompt: input.prompt,
       aspectRatio: input.aspectRatio,
       resolution: input.resolution,
       sourceTag: "nano-banana",
-      credits: cost,
+      credits,
+      usd,
     });
     revalidatePath(`/episodes/${input.episodeId}/refs`);
     revalidatePath("/queue");
@@ -95,19 +111,19 @@ export async function upscaleReference(refId: string): Promise<Result> {
     const db = await getDb();
     const [ref] = await db.select().from(references).where(eq(references.id, refId));
     if (!ref?.episodeId) return { ok: false, error: "Референс не найден" };
-    const catalog = await getCatalog("image");
-    const model = catalog.find((m) => m.id.includes("nano_banana")) ?? catalog[0];
-    if (!model) return { ok: false, error: "В каталоге нет image-моделей" };
+    const modelId = await defaultImageModel();
+    const { usd, credits } = imageCost(modelId, "4k");
     await submitReferenceJob({
       episodeId: ref.episodeId,
-      model: model.id,
+      model: modelId,
       prompt:
         "Upscale this exact image 2x. Preserve composition, subjects, lighting and color grading precisely. Enhance fine detail and sharpness only.",
       aspectRatio: aspectOf(ref.width, ref.height),
       resolution: "4k",
       sourceRefIds: [refId],
       sourceTag: "upscale",
-      credits: 4,
+      credits,
+      usd,
     });
     revalidatePath(`/episodes/${ref.episodeId}/refs`);
     revalidatePath("/queue");
@@ -129,18 +145,18 @@ export async function editReference(input: {
     const [ref] = await db.select().from(references).where(eq(references.id, input.refId));
     if (!ref?.episodeId) return { ok: false, error: "Референс не найден" };
     if (!input.prompt.trim()) return { ok: false, error: "Опишите правку" };
-    const catalog = await getCatalog("image");
-    const model = catalog.find((m) => m.id.includes("nano_banana")) ?? catalog[0];
-    if (!model) return { ok: false, error: "В каталоге нет image-моделей" };
+    const modelId = await defaultImageModel();
+    const { usd, credits } = imageCost(modelId, "2k");
     await submitReferenceJob({
       episodeId: ref.episodeId,
-      model: model.id,
+      model: modelId,
       prompt: input.prompt,
       aspectRatio: aspectOf(ref.width, ref.height),
       resolution: "2k",
       sourceRefIds: [input.refId, ...input.extraRefIds],
       sourceTag: "edit",
-      credits: 6,
+      credits,
+      usd,
     });
     revalidatePath(`/episodes/${ref.episodeId}/refs`);
     revalidatePath("/queue");

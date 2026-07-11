@@ -12,10 +12,11 @@ import {
   shots,
   videoModels,
 } from "@/lib/db";
-import { getProvider, providerConfigured } from "@/lib/providers";
+import { getProvider, getImageProvider, providerConfigured, googleImageConfigured } from "@/lib/providers";
 import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
+import { imageModelMeta, type ImageModelMeta } from "@/lib/imageModels";
 
 // ---------- Каталог моделей (TZ §0.2) ----------
 
@@ -29,14 +30,25 @@ const VIRTUAL_MODELS: Record<string, { base: string; params: Record<string, stri
 
 export async function refreshCatalog(): Promise<{ count: number; source: string }> {
   const provider = getProvider();
-  const models = await provider.listModels();
-  // живой каталог провайдера не знает про виртуальные строки — добавляем их из сида
+  const imageProvider = getImageProvider();
+  const videoModelsList = (await provider.listModels()).filter((m) => m.kind === "video");
+  // виртуальные видео-строки (Seedance Fast) — из сида, если провайдер их не отдал
   for (const seed of CATALOG_SEED) {
-    if (VIRTUAL_MODELS[seed.id] && !models.some((m) => m.id === seed.id)) {
-      models.push({ ...seed });
+    if (VIRTUAL_MODELS[seed.id] && !videoModelsList.some((m) => m.id === seed.id)) {
+      videoModelsList.push({ ...seed });
     }
   }
+  // image-модели берём у image-провайдера (Google при наличии ключа, иначе Higgsfield/мок)
+  const imageModelsList =
+    imageProvider.name === provider.name
+      ? (await provider.listModels()).filter((m) => m.kind === "image")
+      : (await imageProvider.listModels()).filter((m) => m.kind === "image");
+  const models = [...videoModelsList, ...imageModelsList];
+  const providerByKind = (kind: string) => (kind === "image" ? imageProvider.name : provider.name);
+
   const db = await getDb();
+  // при смене image-провайдера чистим старые image-строки (иначе останутся чужие модели)
+  await db.delete(videoModels).where(eq(videoModels.kind, "image"));
   let sort = 0;
   for (const m of models) {
     await db
@@ -45,7 +57,7 @@ export async function refreshCatalog(): Promise<{ count: number; source: string 
         id: m.id,
         name: m.name,
         kind: m.kind,
-        provider: provider.name,
+        provider: providerByKind(m.kind),
         paramsJson: JSON.stringify(m.params ?? {}),
         credits: m.credits ?? null,
         sortIndex: sort++,
@@ -56,13 +68,14 @@ export async function refreshCatalog(): Promise<{ count: number; source: string 
         set: {
           name: m.name,
           kind: m.kind,
+          provider: providerByKind(m.kind),
           paramsJson: JSON.stringify(m.params ?? {}),
           credits: m.credits ?? null,
           fetchedAt: new Date(),
         },
       });
   }
-  return { count: models.length, source: provider.name };
+  return { count: models.length, source: `${provider.name}+${imageProvider.name}` };
 }
 
 export interface CatalogModel {
@@ -95,7 +108,11 @@ export async function getCatalog(kind?: "video" | "image"): Promise<CatalogModel
     .orderBy(asc(videoModels.sortIndex));
   // пустой каталог или каталог, засеянный до появления виртуальных моделей → пересеять
   const missingVirtual = Object.keys(VIRTUAL_MODELS).some((id) => !rows.some((r) => r.id === id));
-  if (!rows.length || missingVirtual) {
+  // image-провайдер сменился (появился/убрали GEMINI_API_KEY) → пересеять image-строки
+  const google = googleImageConfigured();
+  const hasGoogleRows = rows.some((r) => r.id === "nano_banana_pro");
+  const imageProviderChanged = google !== hasGoogleRows;
+  if (!rows.length || missingVirtual || imageProviderChanged) {
     await refreshCatalog();
     rows = await db
       .select()
@@ -112,6 +129,14 @@ export async function getCatalog(kind?: "video" | "image"): Promise<CatalogModel
       credits: r.credits,
       qualities: r.kind === "video" ? qualitiesFor(r.id, r.paramsJson) : [],
     }));
+}
+
+/** Доступные image-модели для пикеров (клиент-безопасные метаданные). */
+export async function availableImageModels(): Promise<ImageModelMeta[]> {
+  const catalog = await getCatalog("image");
+  return catalog
+    .map((c) => imageModelMeta(c.id))
+    .filter((m): m is ImageModelMeta => Boolean(m));
 }
 
 // ---------- Оценка кредитов (spec §3.1) ----------
@@ -153,6 +178,16 @@ async function publicUrlForReference(refId: string): Promise<string | null> {
     return provider.uploadFile(data, contentType);
   }
   return getFileUrl(ref.storagePath);
+}
+
+/** Байты референса inline (base64) — для Google Gemini (inline_data). */
+async function referenceImageBytes(refId: string): Promise<{ data: string; mimeType: string } | null> {
+  const db = await getDb();
+  const [ref] = await db.select().from(references).where(eq(references.id, refId));
+  if (!ref) return null;
+  const data = await readFile(ref.storagePath);
+  const mimeType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+  return { data: data.toString("base64"), mimeType };
 }
 
 /** Провайдер-специфичная форма параметров видео-задачи. */
@@ -250,6 +285,8 @@ export interface ReferenceJobInput {
   sourceRefIds?: string[]; // референсы-входы (правка / upscale)
   sourceTag: "nano-banana" | "upscale" | "edit" | "storyboard";
   credits?: number | null;
+  /** цена в $ для Google-провайдера (Higgsfield считает в кредитах). */
+  usd?: number | null;
   /** Лист раскадровки: сколько кадров в сетке (4 | 9) и к какому шоту относится. */
   sbGrid?: number;
   sbShotId?: string | null;
@@ -258,34 +295,47 @@ export interface ReferenceJobInput {
 
 export async function submitReferenceJob(input: ReferenceJobInput): Promise<void> {
   const db = await getDb();
-  const provider = getProvider();
-  const referenceUrls: string[] = [];
-  for (const refId of input.sourceRefIds ?? []) {
-    const url = await publicUrlForReference(refId);
-    if (url) referenceUrls.push(url);
-  }
+  const provider = getImageProvider();
+  const google = provider.name === "google";
   const params: Record<string, string | number> = {
     aspect_ratio: input.aspectRatio,
     resolution: input.resolution,
   };
+
+  // референсы: Google получает байты inline, Higgsfield — публичные URL/upload
+  const referenceUrls: string[] = [];
+  const referenceImages: Array<{ data: string; mimeType: string }> = [];
+  for (const refId of input.sourceRefIds ?? []) {
+    if (google) {
+      const bytes = await referenceImageBytes(refId);
+      if (bytes) referenceImages.push(bytes);
+    } else {
+      const url = await publicUrlForReference(refId);
+      if (url) referenceUrls.push(url);
+    }
+  }
+
   const sub = await provider.submit({
     model: input.model,
     prompt: input.prompt,
     params,
     referenceUrls: referenceUrls.length ? referenceUrls : undefined,
+    referenceImages: referenceImages.length ? referenceImages : undefined,
   });
   const paramsJson: UrlBundle = {
     ...params,
     source_tag: input.sourceTag,
     source_refs: input.sourceRefIds ?? [],
     estimate: input.credits ?? null,
+    usd: google ? input.usd ?? null : null,
     sb_grid: input.sbGrid ?? null,
     sb_shot_id: input.sbShotId ?? null,
     caption: input.caption ?? null,
     _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
   };
+  const genId = crypto.randomUUID();
   await db.insert(generations).values({
-    id: crypto.randomUUID(),
+    id: genId,
     shotId: null,
     episodeId: input.episodeId,
     kind: "reference",
@@ -297,6 +347,10 @@ export async function submitReferenceJob(input: ReferenceJobInput): Promise<void
     providerJobId: sub.jobId,
     source: "api",
   });
+  // Google синхронный — результат уже готов, приземляем в этом же запросе
+  if (provider.synchronous) {
+    await pollActiveGenerations([genId]);
+  }
 }
 
 // ---------- Референсы серии: токены и размеры ----------
@@ -366,6 +420,13 @@ async function landReferenceResult(
   let ext = ".jpg";
   if (resultUrl === "mock://sample-image") {
     data = await readMockImage();
+  } else if (resultUrl.startsWith("google://")) {
+    // синхронный результат Google — байты лежат у провайдера в памяти процесса
+    const provider = getImageProvider();
+    const taken = provider.takeResult?.(resultUrl.replace("google://", ""));
+    if (!taken) throw new Error("Результат Google утерян (сервер перезапускался)");
+    data = taken.data;
+    ext = taken.mimeType.includes("png") ? ".png" : ".jpg";
   } else {
     const res = await fetch(resultUrl);
     if (!res.ok) throw new Error(`Не удалось скачать референс (${res.status})`);
@@ -402,7 +463,8 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
   updated: number;
 }> {
   const db = await getDb();
-  const provider = getProvider();
+  const videoProvider = getProvider();
+  const imageProvider = getImageProvider();
   let rows = await db
     .select()
     .from(generations)
@@ -411,6 +473,8 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
 
   let updated = 0;
   for (const gen of rows) {
+    // image-задачи опрашивает image-провайдер (Google/Higgsfield), видео — видео-провайдер
+    const provider = gen.kind === "reference" ? imageProvider : videoProvider;
     if (!gen.providerJobId || gen.provider !== provider.name) continue;
     const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
     try {

@@ -7,12 +7,13 @@ import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { startNanoBanana } from "@/lib/actions/generate";
 import { useT } from "@/components/I18nProvider";
+import { formatImageCost, type ImageModelMeta } from "@/lib/imageModels";
 
 const RATIOS = ["16:9", "9:16", "1:1"] as const;
 const RESOLUTIONS = [
-  { id: "1k", label: "1K", credits: 4 },
-  { id: "2k", label: "2K", credits: 6 },
-  { id: "4k", label: "4K", credits: 10 },
+  { id: "1k", label: "1K" },
+  { id: "2k", label: "2K" },
+  { id: "4k", label: "4K" },
 ] as const;
 
 export default function NanoBananaSheet({
@@ -20,20 +21,25 @@ export default function NanoBananaSheet({
   onClose,
   episodeId,
   prefillPrompt = "",
+  models = [],
 }: {
   open: boolean;
   onClose: () => void;
   episodeId: string;
   prefillPrompt?: string;
+  models?: ImageModelMeta[];
 }) {
   const router = useRouter();
   const t = useT();
+  const en = t("ru", "en") === "en";
   const [prompt, setPrompt] = useState(prefillPrompt);
   const [ratio, setRatio] = useState<(typeof RATIOS)[number]>("16:9");
   const [resolution, setResolution] = useState<(typeof RESOLUTIONS)[number]["id"]>("2k");
+  const [model, setModel] = useState(models[0]?.id ?? "");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
-  const credits = RESOLUTIONS.find((r) => r.id === resolution)?.credits ?? 6;
+  const activeModel = models.find((m) => m.id === model) ?? models[0];
+  const cost = activeModel ? formatImageCost(activeModel.id, resolution, en) : "";
 
   // подставить промпт группы при открытии из шота
   const [prevPrefill, setPrevPrefill] = useState(prefillPrompt);
@@ -50,12 +56,13 @@ export default function NanoBananaSheet({
         prompt: prompt.trim(),
         aspectRatio: ratio,
         resolution,
+        model: activeModel?.id,
       });
       if (res.ok) {
         toast(
           t(
-            `Nano Banana поставлен · ${credits} кр — референс появится в серии`,
-            `Nano Banana queued · ${credits} cr — the reference will appear in the episode`,
+            `Nano Banana поставлен · ${cost} — референс появится в серии`,
+            `Nano Banana queued · ${cost} — the reference will appear in the episode`,
           ),
         );
         onClose();
@@ -74,6 +81,32 @@ export default function NanoBananaSheet({
         placeholder={t("Опишите изображение (на английском — точнее)…", "Describe the image (English works best)…")}
         className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t100 outline-none focus:border-[var(--border-strong)]"
       />
+      {models.length > 1 && (
+        <>
+          <div className="section-label mb-2 mt-3.5">{t("Модель", "Model")}</div>
+          <div className="flex gap-1.5">
+            {models.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setModel(m.id)}
+                className="flex min-h-11 flex-1 flex-col items-center justify-center rounded-md border px-1"
+                style={{
+                  borderColor: activeModel?.id === m.id ? "var(--border-strong)" : "var(--border-subtle)",
+                  background: activeModel?.id === m.id ? "var(--ink-600)" : "none",
+                }}
+              >
+                <span
+                  className="text-[11px] font-semibold"
+                  style={{ color: activeModel?.id === m.id ? "var(--text-100)" : "var(--text-400)" }}
+                >
+                  {m.label.replace("Nano Banana ", "")}
+                </span>
+                <span className="font-mono text-[8.5px] text-t400">{en ? m.hintEn : m.hint}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <div className="section-label mb-2 mt-3.5">{t("Соотношение", "Aspect ratio")}</div>
       <div className="flex gap-1.5">
         {RATIOS.map((r) => (
@@ -109,7 +142,9 @@ export default function NanoBananaSheet({
             >
               {r.label}
             </span>
-            <span className="font-mono text-[9px] text-t400">{r.credits} {t("кр", "cr")}</span>
+            <span className="font-mono text-[9px] text-t400">
+              {formatImageCost(activeModel?.id ?? "", r.id, en)}
+            </span>
           </button>
         ))}
       </div>
@@ -120,7 +155,7 @@ export default function NanoBananaSheet({
         className="mt-4 min-h-[52px] w-full rounded-lg bg-violet-500 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-50"
         style={{ boxShadow: "var(--glow-violet-sm)" }}
       >
-        {pending ? t("Отправка…", "Submitting…") : t(`Нарисовать · ${credits} кр`, `Draw · ${credits} cr`)}
+        {pending ? t("Отправка…", "Submitting…") : t(`Нарисовать · ${cost}`, `Draw · ${cost}`)}
       </button>
     </Sheet>
   );

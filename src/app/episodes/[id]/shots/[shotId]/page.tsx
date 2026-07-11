@@ -14,7 +14,7 @@ import {
 } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
-import { getCatalog } from "@/lib/generation";
+import { getCatalog, availableImageModels } from "@/lib/generation";
 import { getTechniquesByIds } from "@/lib/director";
 import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
@@ -340,6 +340,7 @@ export default async function ShotPage(ctx: {
               seriesRefs={seriesRefs}
               bibleRefs={bibleRefs}
               promptText={current?.text ?? shot.actionMd}
+              imageModels={await availableImageModels()}
             />
           </div>
 

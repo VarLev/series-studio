@@ -16,6 +16,7 @@ import { deleteAllSeriesRefs } from "@/lib/actions/deletes";
 import { EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import { useT } from "@/components/I18nProvider";
+import type { ImageModelMeta } from "@/lib/imageModels";
 
 export interface SeriesRef {
   id: string;
@@ -69,10 +70,12 @@ export default function SeriesRefs({
   episodeId,
   refs,
   pendingJobs,
+  imageModels = [],
 }: {
   episodeId: string;
   refs: SeriesRef[];
   pendingJobs: Array<{ id: string; model: string }>;
+  imageModels?: ImageModelMeta[];
 }) {
   const router = useRouter();
   const t = useT();
@@ -369,6 +372,7 @@ export default function SeriesRefs({
         open={nanoOpen}
         onClose={() => setNanoOpen(false)}
         episodeId={episodeId}
+        models={imageModels}
       />
     </div>
   );

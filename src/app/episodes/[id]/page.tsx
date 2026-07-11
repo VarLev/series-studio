@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, references, shots, shotEntities, entities } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
+import { availableImageModels } from "@/lib/generation";
 import { getFileUrl } from "@/lib/storage";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
@@ -150,6 +151,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     attachRefs,
     pendingCount: pendingStoryboards,
     template: settings.tpl_storyboard,
+    imageModels: await availableImageModels(),
   };
 
   const epNumber = String(episode.number).padStart(2, "0");

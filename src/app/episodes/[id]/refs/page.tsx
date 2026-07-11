@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, references } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
+import { availableImageModels } from "@/lib/generation";
 import { ScreenHeader } from "@/components/ui";
 import { getT } from "@/lib/i18n-server";
 import QueuePill from "@/components/QueuePill";
@@ -62,6 +63,7 @@ export default async function RefsPage(ctx: { params: Promise<{ id: string }> })
         episodeId={id}
         refs={refs}
         pendingJobs={activeJobs.map((g) => ({ id: g.id, model: g.model }))}
+        imageModels={await availableImageModels()}
       />
     </main>
   );
