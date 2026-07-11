@@ -12,7 +12,7 @@ import {
   shotEntities,
 } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
-import { TIMING_RULES } from "@/lib/templates";
+import { TIMING_RULES, LANGUAGE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { runJson } from "./client";
 import {
@@ -99,8 +99,7 @@ export async function llmBreakdown(
         "группы в секундах. Время шотов (shots[].time) отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот " +
         "каждой группы начинается с 00:00. Время группы (time) — сквозное по эпизоду. " +
         "Все правила задания (хронометраж, реплики, планы) действуют.\n" +
-        "Если персонаж или локация совпадает с сущностью из библии выше — пиши в characters/location " +
-        "ТОЧНОЕ имя (name) этой сущности, чтобы приложение связало их автоматически.",
+        `${LANGUAGE_RULES}`,
       user,
     },
     breakdownSchema,
@@ -143,7 +142,7 @@ export async function llmReviseGroup(input: {
         "Ты правишь ОДНУ группу шотов раскадровки вертикального сериала (группа = отдельное " +
         "AI-видео не длиннее 15 секунд). Перепиши группу с учётом замечания пользователя, " +
         "сохранив рабочие части и не выходя за события сюжета.\n" +
-        `${TIMING_RULES}\n` +
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n` +
         "Верни ТОЛЬКО JSON без пояснений:\n" +
         '{"title":"название группы","duration_sec":14,' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
@@ -277,6 +276,10 @@ export async function llmShotPrompt(shotId: string, targetModel: string): Promis
         (isKling
           ? "Для Kling промпт начинается с описания камеры/ракурса (движение камеры — первым предложением). "
           : "") +
+        "Весь промпт — ТОЛЬКО на английском, независимо от языка исходного материала. Все имена " +
+        "собственные (персонажи, локации, бренды) — латиницей по-английски; для сущностей библии " +
+        "используй их element_name. Реплики в DIALOGUE LOCK — на английском (переведи, если в " +
+        "исходнике они на другом языке).\n" +
         "Используй element_name сущностей как визуальные якоря. В reference_element_names перечисли " +
         "element_name сущностей, чьи референсы нужно прикрепить к задаче.\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
