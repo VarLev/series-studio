@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Golos_Text, Cinzel, JetBrains_Mono, EB_Garamond } from "next/font/google";
+import { Golos_Text, Cinzel, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import SwRegister from "@/components/SwRegister";
 import Toaster from "@/components/Toaster";
@@ -27,11 +27,6 @@ const jetbrains = JetBrains_Mono({
   subsets: ["latin", "cyrillic"],
   display: "swap",
 });
-const garamond = EB_Garamond({
-  variable: "--font-garamond",
-  subsets: ["latin", "cyrillic"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Series Studio",
@@ -52,7 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={settings.ui_lang} data-theme={settings.ui_theme}>
       <body
-        className={`${golos.variable} ${cinzel.variable} ${jetbrains.variable} ${garamond.variable} antialiased`}
+        className={`${golos.variable} ${cinzel.variable} ${jetbrains.variable} antialiased`}
       >
         <I18nProvider lang={settings.ui_lang}>
           <AppNav />

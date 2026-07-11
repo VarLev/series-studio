@@ -102,9 +102,8 @@ html[data-theme="vault"] {
   --glow-violet-md: 0 0 28px rgba(217, 155, 60, 0.4);
   --focus-ring: 0 0 0 2px var(--ink-900), 0 0 0 4px var(--violet-400);
 
-  /* моноширинные заголовки и системный текст вместо серифов */
+  /* моноширинные заголовки вместо декоративных */
   --font-cinzel: var(--font-jetbrains);
-  --font-garamond: var(--font-golos);
 }
 html[data-theme="vault"] ::selection {
   background: rgba(217, 155, 60, 0.35);
@@ -150,10 +149,12 @@ html[data-theme="vault"] .eyebrow {
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-success: var(--success);
+  /* никаких serif-фолбэков: иначе кириллица (Cinzel — только латиница) и
+     несработавшая загрузка сваливаются в Times New Roman */
   --font-ui: var(--font-golos), system-ui, sans-serif;
-  --font-display: var(--font-cinzel), serif;
+  --font-display: var(--font-cinzel), var(--font-golos), system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, monospace;
-  --font-body: var(--font-garamond), Georgia, serif;
+  --font-body: var(--font-golos), system-ui, sans-serif;
 }
 
 html {
