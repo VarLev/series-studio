@@ -2,9 +2,10 @@
  * HiggsfieldProvider — Cloud API (platform.higgsfield.ai).
  *
  * По живой документации (июль 2026, TZ §0.1):
- *  - auth: заголовок `Authorization: Key <HF_API_KEY>` (при наличии секрета — `key:secret`,
- *    формат HF_KEY из официального SDK);
- *  - submit: POST {BASE}/{model_id} c JSON-аргументами → {request_id, status_url, cancel_url};
+ *  - auth: заголовок `Authorization: Key <key>` (ключ HF_KEY выдаётся в формате
+ *    `key:secret` — кладётся в HIGGSFIELD_API_KEY целиком; подтверждено исходниками SDK);
+ *  - submit: POST {BASE}/applications/{application} c JSON-аргументами →
+ *    {request_id, status_url, cancel_url}; application = namespaced id модели;
  *  - status: GET status_url → status: Queued|InProgress|Completed|Failed|NSFW|Cancelled;
  *  - cancel: POST cancel_url;
  *  - файлы: POST {BASE}/files/generate-upload-url → {upload_url, public_url}, затем PUT байтов;
@@ -231,7 +232,9 @@ export class HiggsfieldProvider implements GenerationProvider {
     if (job.referenceUrls?.length) args.image_references = job.referenceUrls;
     if (job.webhookUrl) args.webhook_url = job.webhookUrl;
 
-    const res = await hfFetch(`${BASE_URL}/${job.model}`, {
+    // submit: POST /applications/{application}; application = namespaced id
+    // модели (напр. bytedance/seedance/...), приходит из каталога video_models
+    const res = await hfFetch(`${BASE_URL}/applications/${job.model}`, {
       method: "POST",
       body: JSON.stringify(args),
     });
