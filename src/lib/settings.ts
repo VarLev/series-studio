@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, settings } from "./db";
+import { DEFAULT_STORYBOARD_TEMPLATE, DEFAULT_VIDEO_TEMPLATE } from "./templates";
 
 export const DEFAULT_SETTINGS = {
   llm_model: "claude-sonnet-4-6",
@@ -14,6 +15,9 @@ export const DEFAULT_SETTINGS = {
   target_models: "kling3_0,seedance_2_0",
   llm_price_in: "3", // $ за 1М входных токенов (конфигурируемый тариф, TZ M7)
   llm_price_out: "15", // $ за 1М выходных токенов
+  // шаблоны промптов (редактируются в «Настройках»)
+  tpl_storyboard: DEFAULT_STORYBOARD_TEMPLATE,
+  tpl_video: DEFAULT_VIDEO_TEMPLATE,
 } as const;
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;

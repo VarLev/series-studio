@@ -15,6 +15,7 @@ import {
 import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog } from "@/lib/generation";
+import { getTechniquesByIds } from "@/lib/director";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import { deleteAllGenerations } from "@/lib/actions/deletes";
@@ -193,8 +194,24 @@ export default async function ShotPage(ctx: {
   ];
   const current = versions[0] ?? null;
   const currentParams = versionRows[0]
-    ? (JSON.parse(versionRows[0].paramsJson || "{}") as { aspect_ratio?: string; duration?: number })
+    ? (JSON.parse(versionRows[0].paramsJson || "{}") as {
+        aspect_ratio?: string;
+        duration?: number;
+        techniques?: string[];
+      })
     : {};
+  // режиссёрские приёмы, использованные фабрикой в текущей версии (бейджи 🎥)
+  const usedTechniques = (await getTechniquesByIds(currentParams.techniques ?? [])).map((t) => ({
+    id: t.id,
+    title: t.title,
+    category: t.category,
+    camera: t.camera,
+    lens: t.lens,
+    lighting: t.lighting,
+    tags: t.tags,
+    prompt: t.prompt,
+    negative: t.negative,
+  }));
 
   // start-frame кандидаты: рефы шота (start_frame первым) + референсы серии
   const startFrames = [
@@ -319,6 +336,7 @@ export default async function ShotPage(ctx: {
             versions={versions}
             tokens={tokens}
             targetModels={catalog.map((m) => m.id)}
+            usedTechniques={usedTechniques}
           />
 
           <div className="flex flex-col gap-1.5">

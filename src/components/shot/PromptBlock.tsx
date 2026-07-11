@@ -16,18 +16,32 @@ export interface PromptVersion {
   createdAt: string;
 }
 
+export interface UsedTechnique {
+  id: string;
+  title: string;
+  category: string;
+  camera: string;
+  lens: string;
+  lighting: string;
+  tags: string;
+  prompt: string;
+  negative: string;
+}
+
 export default function PromptBlock({
   shotId,
   episodeId,
   versions,
   tokens,
   targetModels,
+  usedTechniques = [],
 }: {
   shotId: string;
   episodeId: string;
   versions: PromptVersion[];
   tokens: string[];
   targetModels: string[];
+  usedTechniques?: UsedTechnique[];
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
@@ -36,6 +50,7 @@ export default function PromptBlock({
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const [copied, setCopied] = useState(false);
+  const [technique, setTechnique] = useState<UsedTechnique | null>(null);
   const current = versions[0] ?? null;
 
   function onGenerate() {
@@ -87,6 +102,7 @@ export default function PromptBlock({
       </div>
 
       {current ? (
+        <>
         <button
           onClick={() => router.push(`/episodes/${episodeId}/shots/${shotId}/editor`)}
           className="block w-full text-left"
@@ -108,6 +124,25 @@ export default function PromptBlock({
             </div>
           )}
         </button>
+        {/* режиссёрские приёмы, вплетённые фабрикой в промпт (тап — открыть приём) */}
+        {usedTechniques.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 py-2">
+            <span className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-t400">
+              приёмы:
+            </span>
+            {usedTechniques.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTechnique(t)}
+                title={t.title}
+                className="flex h-7 w-10 items-center justify-center rounded-md border border-[var(--border-default)] bg-ink-600 text-[12px] hover:border-[var(--border-strong)] hover:bg-ink-500"
+              >
+                🎥
+              </button>
+            ))}
+          </div>
+        )}
+        </>
       ) : (
         <div className="flex flex-col items-start gap-2.5 p-4">
           <div className="text-[12px] leading-relaxed text-t300">
@@ -138,6 +173,39 @@ export default function PromptBlock({
           {error && <div className="text-[11px] text-danger">{error}</div>}
         </div>
       )}
+
+      {/* Окно режиссёрского приёма */}
+      <Sheet open={Boolean(technique)} onClose={() => setTechnique(null)} title={technique?.title ?? ""}>
+        {technique && (
+          <div className="flex flex-col gap-3 pb-2">
+            <div className="flex flex-wrap gap-1.5">
+              {[technique.category, technique.camera, technique.lens, technique.lighting]
+                .filter(Boolean)
+                .map((m) => (
+                  <span
+                    key={m}
+                    className="rounded border border-[var(--border-subtle)] bg-ink-600 px-2 py-1 font-mono text-[9.5px] text-t300"
+                  >
+                    {m}
+                  </span>
+                ))}
+            </div>
+            {technique.tags && (
+              <div className="font-mono text-[10px] text-t400">
+                #{technique.tags.split(",").map((t) => t.trim()).join(" #")}
+              </div>
+            )}
+            <div className="whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3 font-mono text-[11px] leading-relaxed text-t200">
+              {technique.prompt}
+            </div>
+            {technique.negative && (
+              <div className="whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3 font-mono text-[10px] leading-relaxed text-t400">
+                negative: {technique.negative}
+              </div>
+            )}
+          </div>
+        )}
+      </Sheet>
 
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="История версий">
         <div className="flex flex-col gap-2.5 pb-2">

@@ -40,6 +40,7 @@ async function insertVersion(
     paramsJson: JSON.stringify({
       ...data.params,
       reference_element_names: data.reference_element_names,
+      techniques: data.used_technique_ids,
     }),
     feedbackNote,
   });
@@ -74,6 +75,11 @@ export async function revisePrompt(promptId: string, feedback: string): Promise<
     const [prev] = await db.select().from(prompts).where(eq(prompts.id, promptId));
     if (!prev) return { ok: false, error: "Промпт не найден" };
     const data = await llmRevisePrompt(promptId, feedback);
+    // приёмы прошлой версии не теряются, если ревизия не выбрала свои
+    if (!data.used_technique_ids.length) {
+      const prevParams = JSON.parse(prev.paramsJson || "{}") as { techniques?: string[] };
+      data.used_technique_ids = prevParams.techniques ?? [];
+    }
     const newId = await insertVersion(prev.shotId, prev.targetModel, data, promptId, feedback);
     return { ok: true, promptId: newId };
   } catch (e) {
@@ -99,6 +105,7 @@ export async function saveManualVersion(
       prompt: text,
       negative_prompt: prev.negativePrompt ?? "",
       reference_element_names: params.reference_element_names ?? [],
+      used_technique_ids: params.techniques ?? [],
       params: { aspect_ratio: params.aspect_ratio ?? "16:9", duration: params.duration ?? 15 },
     },
     promptId,

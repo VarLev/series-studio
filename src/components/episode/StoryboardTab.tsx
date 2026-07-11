@@ -30,11 +30,22 @@ export interface StoryboardSheetData extends StoryboardItem {
   frames: StoryboardItem[];
 }
 
+export interface AttachRef {
+  id: string;
+  url: string;
+  label: string;
+  /** character | location | prop | style | series — определяет роль в промпте */
+  kind: string;
+  name: string;
+}
+
 export interface StoryboardData {
   sheets: StoryboardSheetData[];
   orphanFrames: StoryboardItem[]; // кадры, чей лист уже удалён
-  attachRefs: Array<{ id: string; url: string; label: string }>;
+  attachRefs: AttachRef[];
   pendingCount: number;
+  /** Шаблон промпта листа из настроек (tpl_storyboard, с плейсхолдерами). */
+  template: string;
 }
 
 const FRAME_OPTIONS = [4, 9] as const;
@@ -59,21 +70,46 @@ function evenPick<T>(items: T[], n: number): T[] {
   return [...new Set(out)];
 }
 
-function buildPrompt(scope: ShotListItem | null, frames: number, shots: ShotListItem[]): string {
-  const gridTxt = frames === 9 ? "3x3 grid of 9" : "2x2 grid of 4";
-  const head =
-    `Cinematic storyboard contact sheet: a ${gridTxt} vertical 9:16 panels arranged on a single vertical 9:16 canvas, thin black gutters between panels. ` +
-    `Live-action photorealistic film stills. Consistent characters, wardrobe, lighting and color grading across all panels. No text, no numbers, no watermarks.`;
+const PANEL_STRUCTURE_9 = `1. Introduction – establish the scene and mood.
+2. Character motivation – show intention or desire.
+3. First action – the story begins moving.
+4. Rising tension – complication appears.
+5. Turning point – dramatic or emotional shift.
+6. Escalation – action intensifies.
+7. Climax – peak emotional or action moment.
+8. Resolution – consequences or aftermath.
+9. Final frame – strong cinematic ending shot.`;
+
+const PANEL_STRUCTURE_4 = `1. Introduction – establish the scene, mood and character intention.
+2. Rising tension – the story moves, a complication appears.
+3. Climax – peak emotional or action moment.
+4. Final frame – resolution, strong cinematic ending shot.`;
+
+/** Строка роли референса по типу и порядку прикрепления (требование заказчика). */
+function refLine(n: number, r: AttachRef): string {
+  switch (r.kind) {
+    case "character":
+      return `Use reference image ${n} as the locked character sheet for ${r.name} — keep the exact face, hair and outfit.`;
+    case "location":
+      return `Use reference image ${n} as the environment and location reference (${r.name}).`;
+    case "prop":
+      return `Use reference image ${n} as the exact prop reference (${r.name}).`;
+    case "style":
+      return `Use reference image ${n} only as the visual style reference — do not copy its composition.`;
+    default:
+      return `Use reference image ${n} as a frame and composition reference (${r.name}).`;
+  }
+}
+
+function buildStory(scope: ShotListItem | null, frames: number, shots: ShotListItem[]): string {
   if (scope) {
     return (
-      `${head}\n\nScene (${scope.durationSec}s): ${scope.title ? scope.title + ". " : ""}${trimText(scope.action, 400)}\n` +
-      `The ${frames} panels show the progression of this single scene moment by moment, with varied cinematic camera angles (wide, medium, close-up).`
+      `Scene (${scope.durationSec}s): ${scope.title ? scope.title + ". " : ""}${trimText(scope.action, 400)}\n` +
+      `The panels show the progression of this single scene moment by moment, with varied cinematic camera angles (wide, medium, close-up).`
     );
   }
   const picked = evenPick(shots, frames);
-  if (!picked.length) {
-    return `${head}\n\nStory beats: describe the episode here — one beat per panel.`;
-  }
+  if (!picked.length) return "[опишите историю — по биту на панель]";
   const lines = picked.map(
     (s, i) => `${i + 1}. ${s.title ? s.title + " — " : ""}${trimText(s.action, 160)}`,
   );
@@ -81,7 +117,32 @@ function buildPrompt(scope: ShotListItem | null, frames: number, shots: ShotList
     picked.length < frames
       ? `\nDistribute these beats across all ${frames} panels, expanding key moments into additional angles.`
       : "";
-  return `${head}\n\nStory beats in order, one per panel:\n${lines.join("\n")}${tail}`;
+  return lines.join("\n") + tail;
+}
+
+/** Сборка промпта листа из шаблона настроек: плейсхолдеры → значения. */
+function buildPrompt(
+  template: string,
+  scope: ShotListItem | null,
+  frames: number,
+  shots: ShotListItem[],
+  attached: AttachRef[],
+): string {
+  const refLines = attached.map((r, i) => refLine(i + 1, r)).join("\n");
+  const story = buildStory(scope, frames, shots);
+  const fill: Record<string, string> = {
+    "{{GRID}}": frames === 9 ? "3x3" : "2x2",
+    "{{PANELS}}": String(frames),
+    "{{REFERENCES}}": refLines,
+    "{{STORY}}": story,
+    "{{PANEL_STRUCTURE}}": frames === 9 ? PANEL_STRUCTURE_9 : PANEL_STRUCTURE_4,
+  };
+  let out = template;
+  for (const [key, value] of Object.entries(fill)) out = out.split(key).join(value);
+  // шаблон без плейсхолдеров не должен терять сюжет и референсы
+  if (!template.includes("{{STORY}}")) out += `\n\nStory to visualize:\n${story}`;
+  if (!template.includes("{{REFERENCES}}") && refLines) out += `\n\n${refLines}`;
+  return out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export default function StoryboardTab({
@@ -109,7 +170,17 @@ export default function StoryboardTab({
   const [editPrompt, setEditPrompt] = useState("");
 
   const scope = useMemo(() => shots.find((s) => s.id === scopeId) ?? null, [shots, scopeId]);
-  const autoPrompt = useMemo(() => buildPrompt(scope, frames, shots), [scope, frames, shots]);
+  const attachedRefs = useMemo(
+    () =>
+      attach
+        .map((id) => data.attachRefs.find((r) => r.id === id))
+        .filter((r): r is AttachRef => Boolean(r)),
+    [attach, data.attachRefs],
+  );
+  const autoPrompt = useMemo(
+    () => buildPrompt(data.template, scope, frames, shots, attachedRefs),
+    [data.template, scope, frames, shots, attachedRefs],
+  );
   const prompt = promptEdited ?? autoPrompt;
   const credits = RESOLUTIONS.find((r) => r.id === resolution)?.credits ?? 6;
 
@@ -284,10 +355,13 @@ export default function StoryboardTab({
 
         {data.attachRefs.length > 0 && (
           <div className="flex flex-col gap-1">
-            <SectionLabel hint="персонажи/стиль для консистентности">Приложить референсы</SectionLabel>
+            <SectionLabel hint="порядок = номер референса в промпте">
+              Приложить референсы
+            </SectionLabel>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {data.attachRefs.map((r) => {
-                const on = attach.includes(r.id);
+                const order = attach.indexOf(r.id);
+                const on = order >= 0;
                 return (
                   <button
                     key={r.id}
@@ -297,11 +371,16 @@ export default function StoryboardTab({
                     className="w-[48px] shrink-0"
                   >
                     <span
-                      className="block aspect-[9/16] overflow-hidden rounded-md border-2"
+                      className="relative block aspect-[9/16] overflow-hidden rounded-md border-2"
                       style={{ borderColor: on ? "var(--violet-400)" : "var(--border-subtle)" }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={r.url} alt="" className="h-full w-full object-cover" />
+                      {on && (
+                        <span className="absolute left-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-violet-500 font-mono text-[9px] font-bold text-white">
+                          {order + 1}
+                        </span>
+                      )}
                     </span>
                     <span className="mt-0.5 block truncate text-center font-mono text-[8px] text-t400">
                       {r.label}

@@ -91,7 +91,8 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     frameRows.filter((f) => !f.parentId || !sheetIds.has(f.parentId)).map(toItem),
   );
 
-  // «приложить референсы»: аватары сущностей серии + обычные референсы серии (не листы/кадры)
+  // «приложить референсы»: аватары сущностей серии + обычные референсы серии (не листы/кадры).
+  // kind/name нужны для авто-строк промпта «Use reference image N as …» (роль по порядку)
   const entityAvatarRefs = entityIds.length
     ? await db.select().from(references).where(inArray(references.entityId, entityIds))
     : [];
@@ -99,11 +100,16 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     ...(await Promise.all(
       entityAvatarRefs
         .filter((r) => r.entityId && !r.shotId)
-        .map(async (r) => ({
-          id: r.id,
-          url: await getFileUrl(r.storagePath),
-          label: entityById.get(r.entityId!)?.name ?? "сущность",
-        })),
+        .map(async (r) => {
+          const entity = entityById.get(r.entityId!);
+          return {
+            id: r.id,
+            url: await getFileUrl(r.storagePath),
+            label: entity?.name ?? "сущность",
+            kind: entity?.type ?? "character",
+            name: entity?.name ?? "",
+          };
+        }),
     )),
     ...(await Promise.all(
       seriesRefRows
@@ -112,6 +118,8 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
           id: r.id,
           url: await getFileUrl(r.storagePath),
           label: r.token ?? r.caption ?? "REF",
+          kind: "series",
+          name: r.token ?? r.caption ?? "REF",
         })),
     )),
   ];
@@ -140,6 +148,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     orphanFrames,
     attachRefs,
     pendingCount: pendingStoryboards,
+    template: settings.tpl_storyboard,
   };
 
   const epNumber = String(episode.number).padStart(2, "0");

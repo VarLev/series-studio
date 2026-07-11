@@ -20,6 +20,8 @@ export const shotPromptSchema = z.object({
   prompt: z.string(),
   negative_prompt: z.string().optional().default(""),
   reference_element_names: z.array(z.string()).default([]),
+  /** id использованных режиссёрских приёмов из библиотеки (бейджи 🎥 под промптом) */
+  used_technique_ids: z.array(z.string()).default([]),
   params: z
     .object({
       aspect_ratio: z.string().default("16:9"),
@@ -28,3 +30,8 @@ export const shotPromptSchema = z.object({
     .default({ aspect_ratio: "16:9", duration: 15 }),
 });
 export type ShotPrompt = z.infer<typeof shotPromptSchema>;
+
+/** Этап подбора приёмов: Haiku выбирает кандидатов из индекса библиотеки. */
+export const techniquePickSchema = z.object({
+  ids: z.array(z.string()).default([]),
+});

@@ -8,6 +8,7 @@ const ITEMS = [
   { href: "/bible", label: "Библия", icon: "❖" },
   { href: "/queue", label: "Очередь", icon: "⏳" },
   { href: "/costs", label: "Затраты", icon: "◔" },
+  { href: "/settings", label: "Настройки", icon: "⚙" },
 ];
 
 const HOTKEYS: Array<[string, string]> = [
@@ -24,7 +25,7 @@ const HOTKEYS: Array<[string, string]> = [
  * Таб-бар живёт только на четырёх верхних экранах: на вложенных (карточка шота,
  * серия, референсы) у экранов свои нижние панели — таб-бар их перекрывал.
  */
-const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/costs"];
+const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/costs", "/settings"];
 
 /** Нижний таб-бар (мобайл, spec §2.1) + сайдбар (десктоп, spec §4). */
 export default function NavClient({ activeJobs }: { activeJobs: number }) {

@@ -106,6 +106,19 @@ CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS techniques (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  category text NOT NULL DEFAULT '',
+  camera text NOT NULL DEFAULT '',
+  lens text NOT NULL DEFAULT '',
+  lighting text NOT NULL DEFAULT '',
+  tags text NOT NULL DEFAULT '',
+  prompt text NOT NULL,
+  negative text NOT NULL DEFAULT '',
+  custom boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS llm_usage (
   id text PRIMARY KEY,
   kind text NOT NULL,

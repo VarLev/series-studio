@@ -134,6 +134,25 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
 });
 
+/**
+ * Библиотека режиссёрских приёмов: карточки промптов (сид — JSFilmz Vault 500),
+ * пользователь может добавлять/править/удалять свои. Промпт-фабрика подбирает
+ * подходящие приёмы к шоту и вплетает их в видео-промпт.
+ */
+export const techniques = pgTable("techniques", {
+  id: text("id").primaryKey(), // b19 из вольта либо uuid для своих
+  title: text("title").notNull(),
+  category: text("category").notNull().default(""),
+  camera: text("camera").notNull().default(""),
+  lens: text("lens").notNull().default(""),
+  lighting: text("lighting").notNull().default(""),
+  tags: text("tags").notNull().default(""),
+  prompt: text("prompt").notNull(),
+  negative: text("negative").notNull().default(""),
+  custom: boolean("custom").notNull().default(false), // добавлен пользователем
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const llmUsage = pgTable("llm_usage", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(), // synopsis | breakdown | prompt | revision
