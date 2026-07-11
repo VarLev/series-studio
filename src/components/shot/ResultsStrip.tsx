@@ -25,6 +25,8 @@ export interface ResultItem {
   jobId: string | null;
   /** последняя ошибка связи при поллинге статуса (если есть) */
   pollError: string | null;
+  /** сколько фото-образов персонажей прикреплено к задаче (image_references) */
+  characterRefs: number;
 }
 
 function Elapsed({ since }: { since: string }) {
@@ -149,6 +151,14 @@ export default function ResultsStrip({
                 <span className="font-mono text-[10px] text-t300">
                   {g.credits != null ? `${g.credits} ${t("кр", "cr")}` : g.source}
                 </span>
+                {g.characterRefs > 0 && (
+                  <span
+                    title={t("Прикреплено фото-образов персонажей", "Character reference photos attached")}
+                    className="font-mono text-[10px] text-success"
+                  >
+                    🎭 {g.characterRefs}
+                  </span>
+                )}
                 <span className="flex-1" />
                 {active ? (
                   <>

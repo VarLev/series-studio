@@ -135,6 +135,8 @@ export default function GenerateSheet({
   const klingFallback =
     quality === "480p" &&
     [...selected].some((id) => !(models.find((m) => m.id === id)?.qualities.includes("480p") ?? false));
+  // Kling на Higgsfield MCP не принимает референсы-идентичности персонажей
+  const klingSelected = [...selected].some((id) => id.startsWith("kling"));
   const chosenFrame = startFrames.find((f) => f.id === startFrame) ?? null;
 
   function toggle(id: string) {
@@ -234,6 +236,24 @@ export default function GenerateSheet({
             )}
           </div>
         )}
+      </div>
+
+      <div className="mt-2 flex items-start gap-1.5 text-[10px] leading-snug text-t400">
+        <span className="text-success">🎭</span>
+        <span>
+          {t(
+            "Фото-образы персонажей из библии прикрепляются к задаче автоматически (Seedance держит внешность). ",
+            "Character reference photos from the bible are attached automatically (Seedance locks appearance). ",
+          )}
+          {klingSelected && (
+            <span className="text-warning">
+              {t(
+                "Kling их не принимает — образ только текстом промпта.",
+                "Kling doesn’t accept them — appearance is prompt-text only.",
+              )}
+            </span>
+          )}
+        </span>
       </div>
 
       <div className="mb-2 mt-4 flex items-baseline gap-2">

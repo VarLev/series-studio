@@ -6,12 +6,16 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import {
   getDb,
+  entities,
   generations,
   prompts,
   references,
+  settings,
+  shotEntities,
   shots,
   videoModels,
 } from "@/lib/db";
+import { stripAt } from "@/lib/entityName";
 import {
   getImageProvider,
   googleImageConfigured,
@@ -185,11 +189,104 @@ async function publicUrlForReference(refId: string): Promise<string | null> {
   // Локальный диск недоступен провайдеру извне — передаём байты через его upload API
   // (Cloud API → files/generate-upload-url; MCP → media_upload+confirm → media_id).
   if (!process.env.SUPABASE_URL && provider.uploadFile) {
+    // media_id кэшируется: без кэша каждый запуск заново грузил те же мегабайты
+    // (12+ секунд на пару референсов) и умножал шансы сетевого флапа
+    const cacheKey = `hf_media_${provider.name}_${refId}`;
+    const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
+    if (cached?.value) return cached.value;
     const data = await readFile(ref.storagePath);
     const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
-    return provider.uploadFile(data, contentType);
+    const mediaId = await provider.uploadFile(data, contentType);
+    await db
+      .insert(settings)
+      .values({ key: cacheKey, value: mediaId })
+      .onConflictDoUpdate({ target: settings.key, set: { value: mediaId } });
+    return mediaId;
   }
   return getFileUrl(ref.storagePath);
+}
+
+/**
+ * Референсы-идентичности персонажей для видео-задачи: по каким сущностям
+ * прикрепить фото-образы из библии. Приоритет — reference_element_names из
+ * промпта (кого модель выбрала в кадр); если пусто — все персонажи/пропы,
+ * привязанные к шоту (shot_entities). Возвращает пары {имена, URL/медиа-id}.
+ */
+async function identityRefs(
+  shotId: string,
+  referenceElementNames: string[],
+): Promise<Array<{ elementName: string; name: string; url: string }>> {
+  const db = await getDb();
+  const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
+  if (!links.length) return [];
+  const linked = await db
+    .select()
+    .from(entities)
+    .where(inArray(entities.id, links.map((l) => l.entityId)));
+
+  // выбор сущностей: по именам из промпта (@-нечувствительно) либо все привязанные
+  const wanted = new Set(referenceElementNames.map(stripAt).filter(Boolean));
+  const chosen = wanted.size
+    ? linked.filter((e) => wanted.has(stripAt(e.elementName)) || wanted.has(stripAt(e.name)))
+    : linked;
+  if (!chosen.length) return [];
+
+  // по одному (лучшему) референсу на сущность, порядок как в reference_element_names
+  const order = (e: (typeof chosen)[number]) => {
+    const idx = referenceElementNames.findIndex(
+      (n) => stripAt(n) === stripAt(e.elementName) || stripAt(n) === stripAt(e.name),
+    );
+    return idx === -1 ? 999 : idx;
+  };
+  chosen.sort((a, b) => order(a) - order(b));
+
+  const out: Array<{ elementName: string; name: string; url: string }> = [];
+  for (const e of chosen) {
+    const refs = await db
+      .select()
+      .from(references)
+      .where(eq(references.entityId, e.id))
+      .orderBy(asc(references.createdAt));
+    if (!refs[0]) continue;
+    const url = await publicUrlForReference(refs[0].id);
+    if (url) out.push({ elementName: e.elementName, name: e.name, url });
+  }
+  return out;
+}
+
+/**
+ * Seedance 2.0 ссылается на прикреплённые медиа ТОЛЬКО порядковыми токенами
+ * @image1…@image9 (по порядку в medias). Именованные @Simon у Higgsfield
+ * работают лишь для их библиотеки reference elements — через MCP такие
+ * упоминания не резолвятся (красные в UI). Переписываем упоминания сущностей
+ * в @imageN перед отправкой; в сохранённой версии промпта остаются имена.
+ */
+export function rewritePromptRefs(
+  prompt: string,
+  refs: Array<{ elementName: string; name: string }>,
+  startFrameAttached: boolean,
+): string {
+  let text = prompt;
+  // start-frame занимает первый номер в порядке medias
+  const offset = startFrameAttached ? 1 : 0;
+  refs.forEach((r, i) => {
+    const token = `@image${offset + i + 1}`;
+    for (const raw of [r.elementName, r.name]) {
+      const bare = stripAt(raw);
+      if (!bare) continue;
+      // @Simon / @simon (граница слова — не захватываем соседние буквы)
+      text = text.replace(new RegExp(`@${escapeReg(bare)}(?![\\w-])`, "gi"), token);
+    }
+  });
+  if (startFrameAttached) {
+    // упоминания стартового кадра из шаблона (@Start / @Image1 уже совпадает)
+    text = text.replace(/@start(?![\w-])/gi, "@image1");
+  }
+  return text;
+}
+
+function escapeReg(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Байты референса inline (base64) — для Google Gemini (inline_data). */
@@ -266,6 +363,15 @@ export async function submitJobs(
     ? ((await publicUrlForReference(input.startFrameRefId)) ?? undefined)
     : undefined;
 
+  // фото-образы персонажей из библии → в задачу (image_references). Раньше
+  // не прикреплялись — видео шло без учёта внешности @Simon/@Craig (баг заказчика)
+  const promptParams = JSON.parse(prompt.paramsJson || "{}") as { reference_element_names?: string[] };
+  const refs = await identityRefs(input.shotId, promptParams.reference_element_names ?? []);
+  const characterRefUrls = refs.map((r) => r.url);
+  // Seedance понимает только порядковые @image1..@imageN — подменяем упоминания
+  // сущностей в уходящем тексте (сохранённая версия промпта остаётся с именами)
+  const promptWithTokens = rewritePromptRefs(prompt.text, refs, Boolean(startImageUrl));
+
   const jobs: Array<{ model: string; jobId: string }> = [];
   for (const modelId of input.modelIds) {
     const model = catalog.find((m) => m.id === modelId);
@@ -280,17 +386,22 @@ export async function submitJobs(
     const exactCost = provider.preflightCost
       ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: prompt.text, ...params }).catch(() => null)
       : null;
+    // Kling не принимает image_references — ему уходит исходный текст с именами
+    const supportsIdentityRefs = !modelId.startsWith("kling");
     const sub = await provider.submit({
       model: virtual?.base ?? modelId,
-      prompt: prompt.text,
+      prompt: supportsIdentityRefs && refs.length ? promptWithTokens : prompt.text,
       negativePrompt: prompt.negativePrompt ?? undefined,
       params,
       startImageUrl,
+      characterRefUrls,
     });
     const paramsJson: UrlBundle = {
       ...params,
       quality,
       start_frame_ref: input.startFrameRefId ?? null,
+      // сколько фото-образов персонажей прикреплено к задаче (для карточки)
+      character_refs: modelId.startsWith("kling") ? 0 : characterRefUrls.length,
       estimate: exactCost ?? estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
       estimate_exact: exactCost != null,
       _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },

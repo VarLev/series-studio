@@ -19,6 +19,12 @@ export interface JobRequest {
   /** публичный URL стоп-кадра для image-to-video */
   startImageUrl?: string;
   endImageUrl?: string;
+  /**
+   * URL/медиа-id референсов-ИДЕНТИЧНОСТИ персонажей (лица/образы из библии).
+   * Провайдер прикрепляет их с ролью image_references — модель держит внешность
+   * персонажей. Отличается от startImageUrl (первый кадр).
+   */
+  characterRefUrls?: string[];
   /** публичные URL референсов (для image-моделей Higgsfield) */
   referenceUrls?: string[];
   /** байты референсов inline (для Google — inline_data) */

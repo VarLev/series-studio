@@ -177,11 +177,16 @@ export default async function ShotPage(ctx: {
     .orderBy(desc(generations.createdAt));
   const results = await Promise.all(
     genRows.map(async (g) => {
-      // здоровье поллинга из paramsJson: карточка предупреждает о потере связи
+      // здоровье поллинга + число прикреплённых референсов персонажей из paramsJson
       let pollError: string | null = null;
+      let characterRefs = 0;
       try {
-        const bundle = JSON.parse(g.paramsJson || "{}") as { _poll?: { error?: string } };
+        const bundle = JSON.parse(g.paramsJson || "{}") as {
+          _poll?: { error?: string };
+          character_refs?: number;
+        };
         pollError = bundle._poll?.error ?? null;
+        characterRefs = bundle.character_refs ?? 0;
       } catch {}
       return {
         id: g.id,
@@ -197,6 +202,7 @@ export default async function ShotPage(ctx: {
         credits: g.creditsSpent,
         jobId: g.providerJobId,
         pollError,
+        characterRefs,
       };
     }),
   );

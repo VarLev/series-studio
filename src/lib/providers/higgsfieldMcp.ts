@@ -36,6 +36,20 @@ function parseSubmittedJobId(text: string): string | null {
 const VIDEO_WHITELIST = new Set(["seedance_2_0", "seedance_2_0_mini", "kling3_0"]);
 
 /**
+ * Роли медиа-входов по модели (models_explore get, 2026-07-12). Seedance держит
+ * идентичность персонажей через image_references; Kling их НЕ принимает —
+ * только стоп-кадры. Используем, чтобы не слать модели неподдерживаемую роль.
+ */
+const MEDIA_ROLES: Record<string, string[]> = {
+  seedance_2_0: ["start_image", "end_image", "image_references", "video_references", "audio_references"],
+  seedance_2_0_mini: ["start_image", "end_image", "image_references", "video_references", "audio_references"],
+  kling3_0: ["start_image", "end_image"],
+};
+
+/** Сколько референсов-идентичности максимум крепим к задаче (баланс качества/лимитов). */
+const MAX_IDENTITY_REFS = 4;
+
+/**
  * Сид каталога — снят с живого MCP (models_explore, 2026-07-11). Сеть до
  * *.higgsfield.ai флапает (DNS-перехват), поэтому каталог не должен зависеть
  * от неё: live-ответ обновляет данные, при сбое работаем на этом сиде.
@@ -140,12 +154,20 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
       prompt: job.negativePrompt ? `${job.prompt}\n\nAvoid: ${job.negativePrompt}` : job.prompt,
       ...job.params,
     };
+    const roles = MEDIA_ROLES[job.model] ?? ["start_image", "end_image"];
     const medias: Array<{ value: string; role: string }> = [];
-    if (job.startImageUrl) {
+    if (job.startImageUrl && roles.includes("start_image")) {
       medias.push({ value: await this.resolveMedia(job.startImageUrl), role: "start_image" });
     }
-    if (job.endImageUrl) {
+    if (job.endImageUrl && roles.includes("end_image")) {
       medias.push({ value: await this.resolveMedia(job.endImageUrl), role: "end_image" });
+    }
+    // референсы-идентичности персонажей (лица из библии) — только если модель
+    // принимает image_references (Seedance да, Kling нет: он держит образ иначе)
+    if (job.characterRefUrls?.length && roles.includes("image_references")) {
+      for (const url of job.characterRefUrls.slice(0, MAX_IDENTITY_REFS)) {
+        medias.push({ value: await this.resolveMedia(url), role: "image_references" });
+      }
     }
     if (medias.length) params.medias = medias;
 
@@ -168,13 +190,10 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     if (!jobId) {
       throw new Error(`Higgsfield не принял задачу (job id не выдан). Ответ: ${res.text.slice(0, 300)}`);
     }
-    // Подтверждение приёма: job_status обязан знать задачу — иначе это не сабмит
-    const check = await callMcpTool("job_status", { jobId }, { retry: true });
-    if (check.isError) {
-      throw new Error(
-        `Higgsfield вернул id ${jobId.slice(0, 8)}…, но не подтвердил задачу: ${check.text.slice(0, 200)}`,
-      );
-    }
+    // Контрольный job_status — только доп. сигнал. Задача УЖЕ создана и оплачена
+    // (строгий формат «Submitted N job»), поэтому сбой проверки НЕ фатален:
+    // бросать здесь = потерять учёт оплаченной задачи (инцидент 2026-07-12).
+    await callMcpTool("job_status", { jobId }, { retry: true }).catch(() => {});
     return { jobId };
   }
 
