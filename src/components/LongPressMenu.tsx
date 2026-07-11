@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Sheet from "@/components/Sheet";
 import ConfirmButton from "@/components/ConfirmButton";
+import { useT } from "@/components/I18nProvider";
 
 /**
  * Обёртка «долгое зажатие» (~0.5 c) или правый клик → меню с опцией удаления.
@@ -26,6 +27,7 @@ export default function LongPressMenu({
   children: React.ReactNode;
   className?: string;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fired = useRef(false);
@@ -65,7 +67,7 @@ export default function LongPressMenu({
       <div
         className={`select-none ${className ?? ""}`}
         style={{ WebkitTouchCallout: "none" }}
-        title="Долгое зажатие — удалить"
+        title={t("Долгое зажатие — удалить", "Long-press to delete")}
         onPointerDown={onPointerDown}
         onPointerUp={cancel}
         onPointerLeave={cancel}
@@ -104,7 +106,7 @@ export default function LongPressMenu({
             onClick={() => setOpen(false)}
             className="min-h-11 w-full rounded-lg border border-[var(--border-subtle)] text-[11.5px] font-semibold text-t300 hover:bg-ink-600"
           >
-            Отмена
+            {t("Отмена", "Cancel")}
           </button>
         </div>
       </Sheet>

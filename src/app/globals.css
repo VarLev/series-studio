@@ -57,6 +57,70 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* ============================================================
+   Тема «Vault» (настройка ui_theme=vault): графит + янтарь,
+   моноширинные заголовки — в духе JSFilmz Vault.
+   Токены те же — переопределяем только значения переменных.
+   ============================================================ */
+html[data-theme="vault"] {
+  --ink-900: #07090c;
+  --ink-800: #0b0e13;
+  --ink-700: #10141b;
+  --ink-600: #161b23;
+  --ink-500: #1d232d;
+  --ink-400: #272f3b;
+  --ink-300: #364050;
+
+  --violet-50: #fdf3e3;
+  --violet-100: #f7ddb0;
+  --violet-200: #eec27a;
+  --violet-300: #e5ab52;
+  --violet-400: #d99b3c;
+  --violet-500: #c8862c;
+  --violet-600: #a06a20;
+  --violet-700: #74490f;
+  --violet-800: #4a2e08;
+
+  --magenta-400: #e0b25f;
+  --magenta-500: #c89a47;
+
+  --chrome-hi: #f5f2ea;
+  --chrome-mid: #cfc9bd;
+  --chrome-lo: #948d7e;
+  --chrome-violet: #d3b078;
+
+  --text-100: #edeef0;
+  --text-200: #c3c7cd;
+  --text-300: #8f95a0;
+  --text-400: #666d79;
+
+  --border-subtle: rgba(232, 173, 77, 0.1);
+  --border-default: rgba(232, 173, 77, 0.2);
+  --border-strong: rgba(232, 173, 77, 0.4);
+
+  --glow-violet-sm: 0 0 0 1px rgba(217, 155, 60, 0.35), 0 0 16px rgba(200, 134, 44, 0.3);
+  --glow-violet-md: 0 0 28px rgba(217, 155, 60, 0.4);
+  --focus-ring: 0 0 0 2px var(--ink-900), 0 0 0 4px var(--violet-400);
+
+  /* моноширинные заголовки и системный текст вместо серифов */
+  --font-cinzel: var(--font-jetbrains);
+  --font-garamond: var(--font-golos);
+}
+html[data-theme="vault"] ::selection {
+  background: rgba(217, 155, 60, 0.35);
+}
+html[data-theme="vault"] .chrome-text {
+  filter: drop-shadow(0 2px 10px rgba(200, 134, 44, 0.3));
+}
+html[data-theme="vault"] .prompt-token {
+  color: var(--violet-100);
+  background: rgba(217, 155, 60, 0.14);
+  border-color: rgba(217, 155, 60, 0.32);
+}
+html[data-theme="vault"] .eyebrow {
+  color: var(--violet-300);
+}
+
 @theme inline {
   --color-ink-900: var(--ink-900);
   --color-ink-800: var(--ink-800);

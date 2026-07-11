@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, references } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { ScreenHeader } from "@/components/ui";
+import { getT } from "@/lib/i18n-server";
 import QueuePill from "@/components/QueuePill";
 import GenPoller from "@/components/GenPoller";
 import SeriesRefs from "@/components/refs/SeriesRefs";
@@ -46,13 +47,14 @@ export default async function RefsPage(ctx: { params: Promise<{ id: string }> })
   ).filter((g) => g.episodeId === id);
 
   const epN = String(episode.number).padStart(2, "0");
+  const t = await getT();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
       <ScreenHeader
         backHref={`/episodes/${id}`}
-        eyebrow={`Серия ${epN}`}
-        title={`Референсы · ${refs.length}`}
+        eyebrow={`${t("Серия", "Episode")} ${epN}`}
+        title={`${t("Референсы", "References")} · ${refs.length}`}
         right={<QueuePill />}
       />
       <GenPoller activeCount={activeJobs.length} />

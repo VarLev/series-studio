@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { addShotEntity, removeShotEntity } from "@/lib/actions/shots";
+import { useT } from "@/components/I18nProvider";
 
 /** Наборы стилей (spec §2.3): переключаемые чипы, уходят в промпт-фабрику. */
 export default function StyleChips({
@@ -11,11 +12,15 @@ export default function StyleChips({
   shotId: string;
   styles: Array<{ id: string; name: string; linked: boolean }>;
 }) {
+  const t = useT();
   const [, startTransition] = useTransition();
   if (!styles.length) {
     return (
       <span className="text-[10.5px] text-t400">
-        Стили создаются в библии (тип «Стиль») и включаются здесь чипами.
+        {t(
+          "Стили создаются в библии (тип «Стиль») и включаются здесь чипами.",
+          "Styles are created in the bible (type “Style”) and toggled here as chips.",
+        )}
       </span>
     );
   }

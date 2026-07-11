@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
 import { updateReferenceCaption, deleteReference } from "@/lib/actions/entities";
+import { useT } from "@/components/I18nProvider";
 
 interface GalleryRef {
   id: string;
@@ -12,6 +13,7 @@ interface GalleryRef {
 }
 
 export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
+  const t = useT();
   const [selected, setSelected] = useState<GalleryRef | null>(null);
   const [caption, setCaption] = useState("");
   const [, startTransition] = useTransition();
@@ -19,8 +21,11 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
   if (!refs.length) {
     return (
       <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-3 text-[11px] leading-relaxed text-t400">
-        <span className="text-violet-600">✦</span>&nbsp; Референсов пока нет. Кадры из ревью
-        («взять кадр», Этап 2) тоже будут собираться здесь.
+        <span className="text-violet-600">✦</span>&nbsp;{" "}
+        {t(
+          "Референсов пока нет. Кадры из ревью («взять кадр») тоже будут собираться здесь.",
+          "No references yet. Frames grabbed in review also collect here.",
+        )}
       </div>
     );
   }
@@ -46,7 +51,7 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
         ))}
       </div>
 
-      <Sheet open={Boolean(selected)} onClose={() => setSelected(null)} title="Референс">
+      <Sheet open={Boolean(selected)} onClose={() => setSelected(null)} title={t("Референс", "Reference")}>
         {selected && (
           <div className="flex flex-col gap-3 pb-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -60,7 +65,7 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
               <input
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
-                placeholder="Короткая подпись (например: анфас, тёмная куртка)"
+                placeholder={t("Короткая подпись (например: анфас, тёмная куртка)", "Short caption (e.g. front view, dark jacket)")}
                 className="min-h-11 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[12.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
               />
               <button
@@ -70,7 +75,7 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
                 }}
                 className="min-h-11 rounded-lg bg-violet-500 px-4 text-[11px] font-semibold uppercase text-white"
               >
-                Сохранить
+                {t("Сохранить", "Save")}
               </button>
             </div>
             <button
@@ -80,7 +85,7 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
               }}
               className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
             >
-              Удалить референс
+              {t("Удалить референс", "Delete reference")}
             </button>
           </div>
         )}

@@ -5,6 +5,11 @@ import SwRegister from "@/components/SwRegister";
 import Toaster from "@/components/Toaster";
 import AppNav from "@/components/nav/AppNav";
 import { ContentShell } from "@/components/nav/NavClient";
+import { I18nProvider } from "@/components/I18nProvider";
+import { getAllSettings } from "@/lib/settings";
+
+// язык и тема живут в настройках (БД) — всё приложение рендерится динамически
+export const dynamic = "force-dynamic";
 
 const golos = Golos_Text({
   variable: "--font-golos",
@@ -25,13 +30,12 @@ const jetbrains = JetBrains_Mono({
 const garamond = EB_Garamond({
   variable: "--font-garamond",
   subsets: ["latin", "cyrillic"],
-  style: ["normal", "italic"],
   display: "swap",
 });
 
 export const metadata: Metadata = {
   title: "Series Studio",
-  description: "Пульт производства AI-сериала",
+  description: "AI series production console",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Series Studio" },
 };
@@ -43,16 +47,19 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const settings = await getAllSettings();
   return (
-    <html lang="ru">
+    <html lang={settings.ui_lang} data-theme={settings.ui_theme}>
       <body
         className={`${golos.variable} ${cinzel.variable} ${jetbrains.variable} ${garamond.variable} antialiased`}
       >
-        <AppNav />
-        <ContentShell>{children}</ContentShell>
-        <Toaster />
-        <SwRegister />
+        <I18nProvider lang={settings.ui_lang}>
+          <AppNav />
+          <ContentShell>{children}</ContentShell>
+          <Toaster />
+          <SwRegister />
+        </I18nProvider>
       </body>
     </html>
   );

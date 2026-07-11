@@ -81,7 +81,7 @@ export default async function ReviewPage(ctx: {
       candidates={candidates}
       initialId={g ?? null}
       entities={allEntities.map((e) => ({ id: e.id, name: e.name }))}
-      nextShot={next ? { id: next.id, label: `Группа ${String(next.orderIndex).padStart(2, "0")}` } : null}
+      nextShot={next ? { id: next.id, label: String(next.orderIndex).padStart(2, "0") } : null}
       latestPromptId={latest?.id ?? null}
       latestVersion={latest?.version ?? 0}
       regenParams={{

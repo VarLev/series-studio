@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useT } from "@/components/I18nProvider";
 
 /** Загрузка референса/результата: с телефона открывает камеру или галерею в 1 тап. */
 export default function UploadButton({
@@ -25,6 +26,7 @@ export default function UploadButton({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -45,12 +47,12 @@ export default function UploadButton({
         const res = await fetch("/api/upload", { method: "POST", body: form });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? `Ошибка загрузки (${res.status})`);
+          throw new Error(body.error ?? t(`Ошибка загрузки (${res.status})`, `Upload failed (${res.status})`));
         }
       }
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка загрузки");
+      setError(e instanceof Error ? e.message : t("Ошибка загрузки", "Upload failed"));
     } finally {
       setBusy(false);
       if (input.current) input.current.value = "";
@@ -76,7 +78,7 @@ export default function UploadButton({
           "flex min-h-12 w-full flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-[var(--border-default)] px-3 py-4 text-[12px] text-t200 hover:border-[var(--border-strong)] disabled:opacity-50"
         }
       >
-        {busy ? "Загрузка…" : label}
+        {busy ? t("Загрузка…", "Uploading…") : label}
       </button>
       {error && <div className="mt-1 text-[11px] text-danger">{error}</div>}
     </>

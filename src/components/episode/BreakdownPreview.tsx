@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Breakdown } from "@/lib/llm/contracts";
+import { useT } from "@/components/I18nProvider";
 
 type Item = Breakdown["shots"][number] & { included: boolean; duplicate: boolean };
 
@@ -28,6 +29,7 @@ export default function BreakdownPreview({
   /** Правки полей предпросмотра — родитель сохраняет их (localStorage), чтобы не терять. */
   onEdited?: (b: Breakdown) => void;
 }) {
+  const t = useT();
   const existing = useMemo(() => new Set(existingTitles.map(normalize).filter(Boolean)), [existingTitles]);
   const hasExisting = existingTitles.length > 0;
   const [mode, setMode] = useState<"append" | "replace">(hasExisting ? "append" : "replace");
@@ -78,8 +80,11 @@ export default function BreakdownPreview({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-1 overflow-y-auto p-4 pb-32">
         <div className="mb-3 text-[11px] leading-relaxed text-t400">
-          <span className="text-violet-600">✦</span>&nbsp; Claude предложил {items.length} групп.
-          Проверьте и поправьте описания — карточки создадутся после подтверждения.
+          <span className="text-violet-600">✦</span>&nbsp;{" "}
+          {t(
+            `Claude предложил ${items.length} групп. Проверьте и поправьте описания — карточки создадутся после подтверждения.`,
+            `Claude proposed ${items.length} groups. Review and edit the descriptions — cards are created after you confirm.`,
+          )}
         </div>
 
         {hasExisting && (
@@ -93,7 +98,7 @@ export default function BreakdownPreview({
                 color: mode === "append" ? "var(--text-100)" : "var(--text-400)",
               }}
             >
-              Добавить новые (готовые не трогать)
+              {t("Добавить новые (готовые не трогать)", "Add new (keep existing)")}
             </button>
             <button
               onClick={() => setMode("replace")}
@@ -104,13 +109,16 @@ export default function BreakdownPreview({
                 color: mode === "replace" ? "#e08aa4" : "var(--text-400)",
               }}
             >
-              Заменить все ({existingTitles.length})
+              {t(`Заменить все (${existingTitles.length})`, `Replace all (${existingTitles.length})`)}
             </button>
           </div>
         )}
         {mode === "replace" && hasExisting && (
           <div className="mb-3 text-[10.5px] text-warning">
-            Существующие шоты, их промпты и связи будут удалены.
+            {t(
+              "Существующие шоты, их промпты и связи будут удалены.",
+              "Existing shots with their prompts and links will be deleted.",
+            )}
           </div>
         )}
 
@@ -135,18 +143,19 @@ export default function BreakdownPreview({
                   className="h-5 w-5 accent-[var(--violet-400)]"
                 />
                 <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-t400">
-                  Группа {String(i + 1).padStart(2, "0")} · {item.duration_sec} сек
+                  {t("Группа", "Group")} {String(i + 1).padStart(2, "0")} · {item.duration_sec}{" "}
+                  {t("сек", "sec")}
                 </span>
                 {item.duplicate && mode === "append" && (
                   <span className="rounded bg-[rgba(192,138,62,.14)] px-1.5 py-0.5 text-[8px] font-semibold uppercase text-warning">
-                    похожа на существующую
+                    {t("похожа на существующую", "similar to an existing one")}
                   </span>
                 )}
               </div>
               <input
                 value={item.title}
                 onChange={(e) => patch(i, { title: e.target.value })}
-                placeholder="Название группы"
+                placeholder={t("Название группы", "Group title")}
                 className="mb-1.5 w-full rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2 text-[13px] font-semibold text-t100 outline-none focus:border-[var(--border-strong)]"
               />
               <textarea
@@ -185,7 +194,7 @@ export default function BreakdownPreview({
           onClick={onCancel}
           className="min-h-[50px] rounded-lg border border-[var(--border-default)] px-4 text-[11px] font-semibold uppercase tracking-[0.1em] text-t200 hover:bg-ink-500"
         >
-          Отмена
+          {t("Отмена", "Cancel")}
         </button>
         <button
           onClick={confirm}
@@ -197,10 +206,10 @@ export default function BreakdownPreview({
           }}
         >
           {saving
-            ? "Создание…"
+            ? t("Создание…", "Creating…")
             : mode === "append" && hasExisting
-              ? `Добавить ${included} новых`
-              : `Создать ${included} карточек`}
+              ? t(`Добавить ${included} новых`, `Add ${included} new`)
+              : t(`Создать ${included} карточек`, `Create ${included} cards`)}
         </button>
       </div>
     </div>

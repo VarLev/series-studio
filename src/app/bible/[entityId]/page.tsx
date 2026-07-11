@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth";
 import { getDb, entities, references, shots, shotEntities, episodes } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { ScreenHeader, SectionLabel, EmptyState } from "@/components/ui";
+import { getT } from "@/lib/i18n-server";
 import EntityForm from "@/components/bible/EntityForm";
 import RefGallery from "@/components/bible/RefGallery";
 import UploadButton from "@/components/UploadButton";
@@ -45,17 +46,21 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
     : [];
   const epById = new Map(epRows.map((e) => [e.id, e]));
 
+  const t = await getT();
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader backHref="/bible" eyebrow="Библия" title={entity.name} />
+      <ScreenHeader backHref="/bible" eyebrow={t("Библия", "Bible")} title={entity.name} />
       <div className="flex flex-col gap-5 p-4 pb-10">
         <div className="flex flex-col gap-2">
-          <SectionLabel hint="загрузка с камеры или галереи в 1 тап">Референсы</SectionLabel>
+          <SectionLabel hint={t("загрузка с камеры или галереи в 1 тап", "one-tap upload from camera or gallery")}>
+            {t("Референсы", "References")}
+          </SectionLabel>
           <RefGallery refs={galleryRefs} />
           <UploadButton
             kind="reference"
             entityId={entityId}
-            label="+ Загрузить референсы (фото/кадры)"
+            label={t("+ Загрузить референсы (фото/кадры)", "+ Upload references (photos/frames)")}
           />
         </div>
 
@@ -72,7 +77,7 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
         />
 
         <div className="flex flex-col gap-2">
-          <SectionLabel>Участвует в шотах</SectionLabel>
+          <SectionLabel>{t("Участвует в шотах", "Appears in shots")}</SectionLabel>
           {shotRows.length ? (
             <div className="flex flex-col gap-1.5">
               {shotRows.map((s) => {
@@ -84,7 +89,7 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
                     className="flex items-center gap-2.5 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5 hover:border-[var(--border-strong)]"
                   >
                     <span className="font-mono text-[10px] font-semibold text-t400">
-                      С{String(ep?.number ?? 0).padStart(2, "0")}·Г
+                      {t("С", "E")}{String(ep?.number ?? 0).padStart(2, "0")}·{t("Г", "G")}
                       {String(s.orderIndex).padStart(2, "0")}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[12.5px] text-t200">
@@ -95,12 +100,8 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
               })}
             </div>
           ) : (
-            <EmptyState>Пока не задействован ни в одном шоте.</EmptyState>
+            <EmptyState>{t("Пока не задействован ни в одном шоте.", "Not used in any shot yet.")}</EmptyState>
           )}
-        </div>
-
-        <div className="rounded-lg border border-dashed border-[var(--border-default)] p-3 text-[11px] leading-relaxed text-t400">
-          «Обучить Soul-персонажа» из референсов — Этап 3 (Higgsfield Soul ID).
         </div>
       </div>
     </main>

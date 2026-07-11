@@ -15,6 +15,7 @@ import { toast } from "@/components/Toaster";
 import { setWinner } from "@/lib/actions/generations";
 import { revisePrompt } from "@/lib/actions/prompts";
 import { startGeneration } from "@/lib/actions/generate";
+import { useT } from "@/components/I18nProvider";
 
 const FPS = 24;
 const FRAME = 1 / FPS;
@@ -64,6 +65,7 @@ export default function ReviewPlayer({
   regenParams: { durationSec: number; aspectRatio: string; quality: string };
 }) {
   const router = useRouter();
+  const t = useT();
   const [idx, setIdx] = useState(() => {
     const found = candidates.findIndex((c) => c.id === initialId);
     return found >= 0 ? found : 0;
@@ -138,10 +140,10 @@ export default function ReviewPlayer({
     if (!current || current.isWinner) return;
     startTransition(async () => {
       await setWinner(shotId, current.id);
-      toast(`★ Победитель: ${current.model} — шот утверждён`);
+      toast(t(`★ Победитель: ${current.model} — шот утверждён`, `★ Winner: ${current.model} — shot approved`));
       router.refresh();
     });
-  }, [current, router, shotId]);
+  }, [current, router, shotId, t]);
 
   // hotkeys (spec §5, e.code — независимо от раскладки)
   useEffect(() => {
@@ -194,7 +196,7 @@ export default function ReviewPlayer({
       setGrabTarget("series");
       setGrabOpen(true);
     } catch {
-      toast("Не удалось захватить кадр (CORS источника видео)");
+      toast(t("Не удалось захватить кадр (CORS источника видео)", "Could not grab the frame (video source CORS)"));
     }
   }
 
@@ -205,7 +207,7 @@ export default function ReviewPlayer({
     form.set("file", new File([blob], "frame.jpg", { type: "image/jpeg" }));
     form.set("kind", "reference");
     form.set("source", "frame-grab");
-    form.set("caption", `кадр ${timecode(grabTime)} · ${shotLabel}`);
+    form.set("caption", t(`кадр ${timecode(grabTime)} · ${shotLabel}`, `frame ${timecode(grabTime)} · ${shotLabel}`));
     if (grabTarget === "series") {
       form.set("episodeId", episodeId);
     } else if (grabTarget === "next-shot" && nextShot) {
@@ -219,14 +221,14 @@ export default function ReviewPlayer({
       setGrabOpen(false);
       toast(
         grabTarget === "series"
-          ? "Кадр сохранён в референсы серии"
+          ? t("Кадр сохранён в референсы серии", "Frame saved to episode references")
           : grabTarget === "next-shot"
-            ? `Кадр — start-frame шота (${nextShot?.label})`
-            : "Кадр сохранён в библию",
+            ? t(`Кадр — start-frame шота (${nextShot?.label})`, `Frame set as start-frame of shot (${nextShot?.label})`)
+            : t("Кадр сохранён в библию", "Frame saved to the bible"),
       );
       router.refresh();
     } else {
-      toast("Ошибка сохранения кадра");
+      toast(t("Ошибка сохранения кадра", "Failed to save the frame"));
     }
   }
 
@@ -248,9 +250,9 @@ export default function ReviewPlayer({
           quality: regenParams.quality,
           confirmed: true,
         });
-        toast(`v${latestVersion + 1} создана · перегенерация запущена`);
+        toast(t(`v${latestVersion + 1} создана · перегенерация запущена`, `v${latestVersion + 1} created · regeneration started`));
       } else {
-        toast(`v${latestVersion + 1} создана`);
+        toast(t(`v${latestVersion + 1} создана`, `v${latestVersion + 1} created`));
       }
       setNoteOpen(false);
       setNote("");
@@ -268,9 +270,9 @@ export default function ReviewPlayer({
   if (!current) {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-[#050505] p-6 text-center">
-        <div className="text-[13px] text-[#8a8a8a]">Готовых результатов пока нет.</div>
+        <div className="text-[13px] text-[#8a8a8a]">{t("Готовых результатов пока нет.", "No finished results yet.")}</div>
         <Link href={shotHref} className="text-[12px] font-semibold text-[#bdbdbd] underline">
-          ← Вернуться к шоту
+          {t("← Вернуться к шоту", "← Back to shot")}
         </Link>
       </main>
     );
@@ -292,18 +294,18 @@ export default function ReviewPlayer({
         </Link>
         <div className="min-w-0 flex-1">
           <div className="text-[9.5px] font-semibold uppercase tracking-[0.24em] text-[#6f6f6f]">
-            Ревью · {shotLabel} · {idx + 1} из {candidates.length}
+            {t("Ревью", "Review")} · {shotLabel} · {idx + 1} {t("из", "of")} {candidates.length}
           </div>
           <div className="truncate text-[13px] font-semibold text-[#e6e6e6]">{shotTitle}</div>
         </div>
         <span className="rounded border border-[#2a2a2a] bg-[#141414] px-2 py-1 font-mono text-[9.5px] text-[#bdbdbd]">
           {current.model}
           {current.promptVersion != null ? ` · v${current.promptVersion}` : ""}
-          {current.credits != null ? ` · ${current.credits} кр` : ""}
+          {current.credits != null ? t(` · ${current.credits} кр`, ` · ${current.credits} cr`) : ""}
         </span>
         {shotStatus === "approved" && (
           <span className="rounded bg-success px-1.5 py-1 text-[9px] font-semibold text-ink-900">
-            Утверждён
+            {t("Утверждён", "Approved")}
           </span>
         )}
         {candidates.length > 1 && (
@@ -316,7 +318,7 @@ export default function ReviewPlayer({
               background: compare ? "#1c1c1c" : "none",
             }}
           >
-            Сравнить
+            {t("Сравнить", "Compare")}
           </button>
         )}
       </div>
@@ -432,7 +434,7 @@ export default function ReviewPlayer({
                   </span>
                   {c.isWinner && (
                     <span className="absolute right-2 top-2 rounded bg-success px-1.5 py-0.5 text-[9px] font-semibold text-ink-900">
-                      ★ ПОБЕДИТЕЛЬ
+                      {t("★ ПОБЕДИТЕЛЬ", "★ WINNER")}
                     </span>
                   )}
                 </button>
@@ -495,7 +497,7 @@ export default function ReviewPlayer({
             className="min-w-0 flex-1 accent-[#e6e6e6]"
           />
           <span className="font-mono text-[10px] text-[#8a8a8a]">
-            {timecode(time)} · {duration ? `${duration.toFixed(0)}с` : "—"}
+            {timecode(time)} · {duration ? `${duration.toFixed(0)}${t("с", "s")}` : "—"}
           </span>
         </div>
       )}
@@ -510,14 +512,14 @@ export default function ReviewPlayer({
           disabled={!latestPromptId}
           className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
         >
-          <span>👎</span>Замечание
+          <span>👎</span>{t("Замечание", "Note")}
         </button>
         <button
           onClick={grabFrame}
           disabled={!current.isVideo}
           className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
         >
-          <span>📷</span>Взять кадр
+          <span>📷</span>{t("Взять кадр", "Grab frame")}
         </button>
         <button
           onClick={pickWinner}
@@ -525,12 +527,16 @@ export default function ReviewPlayer({
           className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg bg-success text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-900 disabled:opacity-70"
         >
           <span>★</span>
-          {current.isWinner ? "Утверждён" : "Победитель"}
+          {current.isWinner ? t("Утверждён", "Approved") : t("Победитель", "Winner")}
         </button>
       </div>
 
       {/* Шторка «Взять кадр» (spec §2.5/§3.5) */}
-      <Sheet open={grabOpen} onClose={() => setGrabOpen(false)} title={`Кадр ${timecode(grabTime)} — сохранить как…`}>
+      <Sheet
+        open={grabOpen}
+        onClose={() => setGrabOpen(false)}
+        title={t(`Кадр ${timecode(grabTime)} — сохранить как…`, `Frame ${timecode(grabTime)} — save as…`)}
+      >
         {grabDataUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -555,7 +561,7 @@ export default function ReviewPlayer({
               className="accent-[var(--violet-400)]"
             />
             <span className="text-[12.5px] font-medium text-t100">
-              В референсы серии (получит токен REF_NN)
+              {t("В референсы серии (получит токен REF_NN)", "To episode references (gets a REF_NN token)")}
             </span>
           </label>
           {nextShot && (
@@ -574,11 +580,14 @@ export default function ReviewPlayer({
                 className="accent-[var(--warning)]"
               />
               <span className="text-[12.5px] font-medium text-t100">
-                Start-frame шота {nextShot.label} (image-to-video продолжит кадр)
+                {t(
+                  `Start-frame шота ${nextShot.label} (image-to-video продолжит кадр)`,
+                  `Start-frame of shot ${nextShot.label} (image-to-video continues the frame)`,
+                )}
               </span>
             </label>
           )}
-          <div className="section-label mt-2">Референс к сущности</div>
+          <div className="section-label mt-2">{t("Референс к сущности", "Reference for an entity")}</div>
           {entities.map((e) => (
             <label
               key={e.id}
@@ -605,18 +614,21 @@ export default function ReviewPlayer({
           className="mt-4 min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
-          Сохранить кадр
+          {t("Сохранить кадр", "Save frame")}
         </button>
       </Sheet>
 
       {/* Шторка «Замечание» (spec §2.5) */}
-      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Замечание к результату">
+      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title={t("Замечание к результату", "Note on the result")}>
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
           autoFocus
-          placeholder="Что не так? Промпт-фабрика создаст версию с учётом замечания."
+          placeholder={t(
+            "Что не так? Промпт-фабрика создаст версию с учётом замечания.",
+            "What's wrong? The prompt factory will create a new version from your note.",
+          )}
           className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 text-[13px] text-t200 outline-none focus:border-[var(--border-strong)]"
         />
         <div className="mt-3.5 flex flex-col gap-2">
@@ -626,14 +638,16 @@ export default function ReviewPlayer({
             className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {pending ? "Claude думает…" : `Создать v${latestVersion + 1} и перегенерировать`}
+            {pending
+              ? t("Claude думает…", "Claude is thinking…")
+              : t(`Создать v${latestVersion + 1} и перегенерировать`, `Create v${latestVersion + 1} and regenerate`)}
           </button>
           <button
             onClick={() => submitNote(false)}
             disabled={pending || !note.trim()}
             className="min-h-11 w-full rounded-lg border border-[var(--border-default)] text-[10.5px] font-semibold uppercase tracking-[0.1em] text-t200 hover:bg-ink-500 disabled:opacity-50"
           >
-            Только создать версию
+            {t("Только создать версию", "Just create the version")}
           </button>
         </div>
       </Sheet>

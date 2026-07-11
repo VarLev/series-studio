@@ -7,6 +7,7 @@ import { deleteShot, deleteAllShots } from "@/lib/actions/deletes";
 import { StatusPill, EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import LongPressMenu from "@/components/LongPressMenu";
+import { useT } from "@/components/I18nProvider";
 
 export interface ShotListItem {
   id: string;
@@ -25,13 +26,17 @@ export default function ShotsList({
   episodeId: string;
   shots: ShotListItem[];
 }) {
+  const t = useT();
   const [, startTransition] = useTransition();
 
   if (!shots.length) {
     return (
       <div className="p-4">
         <EmptyState>
-          Групп пока нет. Напишите сюжет во вкладке «Сюжет» и нажмите «Разбить на шоты».
+          {t(
+            "Групп пока нет. Напишите сюжет во вкладке «Сюжет» и нажмите «Разбить на шоты».",
+            "No shot groups yet. Write the story on the Story tab and press Break into shots.",
+          )}
         </EmptyState>
       </div>
     );
@@ -42,10 +47,13 @@ export default function ShotsList({
       {shots.map((shot, i) => (
         <LongPressMenu
           key={shot.id}
-          title={`Группа ${String(shot.orderIndex).padStart(2, "0")} · ${shot.title || "Без названия"}`}
-          deleteLabel="Удалить шот"
-          confirmLabel="Точно удалить шот с промптами и видео?"
-          doneToast="Шот удалён"
+          title={`${t("Группа", "Group")} ${String(shot.orderIndex).padStart(2, "0")} · ${shot.title || t("Без названия", "Untitled")}`}
+          deleteLabel={t("Удалить шот", "Delete shot")}
+          confirmLabel={t(
+            "Точно удалить шот с промптами и видео?",
+            "Really delete this shot with its prompts and videos?",
+          )}
+          doneToast={t("Шот удалён", "Shot deleted")}
           action={deleteShot.bind(null, shot.id)}
           className="flex items-stretch gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-2.5 hover:border-[var(--border-strong)]"
         >
@@ -63,7 +71,7 @@ export default function ShotsList({
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-semibold text-t100">
-                {shot.title || shot.action.slice(0, 60) || "Без названия"}
+                {shot.title || shot.action.slice(0, 60) || t("Без названия", "Untitled")}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <StatusPill status={shot.status} />
@@ -97,15 +105,15 @@ export default function ShotsList({
       ))}
 
       <div className="pt-1 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-t400">
-        долгое зажатие по шоту — удаление
+        {t("долгое зажатие по шоту — удаление", "long-press a shot to delete")}
       </div>
 
       {shots.length > 1 && (
         <ConfirmButton
           action={deleteAllShots.bind(null, episodeId)}
-          label={`Удалить все шоты (${shots.length})`}
-          confirmLabel="Точно удалить все шоты серии?"
-          doneToast="Шоты удалены"
+          label={t(`Удалить все шоты (${shots.length})`, `Delete all shots (${shots.length})`)}
+          confirmLabel={t("Точно удалить все шоты серии?", "Really delete all shots of this episode?")}
+          doneToast={t("Шоты удалены", "Shots deleted")}
           className="mt-1 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
         />
       )}

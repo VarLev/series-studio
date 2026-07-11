@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/Toaster";
+import { useT } from "@/components/I18nProvider";
 
 /**
  * Кнопка с обязательным подтверждением (двухшаговая): первый клик «взводит»,
@@ -12,7 +13,7 @@ import { toast } from "@/components/Toaster";
 export default function ConfirmButton({
   action,
   label,
-  confirmLabel = "Точно удалить?",
+  confirmLabel,
   doneToast,
   className,
   armedClassName,
@@ -25,6 +26,8 @@ export default function ConfirmButton({
   armedClassName?: string;
 }) {
   const router = useRouter();
+  const t = useT();
+  const confirmText = confirmLabel ?? t("Точно удалить?", "Really delete?");
   const [armed, setArmed] = useState(false);
   const [pending, startTransition] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,7 +66,7 @@ export default function ConfirmButton({
       disabled={pending}
       className={`${base} ${armed ? armedCls : ""}`}
     >
-      {pending ? "Удаление…" : armed ? confirmLabel : label}
+      {pending ? t("Удаление…", "Deleting…") : armed ? confirmText : label}
     </button>
   );
 }

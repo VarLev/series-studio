@@ -13,15 +13,18 @@ import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS } from "@/lib/llm/models";
 import BreakdownPreview from "./BreakdownPreview";
 import { SectionLabel } from "@/components/ui";
+import { useT } from "@/components/I18nProvider";
 
 type SaveState = "saved" | "saving" | "local" | "idle";
 
 function ModelSelect({
   value,
   onChange,
+  en,
 }: {
   value: string;
   onChange: (v: string) => void;
+  en: boolean;
 }) {
   const known = LLM_MODELS.some((m) => m.id === value);
   return (
@@ -29,11 +32,11 @@ function ModelSelect({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="min-h-9 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none"
-      title="Модель Claude"
+      title="Claude model"
     >
       {LLM_MODELS.map((m) => (
         <option key={m.id} value={m.id}>
-          {m.label} — {m.hint}
+          {m.label} — {en ? m.hintEn : m.hint}
         </option>
       ))}
       {!known && <option value={value}>{value}</option>}
@@ -65,6 +68,7 @@ export default function SynopsisEditor({
   onBreakdownModelChange: (m: string) => void;
 }) {
   const router = useRouter();
+  const t = useT();
   const draftKey = `ss-draft:${episodeId}`;
   // раскадровка стоит реальных денег — предпросмотр переживает переключение
   // вкладок и перезагрузку страницы через localStorage (замечание заказчика)
@@ -180,11 +184,11 @@ export default function SynopsisEditor({
 
   const saveLabel =
     saveState === "saving"
-      ? "сохранение…"
+      ? t("сохранение…", "saving…")
       : saveState === "saved"
-        ? "сохранено"
+        ? t("сохранено", "saved")
         : saveState === "local"
-          ? "черновик сохранён локально"
+          ? t("черновик сохранён локально", "draft saved locally")
           : "";
 
   if (preview) {
@@ -210,26 +214,32 @@ export default function SynopsisEditor({
         <input
           value={title}
           onChange={(e) => onChange({ title: e.target.value })}
-          placeholder="Название серии"
+          placeholder={t("Название серии", "Episode title")}
           className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[14px] font-semibold text-t100 outline-none focus:border-[var(--border-strong)]"
         />
         <input
           value={logline}
           onChange={(e) => onChange({ logline: e.target.value })}
-          placeholder="Логлайн — одна фраза о серии (попадает в контекст следующих серий)"
+          placeholder={t(
+            "Логлайн — одна фраза о серии (попадает в контекст следующих серий)",
+            "Logline — one sentence about the episode (feeds the next episodes' context)",
+          )}
           className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
         />
       </div>
 
       <SectionLabel right={<span className="font-mono text-[10px] text-t400">{saveLabel}</span>}>
-        Литературный сюжет
+        {t("Литературный сюжет", "Literary story")}
       </SectionLabel>
 
       <textarea
         value={synopsis}
         onChange={(e) => onChange({ synopsis: e.target.value })}
         spellCheck={false}
-        placeholder="Опишите серию как рассказ — Claude раскадрирует его на группы шотов до 15 секунд."
+        placeholder={t(
+          "Опишите серию как рассказ — Claude раскадрирует его на группы шотов до 15 секунд.",
+          "Describe the episode as a story — Claude will break it into shot groups of up to 15 seconds.",
+        )}
         className="min-h-[40dvh] flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-3 font-body text-[15px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
       />
 
@@ -240,12 +250,19 @@ export default function SynopsisEditor({
           <input
             value={brief}
             onChange={(e) => setBrief(e.target.value)}
-            placeholder="Задание для Claude: что должно случиться в этой серии?"
+            placeholder={t(
+              "Задание для Claude: что должно случиться в этой серии?",
+              "Brief for Claude: what should happen in this episode?",
+            )}
             className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
           />
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-t400">Модель сюжета:</span>
-            <ModelSelect value={synopsisModel} onChange={(m) => pickModel("synopsis", m)} />
+            <span className="text-[11px] text-t400">{t("Модель сюжета:", "Story model:")}</span>
+            <ModelSelect
+              value={synopsisModel}
+              onChange={(m) => pickModel("synopsis", m)}
+              en={t("ru", "en") === "en"}
+            />
           </div>
           <button
             onClick={onGenerate}
@@ -253,7 +270,9 @@ export default function SynopsisEditor({
             className="min-h-[52px] w-full rounded-lg bg-violet-500 px-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {generating ? "Claude пишет сюжет…" : "Сгенерировать сюжет"}
+            {generating
+              ? t("Claude пишет сюжет…", "Claude is writing the story…")
+              : t("Сгенерировать сюжет", "Generate story")}
           </button>
         </div>
       )}
@@ -261,12 +280,19 @@ export default function SynopsisEditor({
       {synopsis.trim() && (
         <div className="flex flex-col gap-2 pb-4">
           <div className="text-[11px] leading-relaxed text-t400">
-            <span className="text-violet-600">✦</span>&nbsp; Claude прочитает сюжет, разобьёт его
-            на группы шотов ≤ 15 сек и сам определит сущности в каждой.
+            <span className="text-violet-600">✦</span>&nbsp;{" "}
+            {t(
+              "Claude прочитает сюжет, разобьёт его на группы шотов ≤ 15 сек и сам определит сущности в каждой.",
+              "Claude reads the story, breaks it into shot groups of ≤ 15 sec and detects the entities in each.",
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-t400">Модель раскадровки:</span>
-            <ModelSelect value={breakdownModel} onChange={(m) => pickModel("breakdown", m)} />
+            <span className="text-[11px] text-t400">{t("Модель раскадровки:", "Breakdown model:")}</span>
+            <ModelSelect
+              value={breakdownModel}
+              onChange={(m) => pickModel("breakdown", m)}
+              en={t("ru", "en") === "en"}
+            />
           </div>
           <button
             onClick={onBreakdown}
@@ -275,10 +301,10 @@ export default function SynopsisEditor({
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
             {breakingDown
-              ? "Claude раскадрирует…"
+              ? t("Claude раскадрирует…", "Claude is storyboarding…")
               : shotsCount > 0
-                ? "Раскадровать (готовые группы не дублируются)"
-                : "Разбить на шоты"}
+                ? t("Раскадровать (готовые группы не дублируются)", "Break down (existing groups are kept)")
+                : t("Разбить на шоты", "Break into shots")}
           </button>
         </div>
       )}

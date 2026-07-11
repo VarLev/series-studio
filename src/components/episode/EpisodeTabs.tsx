@@ -4,8 +4,13 @@ import { useState } from "react";
 import SynopsisEditor from "./SynopsisEditor";
 import ShotsList, { type ShotListItem } from "./ShotsList";
 import StoryboardTab, { type StoryboardData } from "./StoryboardTab";
+import { useT } from "@/components/I18nProvider";
 
-const TABS = ["Сюжет", "Раскадровка", "Шоты"] as const;
+const TABS = [
+  { id: "Сюжет", ru: "Сюжет", en: "Story" },
+  { id: "Раскадровка", ru: "Раскадровка", en: "Storyboard" },
+  { id: "Шоты", ru: "Шоты", en: "Shots" },
+] as const;
 
 export default function EpisodeTabs({
   episodeId,
@@ -26,7 +31,8 @@ export default function EpisodeTabs({
   breakdownModel: string;
   storyboard: StoryboardData;
 }) {
-  const [tab, setTab] = useState<(typeof TABS)[number]>(
+  const t = useT();
+  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>(
     shots.length > 0 ? "Шоты" : "Сюжет",
   );
   // выбор моделей живёт здесь, а не в SynopsisEditor: переключение вкладок
@@ -37,13 +43,14 @@ export default function EpisodeTabs({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex gap-1.5 border-b border-[var(--border-subtle)] px-3.5 py-2">
-        {TABS.map((t) => {
-          const active = tab === t;
-          const label = t === "Шоты" && shots.length ? `Шоты · ${shots.length}` : t;
+        {TABS.map((tabDef) => {
+          const active = tab === tabDef.id;
+          const base = t(tabDef.ru, tabDef.en);
+          const label = tabDef.id === "Шоты" && shots.length ? `${base} · ${shots.length}` : base;
           return (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tabDef.id}
+              onClick={() => setTab(tabDef.id)}
               className="min-h-[38px] flex-1 rounded-md border px-1 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.1em]"
               style={{
                 borderColor: active ? "var(--border-strong)" : "transparent",

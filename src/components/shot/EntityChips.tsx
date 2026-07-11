@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
 import { EntityAvatar, ENTITY_TYPE_LABEL } from "@/components/ui";
 import { addShotEntity, removeShotEntity } from "@/lib/actions/shots";
+import { useT } from "@/components/I18nProvider";
 
 export interface ChipEntity {
   id: string;
@@ -22,6 +23,7 @@ export default function EntityChips({
   shotId: string;
   entities: ChipEntity[];
 }) {
+  const t = useT();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [, startTransition] = useTransition();
   const linked = entities.filter((e) => e.linked);
@@ -39,11 +41,11 @@ export default function EntityChips({
             <span className="text-[12px] font-medium text-t200">{e.name}</span>
             {e.auto && (
               <span className="rounded-[3px] bg-[rgba(139,95,176,.14)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-300">
-                авто
+                {t("авто", "auto")}
               </span>
             )}
             <button
-              aria-label={`Убрать ${e.name}`}
+              aria-label={`${t("Убрать", "Remove")} ${e.name}`}
               onClick={() => startTransition(() => removeShotEntity(shotId, e.id))}
               className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger"
             >
@@ -60,11 +62,13 @@ export default function EntityChips({
         </button>
       </div>
 
-      <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Добавить сущность">
+      <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} title={t("Добавить сущность", "Add entity")}>
         {available.length === 0 && (
           <div className="pb-3 text-[12px] text-t400">
-            Все сущности библии уже добавлены — или библия пуста. Новые создаются в разделе
-            «Библия».
+            {t(
+              "Все сущности библии уже добавлены — или библия пуста. Новые создаются в разделе «Библия».",
+              "All bible entities are already added — or the bible is empty. New ones are created in the Bible section.",
+            )}
           </div>
         )}
         <div className="flex flex-col">
@@ -81,7 +85,9 @@ export default function EntityChips({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-medium text-t100">{e.name}</span>
                 <span className="block text-[10px] text-t400">
-                  {ENTITY_TYPE_LABEL[e.type] ?? e.type}
+                  {ENTITY_TYPE_LABEL[e.type]
+                    ? t(ENTITY_TYPE_LABEL[e.type].ru, ENTITY_TYPE_LABEL[e.type].en)
+                    : e.type}
                 </span>
               </span>
               <span className="font-mono text-[10px] text-violet-200">{e.elementName}</span>

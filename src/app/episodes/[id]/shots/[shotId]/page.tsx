@@ -16,6 +16,7 @@ import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog } from "@/lib/generation";
 import { getTechniquesByIds } from "@/lib/director";
+import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import { deleteAllGenerations } from "@/lib/actions/deletes";
@@ -230,12 +231,14 @@ export default async function ShotPage(ctx: {
 
   const shotHref = (s: { id: string }) => `/episodes/${episodeId}/shots/${s.id}`;
 
+  const t = await getT();
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:max-w-none">
       <ScreenHeader
         backHref={`/episodes/${episodeId}`}
-        eyebrow={`Серия ${epN} · Группа ${grpN}`}
-        title={shot.title || "Группа шотов"}
+        eyebrow={`${t("Серия", "Episode")} ${epN} · ${t("Группа", "Group")} ${grpN}`}
+        title={shot.title || t("Группа шотов", "Shot group")}
         right={<QueuePill />}
       />
       <GenPoller activeCount={activeCount} />
@@ -254,7 +257,7 @@ export default async function ShotPage(ctx: {
       <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[280px_1fr]">
         {/* master-колонка (spec §4, десктоп) */}
         <aside className="hidden overflow-y-auto border-r border-[var(--border-subtle)] p-3 lg:block">
-          <div className="section-label mb-2">Шоты серии</div>
+          <div className="section-label mb-2">{t("Шоты серии", "Episode shots")}</div>
           <div className="flex flex-col gap-1.5">
             {allShots.map((s) => {
               const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
@@ -296,30 +299,40 @@ export default async function ShotPage(ctx: {
                 <StatusPill status={shot.status} />
               </div>
               <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
-                {shot.durationSec} сек ·{" "}
-                {versions.length ? `промпт v${current!.version}` : "промпта нет"} · видео{" "}
-                {results.filter((r) => r.status === "done").length}
+                {shot.durationSec} {t("сек", "sec")} ·{" "}
+                {versions.length
+                  ? `${t("промпт", "prompt")} v${current!.version}`
+                  : t("промпта нет", "no prompt")}{" "}
+                · {t("видео", "videos")} {results.filter((r) => r.status === "done").length}
               </div>
             </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <SectionLabel>Фрагмент сюжета</SectionLabel>
+            <SectionLabel>{t("Фрагмент сюжета", "Story fragment")}</SectionLabel>
             <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <SectionLabel hint="определил Claude · правится вручную">Сущности</SectionLabel>
+            <SectionLabel
+              hint={t("определил Claude · правится вручную", "detected by Claude · editable")}
+            >
+              {t("Сущности", "Entities")}
+            </SectionLabel>
             <EntityChips shotId={shotId} entities={entityChips} />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <SectionLabel hint="уходят в промпт-фабрику">Наборы стилей</SectionLabel>
+            <SectionLabel hint={t("уходят в промпт-фабрику", "feed the prompt factory")}>
+              {t("Наборы стилей", "Style sets")}
+            </SectionLabel>
             <StyleChips shotId={shotId} styles={styleChips} />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <SectionLabel hint="тап по бейджу — роль">Референсы шота</SectionLabel>
+            <SectionLabel hint={t("тап по бейджу — роль", "tap the badge to set role")}>
+              {t("Референсы шота", "Shot references")}
+            </SectionLabel>
             <ShotRefs
               shotId={shotId}
               episodeId={episodeId}
@@ -346,22 +359,24 @@ export default async function ShotPage(ctx: {
                 results.length > 0 ? (
                   <ConfirmButton
                     action={deleteAllGenerations.bind(null, shotId)}
-                    label="удалить все"
-                    confirmLabel="Удалить все результаты?"
-                    doneToast="Результаты удалены"
+                    label={t("удалить все", "delete all")}
+                    confirmLabel={t("Удалить все результаты?", "Delete all results?")}
+                    doneToast={t("Результаты удалены", "Results deleted")}
                     className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-t400 hover:text-danger disabled:opacity-50"
                   />
                 ) : undefined
               }
             >
-              Видео группы
+              {t("Видео группы", "Group videos")}
             </SectionLabel>
             {results.length ? (
               <ResultsStrip episodeId={episodeId} shotId={shotId} results={results} />
             ) : (
               <EmptyState>
-                Видео пока нет. Соберите промпт и нажмите «Генерировать» — задача уйдёт в
-                Higgsfield. Либо «Копи-пак» для ручной генерации на kling.ai.
+                {t(
+                  "Видео пока нет. Соберите промпт и нажмите «Генерировать» — задача уйдёт в Higgsfield. Либо «Копи-пак» для ручной генерации на kling.ai.",
+                  "No videos yet. Build a prompt and press Generate — the job goes to Higgsfield. Or use Copy pack for manual generation on kling.ai.",
+                )}
               </EmptyState>
             )}
           </div>

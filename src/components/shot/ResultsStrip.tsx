@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { cancelGeneration, retryGeneration } from "@/lib/actions/generate";
 import { deleteGeneration } from "@/lib/actions/deletes";
 import ConfirmButton from "@/components/ConfirmButton";
+import { useT } from "@/components/I18nProvider";
 
 export interface ResultItem {
   id: string;
@@ -47,6 +48,7 @@ export default function ResultsStrip({
   results: ResultItem[];
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, startTransition] = useTransition();
 
   return (
@@ -77,7 +79,7 @@ export default function ResultsStrip({
                 <span className="pulse-amber h-2.5 w-2.5 rounded-full bg-warning" />
                 <Elapsed since={g.createdAt} />
                 <span className="text-[9.5px] font-medium uppercase tracking-[0.12em] text-t400">
-                  Higgsfield · {g.status === "queued" ? "в очереди" : "в работе"}
+                  Higgsfield · {g.status === "queued" ? t("в очереди", "queued") : t("в работе", "running")}
                 </span>
               </div>
             )}
@@ -85,7 +87,7 @@ export default function ResultsStrip({
             {failed && (
               <div className="flex aspect-[9/16] flex-col items-start justify-center gap-1.5 bg-[rgba(194,71,106,.06)] p-3">
                 <span className="rounded-full border border-[rgba(194,71,106,.4)] bg-[rgba(194,71,106,.14)] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#e08aa4]">
-                  {g.status === "nsfw" ? "Отказ · контент-фильтр" : "Ошибка"}
+                  {g.status === "nsfw" ? t("Отказ · контент-фильтр", "Refused · content filter") : t("Ошибка", "Error")}
                 </span>
                 <span className="line-clamp-3 text-[10.5px] leading-snug text-t300">{g.error}</span>
               </div>
@@ -110,7 +112,7 @@ export default function ResultsStrip({
                 </span>
                 {g.isWinner && (
                   <span className="absolute right-1.5 top-1.5 rounded bg-success px-1.5 py-0.5 text-[9px] font-semibold text-ink-800">
-                    ★ ПОБЕДИТЕЛЬ
+                    {t("★ ПОБЕДИТЕЛЬ", "★ WINNER")}
                   </span>
                 )}
               </Link>
@@ -123,13 +125,13 @@ export default function ResultsStrip({
               )}
               <span className="flex-1" />
               <span className="font-mono text-[10px] text-t300">
-                {g.credits != null ? `${g.credits} кр` : g.source}
+                {g.credits != null ? `${g.credits} ${t("кр", "cr")}` : g.source}
               </span>
               {!active && (
                 <ConfirmButton
                   action={deleteGeneration.bind(null, g.id)}
                   label="🗑"
-                  confirmLabel="Удалить?"
+                  confirmLabel={t("Удалить?", "Delete?")}
                   className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
                   armedClassName="text-danger"
                 />
@@ -142,7 +144,7 @@ export default function ResultsStrip({
                   href={`/episodes/${episodeId}/shots/${shotId}/editor?reason=${encodeURIComponent(g.error.slice(0, 200))}`}
                   className="flex-1 rounded-md border border-[var(--border-strong)] px-2 py-2 text-center text-[10px] font-semibold leading-tight text-violet-100 hover:border-violet-400"
                 >
-                  Исправить промпт
+                  {t("Исправить промпт", "Fix prompt")}
                 </Link>
                 <button
                   disabled={pending}
@@ -154,7 +156,7 @@ export default function ResultsStrip({
                   }
                   className="rounded-md px-2.5 py-2 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
                 >
-                  Повторить
+                  {t("Повторить", "Retry")}
                 </button>
               </div>
             )}
@@ -171,7 +173,7 @@ export default function ResultsStrip({
                   }
                   className="rounded-md px-2 py-1.5 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
                 >
-                  Отменить
+                  {t("Отменить", "Cancel")}
                 </button>
               </div>
             )}

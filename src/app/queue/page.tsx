@@ -3,6 +3,7 @@ import { desc, inArray } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, shots } from "@/lib/db";
 import { ScreenHeader, EmptyState } from "@/components/ui";
+import { getT } from "@/lib/i18n-server";
 import GenPoller from "@/components/GenPoller";
 import QueueList from "@/components/queue/QueueList";
 
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function QueuePage() {
   await requireAuth();
   const db = await getDb();
+  const t = await getT();
 
   const gens = await db
     .select()
@@ -42,10 +44,13 @@ export default async function QueuePage() {
     const params = JSON.parse(g.paramsJson || "{}") as { estimate?: number | null };
     const label =
       g.kind === "reference"
-        ? `Референс серии С${String(ep?.number ?? 0).padStart(2, "0")} · ${g.model}`
+        ? t(
+            `Референс серии С${String(ep?.number ?? 0).padStart(2, "0")} · ${g.model}`,
+            `Episode reference E${String(ep?.number ?? 0).padStart(2, "0")} · ${g.model}`,
+          )
         : shot
-          ? `С${String(ep?.number ?? 0).padStart(2, "0")} · Г${String(shot.orderIndex).padStart(2, "0")} — ${shot.title || shot.actionMd.slice(0, 40)}`
-          : "Шот удалён";
+          ? `${t("С", "E")}${String(ep?.number ?? 0).padStart(2, "0")} · ${t("Г", "G")}${String(shot.orderIndex).padStart(2, "0")} — ${shot.title || shot.actionMd.slice(0, 40)}`
+          : t("Шот удалён", "Shot deleted");
     return {
       id: g.id,
       status: g.status,
@@ -71,28 +76,32 @@ export default async function QueuePage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader backHref="/episodes" eyebrow="Higgsfield · все серии" title="Очередь задач" />
+      <ScreenHeader
+        backHref="/episodes"
+        eyebrow={t("Higgsfield · все серии", "Higgsfield · all episodes")}
+        title={t("Очередь задач", "Job queue")}
+      />
       <GenPoller activeCount={active.length} />
       <div className="flex flex-col gap-3 p-4 pb-10">
-        <div className="section-label">Активные · {active.length}</div>
+        <div className="section-label">{t("Активные", "Active")} · {active.length}</div>
         {active.length ? (
           <QueueList items={active} cancellable />
         ) : (
-          <EmptyState>Сейчас ничего не генерируется.</EmptyState>
+          <EmptyState>{t("Сейчас ничего не генерируется.", "Nothing is generating right now.")}</EmptyState>
         )}
 
-        <div className="section-label mt-3">Завершено сегодня · {doneToday.length}</div>
+        <div className="section-label mt-3">{t("Завершено сегодня", "Finished today")} · {doneToday.length}</div>
         {doneToday.length ? (
           <QueueList items={doneToday} />
         ) : (
-          <EmptyState>Сегодня завершённых задач нет.</EmptyState>
+          <EmptyState>{t("Сегодня завершённых задач нет.", "No finished jobs today.")}</EmptyState>
         )}
 
         <Link
           href="/costs"
           className="mt-2 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-violet-300 hover:text-violet-200"
         >
-          Затраты по эпизодам →
+          {t("Затраты по эпизодам →", "Costs by episode →")}
         </Link>
       </div>
     </main>

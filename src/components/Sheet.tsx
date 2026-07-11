@@ -30,7 +30,7 @@ export default function Sheet({
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end lg:flex-row lg:justify-end">
       <button
-        aria-label="Закрыть"
+        aria-label="Close"
         onClick={onClose}
         className="absolute inset-0 cursor-pointer border-none"
         style={{ background: "rgba(6,5,9,.76)", backdropFilter: "blur(5px)" }}
@@ -47,7 +47,7 @@ export default function Sheet({
         <div className="sticky top-0 z-10 hidden items-center gap-2 border-b border-[var(--border-subtle)] bg-ink-700 px-4 py-3 lg:flex">
           <span className="flex-1 text-[14px] font-semibold text-t100">{title}</span>
           <button
-            aria-label="Закрыть"
+            aria-label="Close"
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-md text-t300 hover:bg-ink-500 hover:text-t100"
           >

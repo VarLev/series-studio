@@ -3,6 +3,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
+import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, EmptyState } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -40,18 +41,22 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
   );
 
   const epN = String(episode.number).padStart(2, "0");
+  const t = await getT();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
       <ScreenHeader
         backHref={`/episodes/${id}`}
-        eyebrow={`Серия ${epN}`}
-        title={`Галерея · ${items.length} утверждено`}
+        eyebrow={`${t("Серия", "Episode")} ${epN}`}
+        title={t(`Галерея · ${items.length} утверждено`, `Gallery · ${items.length} approved`)}
       />
       <div className="flex flex-col gap-3 p-4 pb-10">
         {items.length === 0 && (
           <EmptyState>
-            Утверждённых шотов пока нет. Выберите «Победителя» в ревью — шот попадёт сюда.
+            {t(
+              "Утверждённых шотов пока нет. Выберите «Победителя» в ревью — шот попадёт сюда.",
+              "No approved shots yet. Pick a Winner in review — the shot lands here.",
+            )}
           </EmptyState>
         )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -84,7 +89,7 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
             href={`/api/episodes/${id}/export`}
             className="flex min-h-12 items-center justify-center rounded-lg border border-[var(--border-strong)] text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-200 hover:border-violet-400 hover:text-violet-100"
           >
-            Скачать всё (zip) ↓
+            {t("Скачать всё (zip) ↓", "Download all (zip) ↓")}
           </a>
         )}
       </div>

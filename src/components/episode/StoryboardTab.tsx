@@ -15,6 +15,7 @@ import { generateStoryboard, sliceStoryboard } from "@/lib/actions/storyboard";
 import { upscaleReference, editReference } from "@/lib/actions/generate";
 import { deleteReference } from "@/lib/actions/entities";
 import { SectionLabel, EmptyState } from "@/components/ui";
+import { useT } from "@/components/I18nProvider";
 import type { ShotListItem } from "./ShotsList";
 
 export interface StoryboardItem {
@@ -155,6 +156,7 @@ export default function StoryboardTab({
   data: StoryboardData;
 }) {
   const router = useRouter();
+  const t = useT();
   const [scopeId, setScopeId] = useState<string>(""); // "" = вся серия
   const [frames, setFrames] = useState<(typeof FRAME_OPTIONS)[number]>(9);
   const [resolution, setResolution] = useState<(typeof RESOLUTIONS)[number]["id"]>("2k");
@@ -196,7 +198,12 @@ export default function StoryboardTab({
         refIds: attach,
       });
       if (res.ok) {
-        toast(`Раскадровка поставлена · ${credits} кр — лист появится здесь и в референсах`);
+        toast(
+          t(
+            `Раскадровка поставлена · ${credits} кр — лист появится здесь и в референсах`,
+            `Storyboard queued · ${credits} cr — the sheet will appear here and in references`,
+          ),
+        );
         router.refresh();
       } else setError(res.error);
     });
@@ -208,7 +215,12 @@ export default function StoryboardTab({
       const res = await sliceStoryboard(sheet.id);
       setSlicing(null);
       if (res.ok) {
-        toast(`Лист разрезан на ${res.created} кадров — все получили REF-токены`);
+        toast(
+          t(
+            `Лист разрезан на ${res.created} кадров — все получили REF-токены`,
+            `Sheet sliced into ${res.created} frames — each got a REF token`,
+          ),
+        );
         router.refresh();
       } else toast(res.error);
     });
@@ -217,7 +229,11 @@ export default function StoryboardTab({
   function doUpscale(item: StoryboardItem) {
     startTransition(async () => {
       const res = await upscaleReference(item.id);
-      toast(res.ok ? "Upscale ×2 поставлен · 4 кр" : ("error" in res && res.error) || "Ошибка");
+      toast(
+        res.ok
+          ? t("Upscale ×2 поставлен · 4 кр", "Upscale ×2 queued · 4 cr")
+          : ("error" in res && res.error) || t("Ошибка", "Error"),
+      );
       if (res.ok) {
         setDetail(null);
         router.refresh();
@@ -229,7 +245,11 @@ export default function StoryboardTab({
     if (!editPrompt.trim()) return;
     startTransition(async () => {
       const res = await editReference({ refId: item.id, prompt: editPrompt.trim(), extraRefIds: [] });
-      toast(res.ok ? "Правка поставлена · ≈6 кр · исходник не тронут" : ("error" in res && res.error) || "Ошибка");
+      toast(
+        res.ok
+          ? t("Правка поставлена · ≈6 кр · исходник не тронут", "Edit queued · ≈6 cr · original untouched")
+          : ("error" in res && res.error) || t("Ошибка", "Error"),
+      );
       if (res.ok) {
         setEditOpen(false);
         setDetail(null);
@@ -240,9 +260,11 @@ export default function StoryboardTab({
   }
 
   const scopeLabel = (sbShotId: string | null) => {
-    if (!sbShotId) return "вся серия";
+    if (!sbShotId) return t("вся серия", "whole episode");
     const s = shots.find((x) => x.id === sbShotId);
-    return s ? `группа ${String(s.orderIndex).padStart(2, "0")}` : "шот удалён";
+    return s
+      ? `${t("группа", "group")} ${String(s.orderIndex).padStart(2, "0")}`
+      : t("шот удалён", "shot deleted");
   };
 
   return (
@@ -250,14 +272,16 @@ export default function StoryboardTab({
       {/* ---------- Генератор листа ---------- */}
       <div className="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5">
         <div className="text-[11px] leading-relaxed text-t400">
-          <span className="text-violet-600">✦</span>&nbsp; Nano Banana рисует вертикальный лист 9:16
-          с сеткой вертикальных кадров. Готовый лист можно разрезать на отдельные кадры — всё
-          автоматически попадает в референсы серии.
+          <span className="text-violet-600">✦</span>&nbsp;{" "}
+          {t(
+            "Nano Banana рисует вертикальный лист 9:16 с сеткой вертикальных кадров. Готовый лист можно разрезать на отдельные кадры — всё автоматически попадает в референсы серии.",
+            "Nano Banana draws a vertical 9:16 sheet with a grid of vertical panels. A finished sheet can be sliced into separate frames — everything lands in episode references automatically.",
+          )}
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <label className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="section-label">Область</span>
+            <span className="section-label">{t("Область", "Scope")}</span>
             <select
               value={scopeId}
               onChange={(e) => {
@@ -266,7 +290,7 @@ export default function StoryboardTab({
               }}
               className="min-h-10 w-full rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
             >
-              <option value="">Вся серия</option>
+              <option value="">{t("Вся серия", "Whole episode")}</option>
               {shots.map((s) => (
                 <option key={s.id} value={s.id}>
                   {String(s.orderIndex).padStart(2, "0")} · {trimText(s.title || s.action, 40)}
@@ -275,7 +299,7 @@ export default function StoryboardTab({
             </select>
           </label>
           <div className="flex flex-col gap-1">
-            <span className="section-label">Кадров</span>
+            <span className="section-label">{t("Кадров", "Frames")}</span>
             <div className="flex gap-1.5">
               {FRAME_OPTIONS.map((n) => (
                 <button
@@ -302,7 +326,7 @@ export default function StoryboardTab({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <span className="section-label">Размер</span>
+            <span className="section-label">{t("Размер", "Size")}</span>
             <div className="flex gap-1.5">
               {RESOLUTIONS.map((r) => (
                 <button
@@ -335,14 +359,16 @@ export default function StoryboardTab({
                   onClick={() => setPromptEdited(null)}
                   className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-t400 hover:text-violet-200"
                 >
-                  ↻ пересобрать из шотов
+                  {t("↻ пересобрать из шотов", "↻ rebuild from shots")}
                 </button>
               ) : (
-                <span className="font-mono text-[9px] text-t400">собран из шотов · правится</span>
+                <span className="font-mono text-[9px] text-t400">
+                  {t("собран из шаблона · правится", "built from template · editable")}
+                </span>
               )
             }
           >
-            Промпт листа
+            {t("Промпт листа", "Sheet prompt")}
           </SectionLabel>
           <textarea
             value={prompt}
@@ -355,8 +381,8 @@ export default function StoryboardTab({
 
         {data.attachRefs.length > 0 && (
           <div className="flex flex-col gap-1">
-            <SectionLabel hint="порядок = номер референса в промпте">
-              Приложить референсы
+            <SectionLabel hint={t("порядок = номер референса в промпте", "order = reference number in the prompt")}>
+              {t("Приложить референсы", "Attach references")}
             </SectionLabel>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {data.attachRefs.map((r) => {
@@ -399,7 +425,9 @@ export default function StoryboardTab({
           className="min-h-[52px] w-full rounded-lg bg-violet-500 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-50"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
-          {pending ? "Отправка…" : `Сгенерировать раскадровку · ${credits} кр`}
+          {pending
+            ? t("Отправка…", "Submitting…")
+            : t(`Сгенерировать раскадровку · ${credits} кр`, `Generate storyboard · ${credits} cr`)}
         </button>
       </div>
 
@@ -414,7 +442,10 @@ export default function StoryboardTab({
         >
           <span className="pulse-amber h-2 w-2 rounded-full bg-warning" />
           <span className="font-mono text-[10px] text-t300">
-            {data.pendingCount} лист(а) рисуется — появится автоматически
+            {t(
+              `${data.pendingCount} лист(а) рисуется — появится автоматически`,
+              `${data.pendingCount} sheet(s) rendering — will appear automatically`,
+            )}
           </span>
         </div>
       )}
@@ -422,8 +453,10 @@ export default function StoryboardTab({
       {/* ---------- Листы ---------- */}
       {data.sheets.length === 0 && data.orphanFrames.length === 0 && data.pendingCount === 0 && (
         <EmptyState>
-          Листов пока нет. Выберите область (вся серия или шот), количество кадров и нажмите
-          «Сгенерировать раскадровку».
+          {t(
+            "Листов пока нет. Выберите область (вся серия или шот), количество кадров и нажмите «Сгенерировать раскадровку».",
+            "No sheets yet. Pick a scope (whole episode or a shot), frame count and press Generate storyboard.",
+          )}
         </EmptyState>
       )}
 
@@ -457,11 +490,16 @@ export default function StoryboardTab({
                 className="min-h-10 flex-1 rounded-lg bg-violet-500 px-3 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-white hover:bg-violet-400 disabled:opacity-50"
                 style={{ boxShadow: "var(--glow-violet-sm)" }}
               >
-                {slicing === sheet.id ? "Режу…" : `✂ Разрезать на ${sheet.grid} кадров`}
+                {slicing === sheet.id
+                  ? t("Режу…", "Slicing…")
+                  : t(`✂ Разрезать на ${sheet.grid} кадров`, `✂ Slice into ${sheet.grid} frames`)}
               </button>
             ) : (
               <span className="flex min-h-10 flex-1 items-center justify-center rounded-lg border border-[var(--border-subtle)] font-mono text-[10px] text-t400">
-                ✂ разрезан · {sheet.frames.length} кадров ниже
+                {t(
+                  `✂ разрезан · ${sheet.frames.length} кадров ниже`,
+                  `✂ sliced · ${sheet.frames.length} frames below`,
+                )}
               </span>
             )}
             <button
@@ -480,13 +518,13 @@ export default function StoryboardTab({
               disabled={pending}
               className="min-h-10 rounded-lg border border-[var(--border-default)] px-3 text-[10.5px] font-semibold text-t200 hover:bg-ink-500 disabled:opacity-50"
             >
-              ✎ Править
+              {t("✎ Править", "✎ Edit")}
             </button>
             <ConfirmButton
               action={async () => deleteReference(sheet.id)}
-              label="Удалить"
-              confirmLabel="Точно удалить лист?"
-              doneToast="Лист удалён (кадры остаются)"
+              label={t("Удалить", "Delete")}
+              confirmLabel={t("Точно удалить лист?", "Really delete the sheet?")}
+              doneToast={t("Лист удалён (кадры остаются)", "Sheet deleted (frames remain)")}
               className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] px-3 text-[10.5px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
             />
           </div>
@@ -513,7 +551,9 @@ export default function StoryboardTab({
 
       {data.orphanFrames.length > 0 && (
         <div className="flex flex-col gap-2">
-          <SectionLabel hint="их лист удалён — кадры живут сами">Отдельные кадры</SectionLabel>
+          <SectionLabel hint={t("их лист удалён — кадры живут сами", "sheet deleted — frames live on")}>
+            {t("Отдельные кадры", "Standalone frames")}
+          </SectionLabel>
           <div className="flex flex-wrap gap-1.5">
             {data.orphanFrames.map((f) => (
               <button
@@ -536,7 +576,7 @@ export default function StoryboardTab({
       <Sheet
         open={Boolean(detail) && !editOpen}
         onClose={() => setDetail(null)}
-        title={detail?.token ?? "Элемент"}
+        title={detail?.token ?? t("Элемент", "Item")}
       >
         {detail && (
           <div className="flex flex-col gap-3 pb-2">
@@ -554,7 +594,7 @@ export default function StoryboardTab({
                 disabled={pending}
                 className="min-h-[46px] flex-1 rounded-lg border border-[var(--border-default)] bg-ink-500 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-t100 hover:bg-ink-400 disabled:opacity-50"
               >
-                ⤢ Upscale ×2 · 4 кр
+                {t("⤢ Upscale ×2 · 4 кр", "⤢ Upscale ×2 · 4 cr")}
               </button>
               <button
                 onClick={() => {
@@ -565,7 +605,7 @@ export default function StoryboardTab({
                 className="min-h-[46px] flex-[1.2] rounded-lg bg-violet-500 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-white hover:bg-violet-400 disabled:opacity-50"
                 style={{ boxShadow: "var(--glow-violet-sm)" }}
               >
-                ✎ Править · ≈6 кр
+                {t("✎ Править · ≈6 кр", "✎ Edit · ≈6 cr")}
               </button>
             </div>
             <ConfirmButton
@@ -573,9 +613,9 @@ export default function StoryboardTab({
                 await deleteReference(detail.id);
                 setDetail(null);
               }}
-              label="Удалить"
-              confirmLabel="Точно удалить?"
-              doneToast="Удалено"
+              label={t("Удалить", "Delete")}
+              confirmLabel={t("Точно удалить?", "Really delete?")}
+              doneToast={t("Удалено", "Deleted")}
               className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
             />
           </div>
@@ -586,7 +626,7 @@ export default function StoryboardTab({
       <Sheet
         open={editOpen}
         onClose={() => setEditOpen(false)}
-        title={`Правка ${detail?.token ?? ""} · ≈6 кр`}
+        title={t(`Правка ${detail?.token ?? ""} · ≈6 кр`, `Edit ${detail?.token ?? ""} · ≈6 cr`)}
       >
         <div className="flex flex-col gap-3 pb-2">
           <textarea
@@ -594,7 +634,10 @@ export default function StoryboardTab({
             onChange={(e) => setEditPrompt(e.target.value)}
             rows={3}
             autoFocus
-            placeholder="Что изменить? («сделай план крупнее, добавь дождь…») Исходник не тронется — появится новый референс."
+            placeholder={t(
+              "Что изменить? («сделай план крупнее, добавь дождь…») Исходник не тронется — появится новый референс.",
+              "What to change? (“tighter framing, add rain…”) The original stays — a new reference is created.",
+            )}
             className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 text-[13px] text-t200 outline-none focus:border-[var(--border-strong)]"
           />
           <button
@@ -603,7 +646,7 @@ export default function StoryboardTab({
             className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {pending ? "Отправка…" : "Создать правку (новый референс)"}
+            {pending ? t("Отправка…", "Submitting…") : t("Создать правку (новый референс)", "Create edit (new reference)")}
           </button>
         </div>
       </Sheet>

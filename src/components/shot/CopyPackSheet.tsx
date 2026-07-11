@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Sheet from "@/components/Sheet";
 import UploadButton from "@/components/UploadButton";
+import { useT } from "@/components/I18nProvider";
 
 export interface CopyPackRef {
   url: string;
@@ -30,6 +31,7 @@ export default function CopyPackSheet({
   promptId: string;
   refs: CopyPackRef[];
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -68,7 +70,7 @@ export default function CopyPackSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Копи-пак для Kling web">
+    <Sheet open={open} onClose={onClose} title={t("Копи-пак для Kling web", "Copy pack for Kling web")}>
       <div
         className="flex items-center gap-2.5 rounded-lg border px-3 py-2.5"
         style={{
@@ -83,17 +85,21 @@ export default function CopyPackSheet({
           {copied ? "✓" : "!"}
         </span>
         <span className="flex-1 text-[12.5px] font-medium text-t100">
-          {copied ? `1 · Промпт v${promptVersion} скопирован в буфер` : "Промпт не скопирован"}
+          {copied
+            ? t(`1 · Промпт v${promptVersion} скопирован в буфер`, `1 · Prompt v${promptVersion} copied to clipboard`)
+            : t("Промпт не скопирован", "Prompt not copied")}
         </span>
         <button
           onClick={copyAgain}
           className="rounded-md border border-[var(--border-default)] px-2.5 py-1.5 text-[10px] font-semibold text-t200 hover:bg-ink-500"
         >
-          Ещё раз
+          {t("Ещё раз", "Again")}
         </button>
       </div>
 
-      <div className="section-label mb-2 mt-4">2 · Референсы — скачайте для kling.ai</div>
+      <div className="section-label mb-2 mt-4">
+        {t("2 · Референсы — скачайте для kling.ai", "2 · References — download for kling.ai")}
+      </div>
       {refs.length ? (
         <div className="grid grid-cols-4 gap-2">
           {refs.map((r, i) => (
@@ -115,7 +121,10 @@ export default function CopyPackSheet({
         </div>
       ) : (
         <div className="text-[11.5px] text-t400">
-          У шота нет референсов — прикрепите их на карточке или загрузите в библию.
+          {t(
+            "У шота нет референсов — прикрепите их на карточке или загрузите в библию.",
+            "The shot has no references — attach them on the card or upload to the bible.",
+          )}
         </div>
       )}
 
@@ -125,7 +134,7 @@ export default function CopyPackSheet({
         rel="noreferrer"
         className="mt-4 flex min-h-[46px] items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-200 hover:border-violet-400 hover:text-violet-100"
       >
-        3 · Открыть kling.ai ↗
+        {t("3 · Открыть kling.ai ↗", "3 · Open kling.ai ↗")}
       </a>
 
       <div className="mt-4">
@@ -133,10 +142,10 @@ export default function CopyPackSheet({
           kind="result"
           shotId={shotId}
           promptId={promptId}
-          label="Загрузить результат сюда"
+          label={t("Загрузить результат сюда", "Upload the result here")}
         />
         <div className="mt-1.5 text-center text-[10px] text-t400">
-          привяжется к промпту v{promptVersion} · source: kling-web
+          {t(`привяжется к промпту v${promptVersion} · source: kling-web`, `links to prompt v${promptVersion} · source: kling-web`)}
         </div>
       </div>
     </Sheet>

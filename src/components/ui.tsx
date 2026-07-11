@@ -1,32 +1,8 @@
 import Link from "next/link";
+import StatusPill from "@/components/StatusPill";
 
-export const SHOT_STATUS: Record<string, { label: string; color: string; bg: string; pulse?: boolean }> = {
-  draft: { label: "Черновик", color: "var(--text-300)", bg: "rgba(148,140,166,.12)" },
-  prompted: { label: "Промпт готов", color: "var(--violet-200)", bg: "rgba(139,95,176,.14)" },
-  generating: { label: "Генерация", color: "var(--warning)", bg: "rgba(192,138,62,.14)", pulse: true },
-  review: { label: "Ревью", color: "var(--magenta-400)", bg: "rgba(178,95,208,.12)" },
-  approved: { label: "Утверждён", color: "var(--success)", bg: "rgba(79,143,125,.14)" },
-  failed: { label: "Ошибка", color: "var(--danger)", bg: "rgba(194,71,106,.14)" },
-};
-
-export function StatusPill({ status }: { status: string }) {
-  const s = SHOT_STATUS[status] ?? SHOT_STATUS.draft;
-  return (
-    <span
-      className={`inline-block rounded-full border px-2.5 py-1.5 text-[9.5px] font-semibold uppercase leading-none tracking-[0.16em] ${s.pulse ? "pulse-amber" : ""}`}
-      style={{ color: s.color, background: s.bg, borderColor: s.color + "44" }}
-    >
-      {s.label}
-    </span>
-  );
-}
-
-export const ENTITY_TYPE_LABEL: Record<string, string> = {
-  character: "Персонаж",
-  location: "Локация",
-  prop: "Реквизит",
-  style: "Стиль",
-};
+export { StatusPill };
+export { SHOT_STATUS, ENTITY_TYPE_LABEL } from "@/lib/statuses";
 
 export function EntityAvatar({
   name,
@@ -83,7 +59,7 @@ export function ScreenHeader({
       {backHref && (
         <Link
           href={backHref}
-          aria-label="Назад"
+          aria-label="Back"
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-t100 hover:bg-ink-500"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

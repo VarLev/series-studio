@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { startGeneration } from "@/lib/actions/generate";
+import { useT } from "@/components/I18nProvider";
 
 export interface CatalogModel {
   id: string;
@@ -62,6 +63,7 @@ export default function GenerateSheet({
   defaultStartFrameId: string | null;
 }) {
   const router = useRouter();
+  const t = useT();
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(defaultModelIds.filter((id) => models.some((m) => m.id === id))),
   );
@@ -119,7 +121,12 @@ export default function GenerateSheet({
         confirmed: confirmStep >= 2,
       });
       if (res.ok) {
-        toast(`Запущено задач: ${selected.size} · ≈${estimate}${hasUnknown ? "+?" : ""} кр`);
+        toast(
+          t(
+            `Запущено задач: ${selected.size} · ≈${estimate}${hasUnknown ? "+?" : ""} кр`,
+            `Jobs started: ${selected.size} · ≈${estimate}${hasUnknown ? "+?" : ""} cr`,
+          ),
+        );
         setConfirmInfo(null);
         setConfirmStep(0);
         onClose();
@@ -134,8 +141,8 @@ export default function GenerateSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Генерация · Higgsfield">
-      <div className="section-label mb-2">Модели (A/B — отметьте несколько)</div>
+    <Sheet open={open} onClose={onClose} title={t("Генерация · Higgsfield", "Generation · Higgsfield")}>
+      <div className="section-label mb-2">{t("Модели (A/B — отметьте несколько)", "Models (A/B — pick several)")}</div>
       <div className="flex flex-col gap-1.5">
         {models.map((m) => {
           const est = estimateFor(m, duration, quality);
@@ -161,24 +168,27 @@ export default function GenerateSheet({
                 </span>
               </span>
               <span className="font-mono text-[10.5px] text-t300">
-                {est != null ? `≈${est} кр` : "кр: ?"}
+                {est != null ? t(`≈${est} кр`, `≈${est} cr`) : t("кр: ?", "cr: ?")}
               </span>
             </label>
           );
         })}
         {!models.length && (
           <div className="text-[11.5px] text-t400">
-            Каталог моделей пуст — обновите его на экране «Затраты и настройки».
+            {t(
+              "Каталог моделей пуст — обновите его на экране «Затраты и настройки».",
+              "The model catalog is empty — refresh it on the Costs screen.",
+            )}
           </div>
         )}
       </div>
 
       <div className="mb-2 mt-4 flex items-baseline gap-2">
-        <span className="section-label">Длительность</span>
-        <span className="font-mono text-[12px] font-semibold text-t100">{duration} с</span>
+        <span className="section-label">{t("Длительность", "Duration")}</span>
+        <span className="font-mono text-[12px] font-semibold text-t100">{duration} {t("с", "s")}</span>
         {duration !== groupDurationSec && (
           <span className="text-[9.5px] text-warning">
-            в раскадровке — {groupDurationSec} с
+            {t(`в раскадровке — ${groupDurationSec} с`, `storyboard says ${groupDurationSec} s`)}
           </span>
         )}
       </div>
@@ -196,7 +206,7 @@ export default function GenerateSheet({
         className="w-full accent-[var(--violet-400)]"
       />
 
-      <div className="section-label mb-2 mt-3.5">Качество</div>
+      <div className="section-label mb-2 mt-3.5">{t("Качество", "Quality")}</div>
       <div className="flex gap-1.5">
         {QUALITIES.map((q) => (
           <button
@@ -219,11 +229,11 @@ export default function GenerateSheet({
       </div>
       {klingFallback && (
         <div className="mt-1.5 text-[10px] text-warning">
-          Kling не поддерживает 480p — уйдёт в 720p автоматически.
+          {t("Kling не поддерживает 480p — уйдёт в 720p автоматически.", "Kling has no 480p — it falls back to 720p automatically.")}
         </div>
       )}
 
-      <div className="section-label mb-2 mt-3.5">Формат (соотношение сторон)</div>
+      <div className="section-label mb-2 mt-3.5">{t("Формат (соотношение сторон)", "Format (aspect ratio)")}</div>
       <div className="flex flex-wrap gap-1.5">
         {ASPECTS.map((a) => (
           <button
@@ -260,10 +270,10 @@ export default function GenerateSheet({
             onClick={() => setPickerOpen(true)}
             className="rounded-md border border-[var(--border-default)] px-2.5 py-1.5 text-[10px] font-semibold text-t200"
           >
-            Выбрать
+            {t("Выбрать", "Choose")}
           </button>
           <button
-            aria-label="Сбросить start-frame"
+            aria-label="Reset start-frame"
             onClick={() => setStartFrame("")}
             className="flex h-8 w-8 items-center justify-center rounded-md text-t400 hover:text-danger"
           >
@@ -275,7 +285,7 @@ export default function GenerateSheet({
           onClick={() => setPickerOpen(true)}
           className="flex min-h-11 w-full items-center justify-center rounded-lg border border-dashed border-[var(--border-default)] text-[11px] text-t300 hover:border-[var(--border-strong)]"
         >
-          Выбрать из референсов…
+          {t("Выбрать из референсов…", "Choose from references…")}
         </button>
       )}
       {pickerOpen && (
@@ -305,28 +315,34 @@ export default function GenerateSheet({
           ))}
           {!startFrames.length && (
             <span className="px-2 py-3 text-[11px] text-t400">
-              Нет референсов — добавьте на карточке шота или в референсах серии.
+              {t(
+                "Нет референсов — добавьте на карточке шота или в референсах серии.",
+                "No references — add them on the shot card or in episode references.",
+              )}
             </span>
           )}
         </div>
       )}
 
       <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5">
-        <span className="text-[11px] text-t300">Оценка списания:</span>
+        <span className="text-[11px] text-t300">{t("Оценка списания:", "Estimated charge:")}</span>
         <span className="font-mono text-[10px] text-t400">
-          {duration}с · {quality} · {aspect}
+          {duration}{t("с", "s")} · {quality} · {aspect}
         </span>
         <span className="flex-1" />
         <span className="font-mono text-[13px] font-semibold text-t100">
           ≈ {estimate}
-          {hasUnknown ? "+?" : ""} кр
+          {hasUnknown ? "+?" : ""} {t("кр", "cr")}
         </span>
       </div>
 
       {confirmInfo && (
         <div className="mt-3 rounded-lg border border-[rgba(194,71,106,.5)] bg-[rgba(194,71,106,.1)] px-3 py-2.5 text-[12px] leading-relaxed text-[#e08aa4]">
-          ≈{confirmInfo.estimate} кр — выше лимита подтверждения ({confirmInfo.limit} кр).
-          {confirmStep === 1 ? " Нажмите ещё раз, чтобы точно запустить." : ""}
+          {t(
+            `≈${confirmInfo.estimate} кр — выше лимита подтверждения (${confirmInfo.limit} кр).`,
+            `≈${confirmInfo.estimate} cr — above the confirmation limit (${confirmInfo.limit} cr).`,
+          )}
+          {confirmStep === 1 ? t(" Нажмите ещё раз, чтобы точно запустить.", " Press again to really launch.") : ""}
         </div>
       )}
       {error && <div className="mt-3 text-[11.5px] text-danger">{error}</div>}
@@ -348,12 +364,15 @@ export default function GenerateSheet({
         }}
       >
         {pending
-          ? "Отправка…"
+          ? t("Отправка…", "Submitting…")
           : confirmInfo
             ? confirmStep >= 2
-              ? `Точно запустить · ${confirmInfo.estimate} кр`
-              : `Подтвердить ${confirmInfo.estimate} кр`
-            : `Запустить ${selected.size} ${selected.size === 1 ? "задачу" : "задачи"}`}
+              ? t(`Точно запустить · ${confirmInfo.estimate} кр`, `Really launch · ${confirmInfo.estimate} cr`)
+              : t(`Подтвердить ${confirmInfo.estimate} кр`, `Confirm ${confirmInfo.estimate} cr`)
+            : t(
+                `Запустить ${selected.size} ${selected.size === 1 ? "задачу" : "задачи"}`,
+                `Launch ${selected.size} ${selected.size === 1 ? "job" : "jobs"}`,
+              )}
       </button>
     </Sheet>
   );

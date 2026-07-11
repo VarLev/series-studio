@@ -18,6 +18,9 @@ export const DEFAULT_SETTINGS = {
   // шаблоны промптов (редактируются в «Настройках»)
   tpl_storyboard: DEFAULT_STORYBOARD_TEMPLATE,
   tpl_video: DEFAULT_VIDEO_TEMPLATE,
+  // интерфейс
+  ui_lang: "ru", // ru | en
+  ui_theme: "stigma", // stigma (фиолетовый) | vault (графит + янтарь)
 } as const;
 
 export type SettingKey = keyof typeof DEFAULT_SETTINGS;

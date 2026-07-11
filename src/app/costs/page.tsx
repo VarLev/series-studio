@@ -10,6 +10,7 @@ import {
   videoModels,
 } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
+import { getT } from "@/lib/i18n-server";
 import { saveSettings, logoutAction } from "@/lib/actions/settings";
 import { ScreenHeader, SectionLabel, EmptyState } from "@/components/ui";
 import KnowledgeIngest from "@/components/costs/KnowledgeIngest";
@@ -24,6 +25,7 @@ export default async function CostsPage() {
   await requireAuth();
   const db = await getDb();
   const settings = await getAllSettings();
+  const t = await getT();
   const priceIn = Number(settings.llm_price_in) || 0;
   const priceOut = Number(settings.llm_price_out) || 0;
 
@@ -70,27 +72,32 @@ export default async function CostsPage() {
   );
 
   const fields: Array<{ key: string; label: string; hint?: string; textarea?: boolean }> = [
-    { key: "series_title", label: "Название сериала" },
-    { key: "series_rules", label: "Правила сериала", hint: "тон, жанр, запреты — контекст всех LLM-вызовов", textarea: true },
-    { key: "llm_model", label: "Модель LLM (промпты, раскадровка)" },
-    { key: "llm_model_synopsis", label: "Модель LLM для сюжетов", hint: "например claude-opus-4-8" },
-    { key: "llm_price_in", label: "Тариф LLM, $ за 1М входных токенов" },
-    { key: "llm_price_out", label: "Тариф LLM, $ за 1М выходных токенов" },
-    { key: "target_models", label: "Модели A/B по умолчанию (id через запятую)", hint: "из каталога ниже" },
+    { key: "series_title", label: t("Название сериала", "Series title") },
+    {
+      key: "series_rules",
+      label: t("Правила сериала", "Series rules"),
+      hint: t("тон, жанр, запреты — контекст всех LLM-вызовов", "tone, genre, restrictions — context for all LLM calls"),
+      textarea: true,
+    },
+    { key: "llm_model", label: t("Модель LLM (промпты, раскадровка)", "LLM model (prompts, breakdown)") },
+    { key: "llm_model_synopsis", label: t("Модель LLM для сюжетов", "LLM model for stories"), hint: t("например claude-opus-4-8", "e.g. claude-opus-4-8") },
+    { key: "llm_price_in", label: t("Тариф LLM, $ за 1М входных токенов", "LLM price, $ per 1M input tokens") },
+    { key: "llm_price_out", label: t("Тариф LLM, $ за 1М выходных токенов", "LLM price, $ per 1M output tokens") },
+    { key: "target_models", label: t("Модели A/B по умолчанию (id через запятую)", "Default A/B models (comma-separated ids)"), hint: t("из каталога ниже", "from the catalog below") },
   ];
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader backHref="/episodes" eyebrow="Пульт" title="Затраты и настройки" />
+      <ScreenHeader backHref="/episodes" eyebrow={t("Пульт", "Console")} title={t("Затраты и настройки", "Costs & settings")} />
       <div className="flex flex-col gap-6 p-4 pb-12">
         {/* M7 — сводка */}
         <div className="flex flex-col gap-2">
-          <SectionLabel>Итого</SectionLabel>
+          <SectionLabel>{t("Итого", "Total")}</SectionLabel>
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5">
               <div className="font-mono text-[20px] font-semibold text-t100">{totalCredits}</div>
               <div className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-t400">
-                кредитов Higgsfield
+                {t("кредитов Higgsfield", "Higgsfield credits")}
               </div>
             </div>
             <div className="rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5">
@@ -98,22 +105,22 @@ export default async function CostsPage() {
                 ${totalUsd.toFixed(2)}
               </div>
               <div className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-t400">
-                LLM Anthropic · {usage.length} вызовов
+                {t(`LLM Anthropic · ${usage.length} вызовов`, `LLM Anthropic · ${usage.length} calls`)}
               </div>
             </div>
           </div>
           <div className="rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3.5 py-2.5 font-mono text-[11px] text-t300">
-            За текущий месяц (весь сериал):{" "}
-            <span className="text-t100">{monthCredits} кр</span> +{" "}
+            {t("За текущий месяц (весь сериал):", "This month (whole series):")}{" "}
+            <span className="text-t100">{monthCredits} {t("кр", "cr")}</span> +{" "}
             <span className="text-t100">${monthUsd.toFixed(2)} LLM</span>
           </div>
         </div>
 
         {/* M7 — по эпизодам */}
         <div className="flex flex-col gap-2">
-          <SectionLabel>По эпизодам</SectionLabel>
+          <SectionLabel>{t("По эпизодам", "By episode")}</SectionLabel>
           {perEpisode.filter((e) => e.jobs > 0 || e.usd > 0).length === 0 && (
-            <EmptyState>Затрат пока нет — запустите первую генерацию.</EmptyState>
+            <EmptyState>{t("Затрат пока нет — запустите первую генерацию.", "No costs yet — start your first generation.")}</EmptyState>
           )}
           {perEpisode
             .filter((e) => e.jobs > 0 || e.usd > 0)
@@ -123,7 +130,7 @@ export default async function CostsPage() {
                 className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5"
               >
                 <div className="flex items-baseline gap-2">
-                  <span className="eyebrow">Серия {String(ep.number).padStart(2, "0")}</span>
+                  <span className="eyebrow">{t("Серия", "Episode")} {String(ep.number).padStart(2, "0")}</span>
                   <span className="truncate text-[12.5px] font-semibold text-t100">{ep.title}</span>
                 </div>
                 {[...byModel.entries()].map(([model, cr]) => (
@@ -141,12 +148,13 @@ export default async function CostsPage() {
                       />
                     </div>
                     <span className="w-14 shrink-0 text-right font-mono text-[10px] text-t300">
-                      {cr} кр
+                      {cr} {t("кр", "cr")}
                     </span>
                   </div>
                 ))}
                 <div className="font-mono text-[11px] text-t300">
-                  Серия обошлась в <span className="text-t100">{credits} кредитов</span> +{" "}
+                  {t("Серия обошлась в", "Episode cost:")}{" "}
+                  <span className="text-t100">{credits} {t("кредитов", "credits")}</span> +{" "}
                   <span className="text-t100">${usd.toFixed(2)} LLM</span>
                 </div>
               </div>
@@ -155,7 +163,9 @@ export default async function CostsPage() {
 
         {/* Каталог моделей (TZ §0.2) */}
         <div className="flex flex-col gap-2">
-          <SectionLabel hint="живой каталог Higgsfield, хранится в БД">Каталог моделей</SectionLabel>
+          <SectionLabel hint={t("живой каталог Higgsfield, хранится в БД", "live Higgsfield catalog, stored in DB")}>
+            {t("Каталог моделей", "Model catalog")}
+          </SectionLabel>
           {models.length ? (
             <div className="flex flex-col gap-1.5">
               {models.map((m) => (
@@ -170,20 +180,20 @@ export default async function CostsPage() {
                     {m.kind}
                   </span>
                   <span className="font-mono text-[10px] text-t400">
-                    {m.credits != null ? `~${m.credits} кр` : ""}
+                    {m.credits != null ? t(`~${m.credits} кр`, `~${m.credits} cr`) : ""}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <EmptyState>Каталог пуст — нажмите «Обновить каталог моделей».</EmptyState>
+            <EmptyState>{t("Каталог пуст — нажмите «Обновить каталог моделей».", "Catalog is empty — press Refresh model catalog.")}</EmptyState>
           )}
           <CatalogRefresh />
         </div>
 
         {/* Настройки */}
         <form action={saveSettings} className="flex flex-col gap-3">
-          <SectionLabel>Настройки</SectionLabel>
+          <SectionLabel>{t("Настройки", "Settings")}</SectionLabel>
           {fields.map((f) => (
             <label key={f.key} className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-t300">
@@ -208,7 +218,10 @@ export default async function CostsPage() {
           ))}
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-t300">
-              Лимит подтверждения — задачи дороже требуют двухшагового подтверждения
+              {t(
+                "Лимит подтверждения — задачи дороже требуют двухшагового подтверждения",
+                "Confirmation limit — jobs above it require a two-step confirmation",
+              )}
             </span>
             <LimitStepper
               name="credit_confirm_limit"
@@ -220,14 +233,14 @@ export default async function CostsPage() {
             className="min-h-12 rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            Сохранить настройки
+            {t("Сохранить настройки", "Save settings")}
           </button>
         </form>
 
         {/* База знаний */}
         <div className="flex flex-col gap-2">
-          <SectionLabel hint="папка /knowledge в проекте (.md, .txt)">
-            База знаний промпт-фабрики
+          <SectionLabel hint={t("папка /knowledge в проекте (.md, .txt)", "the /knowledge folder in the project (.md, .txt)")}>
+            {t("База знаний промпт-фабрики", "Prompt factory knowledge base")}
           </SectionLabel>
           {docs.length ? (
             <div className="flex flex-col gap-1.5">
@@ -241,7 +254,7 @@ export default async function CostsPage() {
                   <ConfirmButton
                     action={deleteKnowledgeDoc.bind(null, d.id)}
                     label="🗑"
-                    confirmLabel="Удалить?"
+                    confirmLabel={t("Удалить?", "Delete?")}
                     className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
                     armedClassName="text-danger"
                   />
@@ -250,17 +263,19 @@ export default async function CostsPage() {
               {docs.length > 1 && (
                 <ConfirmButton
                   action={clearKnowledge}
-                  label={`Очистить базу знаний (${docs.length})`}
-                  confirmLabel="Точно очистить всю базу знаний?"
-                  doneToast="База знаний очищена"
+                  label={t(`Очистить базу знаний (${docs.length})`, `Clear knowledge base (${docs.length})`)}
+                  confirmLabel={t("Точно очистить всю базу знаний?", "Really clear the whole knowledge base?")}
+                  doneToast={t("База знаний очищена", "Knowledge base cleared")}
                   className="mt-1 min-h-10 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
                 />
               )}
             </div>
           ) : (
             <EmptyState>
-              Положите свои PDF-материалы (конвертированные в .md) в папку /knowledge и нажмите
-              «Обновить».
+              {t(
+                "Положите свои PDF-материалы (конвертированные в .md) в папку /knowledge и нажмите «Обновить».",
+                "Put your PDF materials (converted to .md) into the /knowledge folder and press Refresh.",
+              )}
             </EmptyState>
           )}
           <KnowledgeIngest />
@@ -272,7 +287,7 @@ export default async function CostsPage() {
               type="submit"
               className="min-h-11 w-full rounded-lg border border-[var(--border-subtle)] text-[11px] font-semibold uppercase tracking-[0.1em] text-t300 hover:text-t100"
             >
-              Выйти
+              {t("Выйти", "Sign out")}
             </button>
           </form>
         )}

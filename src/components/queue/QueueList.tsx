@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cancelGeneration } from "@/lib/actions/generate";
+import { useT } from "@/components/I18nProvider";
 
 interface QueueItem {
   id: string;
@@ -49,6 +50,7 @@ export default function QueueList({
   cancellable?: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, startTransition] = useTransition();
 
   return (
@@ -74,7 +76,7 @@ export default function QueueList({
               </span>
               <span className="block font-mono text-[9.5px] text-t400">
                 {item.model}
-                {isActive && item.estimate != null ? ` · ≈${item.estimate} кр` : ""}
+                {isActive && item.estimate != null ? t(` · ≈${item.estimate} кр`, ` · ≈${item.estimate} cr`) : ""}
                 {item.error ? ` · ${item.error.slice(0, 60)}` : ""}
               </span>
             </Link>
@@ -83,11 +85,11 @@ export default function QueueList({
             ) : (
               <span className="font-mono text-[10px] text-t400">
                 {item.status === "done" && item.credits != null
-                  ? `−${item.credits} кр`
+                  ? t(`−${item.credits} кр`, `−${item.credits} cr`)
                   : item.status !== "done"
-                    ? "отказ"
+                    ? t("отказ", "failed")
                     : ""}{" "}
-                {new Date(item.createdAt).toLocaleTimeString("ru", {
+                {new Date(item.createdAt).toLocaleTimeString(t("ru", "en"), {
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
@@ -95,7 +97,7 @@ export default function QueueList({
             )}
             {cancellable && isActive && (
               <button
-                aria-label="Отменить"
+                aria-label="Cancel"
                 disabled={pending}
                 onClick={() =>
                   startTransition(async () => {

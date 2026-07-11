@@ -9,8 +9,15 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import ConfirmButton from "@/components/ConfirmButton";
 import { toast } from "@/components/Toaster";
-import { saveTemplate, resetTemplate, saveTechnique, deleteTechnique } from "@/lib/actions/settingsPage";
+import {
+  saveTemplate,
+  resetTemplate,
+  saveTechnique,
+  deleteTechnique,
+  saveUiPref,
+} from "@/lib/actions/settingsPage";
 import { SectionLabel } from "@/components/ui";
+import { useT } from "@/components/I18nProvider";
 
 export interface TechniqueCard {
   id: string;
@@ -39,6 +46,7 @@ function TemplateEditor({
   initial: string;
 }) {
   const router = useRouter();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(initial);
   const [pending, startTransition] = useTransition();
@@ -70,23 +78,31 @@ function TemplateEditor({
               onClick={() =>
                 startTransition(async () => {
                   const res = await saveTemplate(settingKey, value);
-                  toast(res.ok ? "Шаблон сохранён" : ("error" in res && res.error) || "Ошибка");
+                  toast(
+                    res.ok
+                      ? t("Шаблон сохранён", "Template saved")
+                      : ("error" in res && res.error) || t("Ошибка", "Error"),
+                  );
                   router.refresh();
                 })
               }
               disabled={pending || !dirty}
               className="min-h-10 flex-1 rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.1em] text-white hover:bg-violet-400 disabled:opacity-50"
             >
-              {pending ? "Сохранение…" : dirty ? "Сохранить шаблон" : "Сохранено"}
+              {pending
+                ? t("Сохранение…", "Saving…")
+                : dirty
+                  ? t("Сохранить шаблон", "Save template")
+                  : t("Сохранено", "Saved")}
             </button>
             <ConfirmButton
               action={async () => {
                 await resetTemplate(settingKey);
                 setValue(initial); // сервер отдаст стандартный после refresh
               }}
-              label="Сбросить"
-              confirmLabel="Вернуть стандартный?"
-              doneToast="Шаблон сброшен к стандартному"
+              label={t("Сбросить", "Reset")}
+              confirmLabel={t("Вернуть стандартный?", "Restore the default?")}
+              doneToast={t("Шаблон сброшен к стандартному", "Template reset to default")}
               className="min-h-10 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold text-t300 hover:bg-ink-500 disabled:opacity-50"
             />
           </div>
@@ -100,12 +116,18 @@ export default function SettingsClient({
   storyboardTemplate,
   videoTemplate,
   techniques,
+  uiLang,
+  uiTheme,
 }: {
   storyboardTemplate: string;
   videoTemplate: string;
   techniques: TechniqueCard[];
+  uiLang: string;
+  uiTheme: string;
 }) {
   const router = useRouter();
+  const t = useT();
+  const tr = t; // алиас: внутри map((t) => …) имя t занято приёмом
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [limit, setLimit] = useState(PAGE);
@@ -164,27 +186,69 @@ export default function SettingsClient({
         tags: draft.tags,
       });
       if (res.ok) {
-        toast(draft.id ? "Приём обновлён" : "Приём добавлен");
+        toast(draft.id ? t("Приём обновлён", "Technique updated") : t("Приём добавлен", "Technique added"));
         setEditing(false);
         setDraft(null);
         router.refresh();
-      } else toast(("error" in res && res.error) || "Ошибка");
+      } else toast(("error" in res && res.error) || t("Ошибка", "Error"));
     });
   }
 
   return (
     <div className="flex flex-col gap-3 px-4 pb-10">
-      <SectionLabel>Шаблоны промптов</SectionLabel>
+      <SectionLabel>{t("Интерфейс", "Interface")}</SectionLabel>
+      <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5 sm:flex-row">
+        <label className="flex flex-1 flex-col gap-1">
+          <span className="section-label">{t("Язык", "Language")}</span>
+          <select
+            value={uiLang}
+            onChange={(e) =>
+              startTransition(async () => {
+                await saveUiPref("ui_lang", e.target.value);
+                router.refresh();
+              })
+            }
+            className="min-h-10 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
+          >
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className="section-label">{t("Стиль", "Style")}</span>
+          <select
+            value={uiTheme}
+            onChange={(e) =>
+              startTransition(async () => {
+                await saveUiPref("ui_theme", e.target.value);
+                router.refresh();
+              })
+            }
+            className="min-h-10 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
+          >
+            <option value="stigma">{t("Stigma — тёмный фиолетовый", "Stigma — dark violet")}</option>
+            <option value="vault">{t("Vault — графит и янтарь", "Vault — graphite & amber")}</option>
+          </select>
+        </label>
+      </div>
+
+      <SectionLabel>{t("Шаблоны промптов", "Prompt templates")}</SectionLabel>
       <TemplateEditor
         settingKey="tpl_storyboard"
-        title="Шаблон раскадровки (Nano Banana)"
-        hint="Плейсхолдеры: {{GRID}}, {{PANELS}}, {{REFERENCES}}, {{STORY}}, {{PANEL_STRUCTURE}} — подставляются при сборке на вкладке «Раскадровка»."
+        title={t("Шаблон раскадровки (Nano Banana)", "Storyboard template (Nano Banana)")}
+        hint={t(
+          "Плейсхолдеры: {{GRID}}, {{PANELS}}, {{REFERENCES}}, {{STORY}}, {{PANEL_STRUCTURE}} — подставляются при сборке на вкладке «Раскадровка».",
+          "Placeholders: {{GRID}}, {{PANELS}}, {{REFERENCES}}, {{STORY}}, {{PANEL_STRUCTURE}} — filled when assembling on the Storyboard tab.",
+        )}
         initial={storyboardTemplate}
       />
       <TemplateEditor
         settingKey="tpl_video"
-        title="Шаблон видео-промпта (системный для Claude)"
-        hint="Инструкция, по которой промпт-фабрика пишет мультишот-промпты для Seedance/Kling. Кнопка «Сгенерировать промпт» на карточке шота."
+        title={t("Шаблон видео-промпта (системный для Claude)", "Video prompt template (Claude system prompt)")}
+        hint={t(
+          "Инструкция, по которой промпт-фабрика пишет мультишот-промпты для Seedance/Kling. Кнопка «Сгенерировать промпт» на карточке шота.",
+          "The instruction the prompt factory follows to write multi-shot prompts for Seedance/Kling. The Generate prompt button on the shot card.",
+        )}
         initial={videoTemplate}
       />
 
@@ -194,16 +258,18 @@ export default function SettingsClient({
             onClick={openNew}
             className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:text-violet-100"
           >
-            + Добавить приём
+            {t("+ Добавить приём", "+ Add technique")}
           </button>
         }
       >
-        Режиссёрские приёмы · {techniques.length}
+        {t("Режиссёрские приёмы", "Director techniques")} · {techniques.length}
       </SectionLabel>
       <div className="text-[10.5px] leading-relaxed text-t400">
-        <span className="text-violet-600">✦</span>&nbsp; Промпт-фабрика сама подбирает подходящие
-        приёмы к каждому шоту и вплетает их в видео-промпт. Использованные приёмы видны бейджами 🎥
-        под промптом шота.
+        <span className="text-violet-600">✦</span>&nbsp;{" "}
+        {t(
+          "Промпт-фабрика сама подбирает подходящие приёмы к каждому шоту и вплетает их в видео-промпт. Использованные приёмы видны бейджами 🎥 под промптом шота.",
+          "The prompt factory picks fitting techniques for each shot and weaves them into the video prompt. Used techniques show as 🎥 badges under the shot prompt.",
+        )}
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -213,7 +279,7 @@ export default function SettingsClient({
             setQuery(e.target.value);
             setLimit(PAGE);
           }}
-          placeholder="Поиск по названию, тегам, тексту…"
+          placeholder={t("Поиск по названию, тегам, тексту…", "Search by title, tags, text…")}
           className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
         />
         <select
@@ -224,7 +290,7 @@ export default function SettingsClient({
           }}
           className="min-h-10 rounded-lg border border-[var(--border-default)] bg-ink-600 px-2 text-[11.5px] text-t100 outline-none"
         >
-          <option value="">Все категории</option>
+          <option value="">{t("Все категории", "All categories")}</option>
           {categories.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -248,14 +314,14 @@ export default function SettingsClient({
               <span className="mt-0.5 block truncate font-mono text-[9px] text-t400">
                 {t.category}
                 {t.camera ? ` · ${t.camera}` : ""}
-                {t.custom ? " · свой" : ""}
+                {t.custom ? ` · ${tr("свой", "custom")}` : ""}
               </span>
             </span>
           </button>
         ))}
         {filtered.length === 0 && (
           <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-4 text-center text-[11px] text-t400">
-            Ничего не найдено
+            {t("Ничего не найдено", "Nothing found")}
           </div>
         )}
         {filtered.length > limit && (
@@ -263,7 +329,7 @@ export default function SettingsClient({
             onClick={() => setLimit((v) => v + PAGE)}
             className="min-h-10 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t300 hover:bg-ink-600"
           >
-            Показать ещё ({filtered.length - limit})
+            {t(`Показать ещё (${filtered.length - limit})`, `Show more (${filtered.length - limit})`)}
           </button>
         )}
       </div>
@@ -300,16 +366,16 @@ export default function SettingsClient({
                 onClick={() => openEdit(selected)}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t200 hover:bg-ink-500"
               >
-                ✎ Править
+                {t("✎ Править", "✎ Edit")}
               </button>
               <ConfirmButton
                 action={async () => {
                   await deleteTechnique(selected.id);
                   setSelected(null);
                 }}
-                label="Удалить"
-                confirmLabel="Точно удалить приём?"
-                doneToast="Приём удалён"
+                label={t("Удалить", "Delete")}
+                confirmLabel={t("Точно удалить приём?", "Really delete this technique?")}
+                doneToast={t("Приём удалён", "Technique deleted")}
                 className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] px-3 text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
               />
             </div>
@@ -324,48 +390,48 @@ export default function SettingsClient({
           setEditing(false);
           setDraft(null);
         }}
-        title={draft?.id ? "Правка приёма" : "Новый приём"}
+        title={draft?.id ? t("Правка приёма", "Edit technique") : t("Новый приём", "New technique")}
       >
         {draft && (
           <div className="flex flex-col gap-2 pb-2">
             <input
               value={draft.title}
               onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-              placeholder="Название приёма"
+              placeholder={t("Название приёма", "Technique title")}
               className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[13px] font-semibold text-t100 outline-none focus:border-[var(--border-strong)]"
             />
             <div className="flex gap-2">
               <input
                 value={draft.category}
                 onChange={(e) => setDraft({ ...draft, category: e.target.value })}
-                placeholder="Категория"
+                placeholder={t("Категория", "Category")}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
               />
               <input
                 value={draft.camera}
                 onChange={(e) => setDraft({ ...draft, camera: e.target.value })}
-                placeholder="Камера (напр. Steadicam)"
+                placeholder={t("Камера (напр. Steadicam)", "Camera (e.g. Steadicam)")}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
               />
             </div>
             <input
               value={draft.tags}
               onChange={(e) => setDraft({ ...draft, tags: e.target.value })}
-              placeholder="Теги через запятую (one-take, chase…)"
+              placeholder={t("Теги через запятую (one-take, chase…)", "Comma-separated tags (one-take, chase…)")}
               className="min-h-10 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 font-mono text-[11px] text-t200 outline-none focus:border-[var(--border-strong)]"
             />
             <textarea
               value={draft.prompt}
               onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
               rows={7}
-              placeholder="Текст приёма (английский промпт)…"
+              placeholder={t("Текст приёма (английский промпт)…", "Technique text (English prompt)…")}
               className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
             />
             <textarea
               value={draft.negative}
               onChange={(e) => setDraft({ ...draft, negative: e.target.value })}
               rows={3}
-              placeholder="Negative prompt (по желанию)…"
+              placeholder={t("Negative prompt (по желанию)…", "Negative prompt (optional)…")}
               className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[10.5px] leading-relaxed text-t400 outline-none focus:border-[var(--border-strong)]"
             />
             <button
@@ -374,7 +440,7 @@ export default function SettingsClient({
               className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
               style={{ boxShadow: "var(--glow-violet-sm)" }}
             >
-              {pending ? "Сохранение…" : "Сохранить приём"}
+              {pending ? t("Сохранение…", "Saving…") : t("Сохранить приём", "Save technique")}
             </button>
           </div>
         )}

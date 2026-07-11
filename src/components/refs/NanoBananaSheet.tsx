@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { startNanoBanana } from "@/lib/actions/generate";
+import { useT } from "@/components/I18nProvider";
 
 const RATIOS = ["16:9", "9:16", "1:1"] as const;
 const RESOLUTIONS = [
@@ -26,6 +27,7 @@ export default function NanoBananaSheet({
   prefillPrompt?: string;
 }) {
   const router = useRouter();
+  const t = useT();
   const [prompt, setPrompt] = useState(prefillPrompt);
   const [ratio, setRatio] = useState<(typeof RATIOS)[number]>("16:9");
   const [resolution, setResolution] = useState<(typeof RESOLUTIONS)[number]["id"]>("2k");
@@ -50,7 +52,12 @@ export default function NanoBananaSheet({
         resolution,
       });
       if (res.ok) {
-        toast(`Nano Banana поставлен · ${credits} кр — референс появится в серии`);
+        toast(
+          t(
+            `Nano Banana поставлен · ${credits} кр — референс появится в серии`,
+            `Nano Banana queued · ${credits} cr — the reference will appear in the episode`,
+          ),
+        );
         onClose();
         router.refresh();
       } else if ("error" in res) setError(res.error);
@@ -58,16 +65,16 @@ export default function NanoBananaSheet({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Nano Banana · новый референс">
+    <Sheet open={open} onClose={onClose} title={t("Nano Banana · новый референс", "Nano Banana · new reference")}>
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={4}
         autoFocus
-        placeholder="Опишите изображение (на английском — точнее)…"
+        placeholder={t("Опишите изображение (на английском — точнее)…", "Describe the image (English works best)…")}
         className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t100 outline-none focus:border-[var(--border-strong)]"
       />
-      <div className="section-label mb-2 mt-3.5">Соотношение</div>
+      <div className="section-label mb-2 mt-3.5">{t("Соотношение", "Aspect ratio")}</div>
       <div className="flex gap-1.5">
         {RATIOS.map((r) => (
           <button
@@ -84,7 +91,7 @@ export default function NanoBananaSheet({
           </button>
         ))}
       </div>
-      <div className="section-label mb-2 mt-3.5">Разрешение</div>
+      <div className="section-label mb-2 mt-3.5">{t("Разрешение", "Resolution")}</div>
       <div className="flex gap-1.5">
         {RESOLUTIONS.map((r) => (
           <button
@@ -102,7 +109,7 @@ export default function NanoBananaSheet({
             >
               {r.label}
             </span>
-            <span className="font-mono text-[9px] text-t400">{r.credits} кр</span>
+            <span className="font-mono text-[9px] text-t400">{r.credits} {t("кр", "cr")}</span>
           </button>
         ))}
       </div>
@@ -113,7 +120,7 @@ export default function NanoBananaSheet({
         className="mt-4 min-h-[52px] w-full rounded-lg bg-violet-500 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-50"
         style={{ boxShadow: "var(--glow-violet-sm)" }}
       >
-        {pending ? "Отправка…" : `Нарисовать · ${credits} кр`}
+        {pending ? t("Отправка…", "Submitting…") : t(`Нарисовать · ${credits} кр`, `Draw · ${credits} cr`)}
       </button>
     </Sheet>
   );

@@ -2,23 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useT } from "@/components/I18nProvider";
 
 const ITEMS = [
-  { href: "/episodes", label: "Серии", icon: "▤" },
-  { href: "/bible", label: "Библия", icon: "❖" },
-  { href: "/queue", label: "Очередь", icon: "⏳" },
-  { href: "/costs", label: "Затраты", icon: "◔" },
-  { href: "/settings", label: "Настройки", icon: "⚙" },
-];
-
-const HOTKEYS: Array<[string, string]> = [
-  ["J / K", "след. / пред. шот"],
-  ["G", "генерация"],
-  ["P", "промпт"],
-  ["← →", "покадрово"],
-  ["Space", "play / pause"],
-  ["Enter", "победитель"],
-  ["Esc", "назад"],
+  { href: "/episodes", ru: "Серии", en: "Episodes", icon: "▤" },
+  { href: "/bible", ru: "Библия", en: "Bible", icon: "❖" },
+  { href: "/queue", ru: "Очередь", en: "Queue", icon: "⏳" },
+  { href: "/costs", ru: "Затраты", en: "Costs", icon: "◔" },
+  { href: "/settings", ru: "Настройки", en: "Settings", icon: "⚙" },
 ];
 
 /**
@@ -30,6 +21,7 @@ const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/costs", "/settings"];
 /** Нижний таб-бар (мобайл, spec §2.1) + сайдбар (десктоп, spec §4). */
 export default function NavClient({ activeJobs }: { activeJobs: number }) {
   const pathname = usePathname();
+  const t = useT();
   if (pathname === "/login") return null;
   const showTabBar = TOP_LEVEL.includes(pathname);
 
@@ -59,7 +51,7 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
               >
                 <span className="text-[16px] leading-none">{item.icon}</span>
                 <span className="text-[9.5px] font-semibold uppercase tracking-[0.1em]">
-                  {item.label}
+                  {t(item.ru, item.en)}
                 </span>
                 {item.href === "/queue" && activeJobs > 0 && (
                   <span className="pulse-amber absolute right-[calc(50%-22px)] top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 font-mono text-[9px] font-bold text-ink-900">
@@ -79,7 +71,7 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
         <div className="px-4 pb-4 pt-6">
           <div className="eyebrow mb-1">Series Studio</div>
           <div className="chrome-text font-display text-[15px] font-bold uppercase tracking-[0.06em]">
-            Пульт
+            {t("Пульт", "Console")}
           </div>
         </div>
         <nav className="flex flex-col gap-0.5 px-2">
@@ -96,7 +88,7 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
                 }}
               >
                 <span className="w-4 text-center">{item.icon}</span>
-                {item.label}
+                {t(item.ru, item.en)}
                 {item.href === "/queue" && activeJobs > 0 && (
                   <span className="pulse-amber ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 font-mono text-[9px] font-bold text-ink-900">
                     {activeJobs}
@@ -106,19 +98,6 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
             );
           })}
         </nav>
-        <div className="mt-auto px-4 pb-5">
-          <div className="section-label mb-2">Горячие клавиши</div>
-          <div className="flex flex-col gap-1">
-            {HOTKEYS.map(([key, label]) => (
-              <div key={key} className="flex items-center gap-2 text-[10px] text-t400">
-                <span className="rounded border border-[var(--border-subtle)] bg-ink-700 px-1.5 py-0.5 font-mono text-[9px] text-t300">
-                  {key}
-                </span>
-                {label}
-              </div>
-            ))}
-          </div>
-        </div>
       </aside>
     </>
   );

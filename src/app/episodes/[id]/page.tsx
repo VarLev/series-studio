@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, references, shots, shotEntities, entities } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
+import { getT } from "@/lib/i18n-server";
 import { getFileUrl } from "@/lib/storage";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
@@ -152,29 +153,30 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
   };
 
   const epNumber = String(episode.number).padStart(2, "0");
+  const t = await getT();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
       <ScreenHeader
         backHref="/episodes"
-        eyebrow={`Серия ${epNumber}`}
-        title={episode.title || "Без названия"}
+        eyebrow={`${t("Серия", "Episode")} ${epNumber}`}
+        title={episode.title || t("Без названия", "Untitled")}
         right={
           <div className="flex items-center gap-1.5">
             <Link
               href={`/episodes/${episode.id}/refs`}
-              title="Референсы серии"
+              title={t("Референсы серии", "Episode references")}
               className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:bg-ink-500"
             >
               REF
             </Link>
             <Link
               href={`/episodes/${episode.id}/gallery`}
-              title="Галерея утверждённых шотов"
+              title={t("Галерея утверждённых шотов", "Approved shots gallery")}
               className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
             >
               <span className="text-[13px] leading-none">🎞</span>
-              <span className="hidden md:inline">Галерея</span>
+              <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
             </Link>
             <QueuePill />
           </div>

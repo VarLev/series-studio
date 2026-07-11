@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
 import { generateShotPrompt } from "@/lib/actions/prompts";
+import { useT } from "@/components/I18nProvider";
 
 export interface PromptVersion {
   id: string;
@@ -44,6 +45,7 @@ export default function PromptBlock({
   usedTechniques?: UsedTechnique[];
 }) {
   const router = useRouter();
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [model, setModel] = useState(targetModels[0] ?? "kling-3.0");
@@ -72,7 +74,7 @@ export default function PromptBlock({
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-700">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
-        <span className="section-label">Промпт · Claude → видеомодель</span>
+        <span className="section-label">{t("Промпт · Claude → видеомодель", "Prompt · Claude → video model")}</span>
         {current && (
           <button
             onClick={() => setHistoryOpen(true)}
@@ -86,7 +88,7 @@ export default function PromptBlock({
           <>
             <button
               onClick={copy}
-              title="Скопировать промпт"
+              title={t("Скопировать промпт", "Copy prompt")}
               className="flex h-7 w-7 items-center justify-center rounded-md text-t300 hover:bg-ink-500 hover:text-violet-200"
             >
               {copied ? "✓" : "⧉"}
@@ -95,7 +97,7 @@ export default function PromptBlock({
               onClick={() => setExpanded((v) => !v)}
               className="px-0.5 py-1.5 text-[10.5px] text-t300 hover:text-violet-200"
             >
-              {expanded ? "свернуть" : "развернуть"}
+              {expanded ? t("свернуть", "collapse") : t("развернуть", "expand")}
             </button>
           </>
         )}
@@ -128,7 +130,7 @@ export default function PromptBlock({
         {usedTechniques.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] px-3 py-2">
             <span className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-t400">
-              приёмы:
+              {t("приёмы:", "techniques:")}
             </span>
             {usedTechniques.map((t) => (
               <button
@@ -146,8 +148,11 @@ export default function PromptBlock({
       ) : (
         <div className="flex flex-col items-start gap-2.5 p-4">
           <div className="text-[12px] leading-relaxed text-t300">
-            <span className="text-violet-600">✦</span>&nbsp; Промпта ещё нет. Claude соберёт его из
-            фрагмента сюжета, сущностей и базы знаний.
+            <span className="text-violet-600">✦</span>&nbsp;{" "}
+            {t(
+              "Промпта ещё нет. Claude соберёт его из фрагмента сюжета, сущностей и базы знаний.",
+              "No prompt yet. Claude will build it from the story fragment, entities and knowledge base.",
+            )}
           </div>
           <div className="flex w-full flex-wrap items-center gap-2">
             <select
@@ -167,7 +172,7 @@ export default function PromptBlock({
               className="min-h-10 flex-1 rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-60"
               style={{ boxShadow: "var(--glow-violet-sm)" }}
             >
-              {pending ? "Фабрика работает…" : "Сгенерировать промпт"}
+              {pending ? t("Фабрика работает…", "Factory running…") : t("Сгенерировать промпт", "Generate prompt")}
             </button>
           </div>
           {error && <div className="text-[11px] text-danger">{error}</div>}
@@ -207,7 +212,7 @@ export default function PromptBlock({
         )}
       </Sheet>
 
-      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="История версий">
+      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title={t("История версий", "Version history")}>
         <div className="flex flex-col gap-2.5 pb-2">
           {versions.map((v) => (
             <button
@@ -221,12 +226,12 @@ export default function PromptBlock({
                 </span>
                 <span className="font-mono text-[9.5px] text-chrome-mid">{v.targetModel}</span>
                 <span className="ml-auto font-mono text-[9.5px] text-t400">
-                  {v.feedbackNote === "Ручная правка" ? "ручная правка" : "фабрика"} ·{" "}
-                  {new Date(v.createdAt).toLocaleString("ru")}
+                  {v.feedbackNote === "Ручная правка" ? t("ручная правка", "manual edit") : t("фабрика", "factory")} ·{" "}
+                  {new Date(v.createdAt).toLocaleString(t("ru", "en"))}
                 </span>
               </div>
               {v.feedbackNote && (
-                <div className="mb-1.5 text-[11px] italic text-t300">«{v.feedbackNote}»</div>
+                <div className="mb-1.5 text-[11px] text-t300">«{v.feedbackNote}»</div>
               )}
               <div className="line-clamp-4 whitespace-pre-wrap font-mono text-[10.5px] leading-relaxed text-t400">
                 {v.text}

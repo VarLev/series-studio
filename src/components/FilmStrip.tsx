@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
-import { SHOT_STATUS } from "@/components/ui";
+import { SHOT_STATUS } from "@/lib/statuses";
+import { useT } from "@/components/I18nProvider";
 
 export interface StripShot {
   id: string;
@@ -21,6 +24,7 @@ export default function FilmStrip({
   shots: StripShot[];
   currentShotId?: string;
 }) {
+  const t = useT();
   if (shots.length < 2) return null;
   return (
     <div className="flex gap-1.5 overflow-x-auto border-b border-[var(--border-subtle)] bg-ink-900 px-3.5 py-2">
@@ -32,7 +36,7 @@ export default function FilmStrip({
             key={s.id}
             href={`/episodes/${episodeId}/shots/${s.id}`}
             className="w-[38px] shrink-0"
-            title={`Группа ${String(s.orderIndex).padStart(2, "0")} · ${st.label}`}
+            title={`${t("Группа", "Group")} ${String(s.orderIndex).padStart(2, "0")} · ${t(st.ru, st.en)}`}
           >
             <span
               className="relative block aspect-[9/16] overflow-hidden rounded border-[1.5px] bg-ink-600"

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import CopyPackSheet, { type CopyPackRef } from "./CopyPackSheet";
 import GenerateSheet, { type CatalogModel, type StartFrameOption } from "./GenerateSheet";
+import { useT } from "@/components/I18nProvider";
 
 /**
  * Панель действий карточки шота: [Редактор] [Генерировать] [Копи-пак].
@@ -38,6 +39,7 @@ export default function ActionBar({
   aspectRatio: string;
   defaultStartFrameId: string | null;
 }) {
+  const t = useT();
   const [copyPackOpen, setCopyPackOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
 
@@ -54,7 +56,7 @@ export default function ActionBar({
       className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-ink-500 text-t100 hover:bg-ink-400"
     >
       <span>⌨</span>
-      Редактор
+      {t("Редактор", "Editor")}
     </Link>
   );
   const generateBtn = (
@@ -63,10 +65,10 @@ export default function ActionBar({
       disabled={!hasPrompt}
       className="flex items-center justify-center gap-1.5 rounded-lg bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-40"
       style={{ boxShadow: hasPrompt ? "var(--glow-violet-sm)" : "none" }}
-      title={hasPrompt ? "Запустить генерацию Higgsfield" : "Сначала соберите промпт"}
+      title={hasPrompt ? t("Запустить генерацию Higgsfield", "Start Higgsfield generation") : t("Сначала соберите промпт", "Build a prompt first")}
     >
       <span>⚡</span>
-      Генерировать
+      {t("Генерировать", "Generate")}
     </button>
   );
   const copyBtn = (
@@ -76,7 +78,7 @@ export default function ActionBar({
       className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-ink-500 text-t100 hover:bg-ink-400 disabled:opacity-40"
     >
       <span>⧉</span>
-      Копи-пак
+      {t("Копи-пак", "Copy pack")}
     </button>
   );
 
@@ -105,7 +107,7 @@ export default function ActionBar({
         className="fixed right-0 top-0 z-30 hidden h-full w-[196px] flex-col gap-2 border-l border-[var(--border-default)] p-3 pt-[68px] text-[11px] font-semibold uppercase tracking-[0.08em] lg:flex [&>*]:min-h-[46px]"
         style={{ background: "linear-gradient(180deg, rgba(15,12,22,.6), rgba(6,5,9,.4))" }}
       >
-        <div className="section-label mb-1">Действия</div>
+        <div className="section-label mb-1">{t("Действия", "Actions")}</div>
         {generateBtn}
         {editorBtn}
         {copyBtn}

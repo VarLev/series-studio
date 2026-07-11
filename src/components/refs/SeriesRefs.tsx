@@ -15,6 +15,7 @@ import { deleteReference, updateReferenceCaption } from "@/lib/actions/entities"
 import { deleteAllSeriesRefs } from "@/lib/actions/deletes";
 import { EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
+import { useT } from "@/components/I18nProvider";
 
 export interface SeriesRef {
   id: string;
@@ -26,14 +27,14 @@ export interface SeriesRef {
   height: number | null;
 }
 
-const SOURCE_LABEL: Record<string, string> = {
-  upload: "загрузка",
-  "frame-grab": "кадр из ревью",
-  "nano-banana": "Nano Banana",
-  upscale: "upscale",
-  edit: "правка",
-  storyboard: "лист раскадровки",
-  "storyboard-frame": "кадр раскадровки",
+const SOURCE_LABEL: Record<string, { ru: string; en: string }> = {
+  upload: { ru: "загрузка", en: "upload" },
+  "frame-grab": { ru: "кадр из ревью", en: "review frame" },
+  "nano-banana": { ru: "Nano Banana", en: "Nano Banana" },
+  upscale: { ru: "upscale", en: "upscale" },
+  edit: { ru: "правка", en: "edit" },
+  storyboard: { ru: "лист раскадровки", en: "storyboard sheet" },
+  "storyboard-frame": { ru: "кадр раскадровки", en: "storyboard frame" },
 };
 
 const KNOWN_ASPECTS: Array<[string, number]> = [
@@ -74,6 +75,9 @@ export default function SeriesRefs({
   pendingJobs: Array<{ id: string; model: string }>;
 }) {
   const router = useRouter();
+  const t = useT();
+  const sourceLabel = (source: string) =>
+    SOURCE_LABEL[source] ? t(SOURCE_LABEL[source].ru, SOURCE_LABEL[source].en) : source;
   const [selected, setSelected] = useState<SeriesRef | null>(null);
   const [nanoOpen, setNanoOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -92,7 +96,11 @@ export default function SeriesRefs({
     if (!selected) return;
     startTransition(async () => {
       const res = await upscaleReference(selected.id);
-      toast(res.ok ? "Upscale ×2 поставлен · Nano Banana · 4 кр" : ("error" in res && res.error) || "Ошибка");
+      toast(
+        res.ok
+          ? t("Upscale ×2 поставлен · Nano Banana · 4 кр", "Upscale ×2 queued · Nano Banana · 4 cr")
+          : ("error" in res && res.error) || t("Ошибка", "Error"),
+      );
       if (res.ok) {
         setSelected(null);
         router.refresh();
@@ -108,7 +116,11 @@ export default function SeriesRefs({
         prompt: editPrompt.trim(),
         extraRefIds: extraRefs,
       });
-      toast(res.ok ? "Правка поставлена · ≈6 кр · исходник не тронут" : ("error" in res && res.error) || "Ошибка");
+      toast(
+        res.ok
+          ? t("Правка поставлена · ≈6 кр · исходник не тронут", "Edit queued · ≈6 cr · original untouched")
+          : ("error" in res && res.error) || t("Ошибка", "Error"),
+      );
       if (res.ok) {
         setEditOpen(false);
         setSelected(null);
@@ -123,8 +135,11 @@ export default function SeriesRefs({
     <div className="flex flex-col gap-3 p-4 pb-10">
       <div className="flex items-center gap-2">
         <span className="text-[11px] leading-relaxed text-t400">
-          <span className="text-violet-600">✦</span>&nbsp; Кадры из ревью и картинки Nano Banana
-          собираются здесь. Токены REF_NN работают в @-упоминаниях редактора.
+          <span className="text-violet-600">✦</span>&nbsp;{" "}
+          {t(
+            "Кадры из ревью и картинки Nano Banana собираются здесь. Токены REF_NN работают в @-упоминаниях редактора.",
+            "Review frames and Nano Banana images collect here. REF_NN tokens work in editor @-mentions.",
+          )}
         </span>
       </div>
       <div className="flex gap-2">
@@ -138,14 +153,17 @@ export default function SeriesRefs({
         <UploadButton
           kind="reference"
           episodeId={episodeId}
-          label="+ С устройства"
+          label={t("+ С устройства", "+ From device")}
           className="min-h-11 flex-1 rounded-lg border-[1.5px] border-dashed border-[var(--border-default)] px-3 text-[11px] font-semibold text-t200 hover:border-[var(--border-strong)]"
         />
       </div>
 
       {refs.length === 0 && pendingJobs.length === 0 && (
         <EmptyState>
-          Пока пусто. Возьмите кадр в ревью, нарисуйте референс Nano Banana или загрузите файл.
+          {t(
+            "Пока пусто. Возьмите кадр в ревью, нарисуйте референс Nano Banana или загрузите файл.",
+            "Empty for now. Grab a frame in review, draw a Nano Banana reference or upload a file.",
+          )}
         </EmptyState>
       )}
 
@@ -179,7 +197,7 @@ export default function SeriesRefs({
             <span className="flex items-center gap-1 px-1.5 py-1">
               <span className="font-mono text-[9px] font-semibold text-violet-200">{r.token}</span>
               <span className="min-w-0 flex-1 truncate text-[8.5px] text-t400">
-                {r.caption || SOURCE_LABEL[r.source] || r.source}
+                {r.caption || sourceLabel(r.source)}
               </span>
             </span>
           </button>
@@ -187,7 +205,7 @@ export default function SeriesRefs({
       </div>
 
       {/* Детальный просмотр */}
-      <Sheet open={Boolean(selected) && !editOpen} onClose={() => setSelected(null)} title={selected?.token || "Референс"}>
+      <Sheet open={Boolean(selected) && !editOpen} onClose={() => setSelected(null)} title={selected?.token || t("Референс", "Reference")}>
         {selected && (
           <div className="flex flex-col gap-3 pb-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -207,21 +225,21 @@ export default function SeriesRefs({
                 </span>
               )}
               <span className="rounded px-2 py-1 font-mono text-[10px] text-t400">
-                {SOURCE_LABEL[selected.source] || selected.source}
+                {sourceLabel(selected.source)}
               </span>
             </div>
             <div className="flex gap-2">
               <input
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
-                placeholder="Подпись"
+                placeholder={t("Подпись", "Caption")}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
               />
               <button
                 onClick={() =>
                   startTransition(async () => {
                     await updateReferenceCaption(selected.id, caption);
-                    toast("Подпись сохранена");
+                    toast(t("Подпись сохранена", "Caption saved"));
                     router.refresh();
                   })
                 }
@@ -239,7 +257,9 @@ export default function SeriesRefs({
                 <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em]">
                   Upscale ×2
                 </span>
-                <span className="font-mono text-[9px] text-t400">Nano Banana · 4 кр</span>
+                <span className="font-mono text-[9px] text-t400">
+                  {t("Nano Banana · 4 кр", "Nano Banana · 4 cr")}
+                </span>
               </button>
               <button
                 onClick={() => {
@@ -252,40 +272,49 @@ export default function SeriesRefs({
                 style={{ boxShadow: "var(--glow-violet-sm)" }}
               >
                 <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em]">
-                  Редактировать
+                  {t("Редактировать", "Edit")}
                 </span>
-                <span className="font-mono text-[9px] text-white/70">Nano Banana · промпт</span>
+                <span className="font-mono text-[9px] text-white/70">
+                  {t("Nano Banana · промпт", "Nano Banana · prompt")}
+                </span>
               </button>
             </div>
             <button
               onClick={() =>
                 startTransition(async () => {
                   await deleteReference(selected.id);
-                  toast("Референс удалён");
+                  toast(t("Референс удалён", "Reference deleted"));
                   setSelected(null);
                   router.refresh();
                 })
               }
               className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
             >
-              Удалить
+              {t("Удалить", "Delete")}
             </button>
           </div>
         )}
       </Sheet>
 
       {/* Правка (spec §2.6) */}
-      <Sheet open={editOpen} onClose={() => setEditOpen(false)} title={`Правка ${selected?.token ?? ""} · ≈6 кр`}>
+      <Sheet
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={t(`Правка ${selected?.token ?? ""} · ≈6 кр`, `Edit ${selected?.token ?? ""} · ≈6 cr`)}
+      >
         <div className="flex flex-col gap-3 pb-2">
           <textarea
             value={editPrompt}
             onChange={(e) => setEditPrompt(e.target.value)}
             rows={3}
             autoFocus
-            placeholder="Что изменить? («убери прожектор, добавь дождь…») Соотношение сторон сохранится, исходник не тронется."
+            placeholder={t(
+              "Что изменить? («убери прожектор, добавь дождь…») Соотношение сторон сохранится, исходник не тронется.",
+              "What to change? (“remove the spotlight, add rain…”) Aspect ratio stays, original untouched.",
+            )}
             className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 text-[13px] text-t200 outline-none focus:border-[var(--border-strong)]"
           />
-          <div className="section-label">Доп. референсы (по желанию)</div>
+          <div className="section-label">{t("Доп. референсы (по желанию)", "Extra references (optional)")}</div>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {refs
               .filter((r) => r.id !== selected?.id)
@@ -321,7 +350,7 @@ export default function SeriesRefs({
             className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {pending ? "Отправка…" : "Создать правку (новый референс)"}
+            {pending ? t("Отправка…", "Submitting…") : t("Создать правку (новый референс)", "Create edit (new reference)")}
           </button>
         </div>
       </Sheet>
@@ -329,9 +358,9 @@ export default function SeriesRefs({
       {refs.length > 1 && (
         <ConfirmButton
           action={deleteAllSeriesRefs.bind(null, episodeId)}
-          label={`Удалить все референсы (${refs.length})`}
-          confirmLabel="Точно удалить все референсы серии?"
-          doneToast="Референсы удалены"
+          label={t(`Удалить все референсы (${refs.length})`, `Delete all references (${refs.length})`)}
+          confirmLabel={t("Точно удалить все референсы серии?", "Really delete all episode references?")}
+          doneToast={t("Референсы удалены", "References deleted")}
           className="mt-1 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
         />
       )}

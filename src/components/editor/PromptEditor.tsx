@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { revisePrompt, saveManualVersion, generateShotPrompt } from "@/lib/actions/prompts";
 import { toast } from "@/components/Toaster";
+import { useT } from "@/components/I18nProvider";
 import type { PromptVersion } from "@/components/shot/PromptBlock";
 
 /** Движения камеры (Kling Camera Toolkit) — быстрые вставки в позицию курсора. */
@@ -84,6 +85,7 @@ export default function PromptEditor({
   initialVersionId?: string;
 }) {
   const router = useRouter();
+  const t = useT();
   const [selectedId, setSelectedId] = useState(
     () => versions.find((v) => v.id === initialVersionId)?.id ?? versions[0]?.id ?? "",
   );
@@ -105,18 +107,18 @@ export default function PromptEditor({
       ...insertEntities.map((e) => ({
         token: e.elementName,
         name: e.name,
-        sub: "сущность",
+        sub: t("сущность", "entity"),
       })),
       ...seriesRefs.map((r) => ({
         token: r.token,
         name: r.caption || r.token,
-        sub: "референс серии",
+        sub: t("референс серии", "episode reference"),
       })),
     ];
     return all
       .filter((i) => !q || i.token.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))
       .slice(0, 12);
-  }, [mention, insertEntities, seriesRefs]);
+  }, [mention, insertEntities, seriesRefs, t]);
 
   const diff = useMemo(() => {
     if (!diffMode || !selected) return [];
@@ -191,7 +193,7 @@ export default function PromptEditor({
 
   function makeVersion() {
     if (!note.trim()) {
-      setError("Напишите замечание — что исправить в новой версии");
+      setError(t("Напишите замечание — что исправить в новой версии", "Write a note — what to fix in the new version"));
       return;
     }
     if (!latest) return;
@@ -200,7 +202,7 @@ export default function PromptEditor({
       const res = await revisePrompt(latest.id, note.trim());
       if (!res.ok) setError(res.error);
       else {
-        toast(`Версия v${latest.version + 1} создана`);
+        toast(t(`Версия v${latest.version + 1} создана`, `Version v${latest.version + 1} created`));
         router.push(`/episodes/${episodeId}/shots/${shotId}`);
       }
     });
@@ -208,17 +210,17 @@ export default function PromptEditor({
 
   function saveAsIs() {
     if (text === selected?.text) {
-      toast("Изменений нет");
+      toast(t("Изменений нет", "No changes"));
       return;
     }
     setError("");
     startTransition(async () => {
       const res = latest
         ? await saveManualVersion(latest.id, text, note.trim() || "Ручная правка")
-        : { ok: false as const, error: "Сначала сгенерируйте первую версию" };
+        : { ok: false as const, error: t("Сначала сгенерируйте первую версию", "Generate the first version first") };
       if (!res.ok) setError(res.error);
       else {
-        toast(`Сохранено как v${(latest?.version ?? 0) + 1} · ручная правка`);
+        toast(t(`Сохранено как v${(latest?.version ?? 0) + 1} · ручная правка`, `Saved as v${(latest?.version ?? 0) + 1} · manual edit`));
         router.push(`/episodes/${episodeId}/shots/${shotId}`);
       }
     });
@@ -228,8 +230,11 @@ export default function PromptEditor({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <div className="text-[13px] leading-relaxed text-t300">
-          <span className="text-violet-600">✦</span>&nbsp; Версий ещё нет — сгенерируйте первую
-          на карточке шота или прямо здесь.
+          <span className="text-violet-600">✦</span>&nbsp;{" "}
+          {t(
+            "Версий ещё нет — сгенерируйте первую на карточке шота или прямо здесь.",
+            "No versions yet — generate the first one on the shot card or right here.",
+          )}
         </div>
         <button
           onClick={() =>
@@ -243,7 +248,7 @@ export default function PromptEditor({
           className="min-h-12 rounded-lg bg-violet-500 px-6 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
-          {pending ? "Фабрика работает…" : "Собрать промпт · Claude"}
+          {pending ? t("Фабрика работает…", "Factory running…") : t("Собрать промпт · Claude", "Build prompt · Claude")}
         </button>
         {error && <div className="text-[11px] text-danger">{error}</div>}
       </div>
@@ -279,7 +284,7 @@ export default function PromptEditor({
               color: diffMode ? "var(--text-100)" : "var(--text-300)",
             }}
           >
-            Отличия
+            {t("Отличия", "Diff")}
           </button>
         )}
       </div>
@@ -347,7 +352,7 @@ export default function PromptEditor({
                   @{mention.query}
                 </span>
                 <span className="flex-1" />
-                <span className="text-[9px] text-t400">сущности · референсы серии</span>
+                <span className="text-[9px] text-t400">{t("сущности · референсы серии", "entities · episode references")}</span>
               </div>
               {mentionItems.map((item) => (
                 <button
@@ -368,7 +373,10 @@ export default function PromptEditor({
               ))}
               {!mentionItems.length && (
                 <div className="px-3 py-2.5 text-[10.5px] text-t400">
-                  Ничего не найдено — продолжайте набирать или закройте @ пробелом.
+                  {t(
+                    "Ничего не найдено — продолжайте набирать или закройте @ пробелом.",
+                    "Nothing found — keep typing or close the @ with a space.",
+                  )}
                 </div>
               )}
             </div>
@@ -380,13 +388,13 @@ export default function PromptEditor({
       <div className="border-t border-[var(--border-subtle)] bg-ink-800 py-1.5">
         <div className="flex items-center gap-1.5 overflow-x-auto px-3 pb-1.5">
           <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-t400">
-            Сущности
+            {t("Сущности", "Entities")}
           </span>
           <button
             onClick={insertAtSign}
             className="min-h-7 shrink-0 rounded-md border border-[rgba(178,95,208,.32)] bg-[rgba(178,95,208,.08)] px-2.5 font-mono text-[10.5px] font-semibold text-magenta-400 hover:bg-[rgba(178,95,208,.16)]"
           >
-            @ вставить…
+            {t("@ вставить…", "@ insert…")}
           </button>
           {insertEntities.map((e) => (
             <button
@@ -400,7 +408,7 @@ export default function PromptEditor({
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto px-3">
           <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-t400">
-            Камера
+            {t("Камера", "Camera")}
           </span>
           {CAMERA_MOVES.map((m) => (
             <button
@@ -424,7 +432,10 @@ export default function PromptEditor({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={2}
-          placeholder="Замечание для Claude — что исправить в новой версии?"
+          placeholder={t(
+            "Замечание для Claude — что исправить в новой версии?",
+            "Note for Claude — what to fix in the new version?",
+          )}
           className="w-full resize-none rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2 text-[12.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
         />
         <div className="flex items-stretch gap-2">
@@ -434,16 +445,16 @@ export default function PromptEditor({
             className="min-h-[46px] flex-1 rounded-md bg-violet-500 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {pending ? "Claude думает…" : `Создать v${(latest?.version ?? 0) + 1}`}
+            {pending ? t("Claude думает…", "Claude is thinking…") : t(`Создать v${(latest?.version ?? 0) + 1}`, `Create v${(latest?.version ?? 0) + 1}`)}
           </button>
           <button
             onClick={saveAsIs}
             disabled={pending}
             className="min-h-[46px] rounded-md border border-[var(--border-default)] px-3 text-[10.5px] font-semibold leading-tight text-t200 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
           >
-            Сохранить
+            {t("Сохранить", "Save")}
             <br />
-            как есть
+            {t("как есть", "as is")}
           </button>
         </div>
       </div>

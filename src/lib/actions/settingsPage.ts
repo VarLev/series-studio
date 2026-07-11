@@ -52,3 +52,10 @@ export async function deleteTechnique(id: string): Promise<void> {
   await deleteTechniqueRow(id);
   revalidatePath("/settings");
 }
+
+/** Язык интерфейса / тема — применяются через корневой layout. */
+export async function saveUiPref(key: "ui_lang" | "ui_theme", value: string): Promise<void> {
+  await requireAuth();
+  await setSetting(key, value);
+  revalidatePath("/", "layout");
+}

@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { updateEntity, setEntityArchived, deleteEntity, type EntityType } from "@/lib/actions/entities";
 import { SectionLabel } from "@/components/ui";
+import { useT } from "@/components/I18nProvider";
 
 export default function EntityForm({
   entity,
@@ -17,6 +18,7 @@ export default function EntityForm({
     archived: boolean;
   };
 }) {
+  const t = useT();
   const [name, setName] = useState(entity.name);
   const [elementName, setElementName] = useState(entity.elementName);
   const [description, setDescription] = useState(entity.description);
@@ -42,7 +44,7 @@ export default function EntityForm({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <SectionLabel>Имя</SectionLabel>
+        <SectionLabel>{t("Имя", "Name")}</SectionLabel>
         <input
           value={name}
           onChange={(e) => {
@@ -54,7 +56,7 @@ export default function EntityForm({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <SectionLabel hint="подставляется в промпты">element_name</SectionLabel>
+        <SectionLabel hint={t("подставляется в промпты", "inserted into prompts")}>element_name</SectionLabel>
         <div className="flex gap-2">
           <input
             value={elementName}
@@ -69,13 +71,15 @@ export default function EntityForm({
             onClick={copyElement}
             className="min-h-11 rounded-lg border border-[var(--border-default)] px-4 text-[11px] font-semibold text-t200 hover:bg-ink-500"
           >
-            {copied ? "✓" : "Копировать"}
+            {copied ? "✓" : t("Копировать", "Copy")}
           </button>
         </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <SectionLabel hint="попадает в контекст промпт-фабрики">Описание</SectionLabel>
+        <SectionLabel hint={t("попадает в контекст промпт-фабрики", "goes into the prompt factory context")}>
+          {t("Описание", "Description")}
+        </SectionLabel>
         <textarea
           value={description}
           onChange={(e) => {
@@ -83,7 +87,10 @@ export default function EntityForm({
             save({ description: e.target.value });
           }}
           rows={5}
-          placeholder="Внешность, характер, визуальные детали — то, что должно быть стабильным от шота к шоту."
+          placeholder={t(
+            "Внешность, характер, визуальные детали — то, что должно быть стабильным от шота к шоту.",
+            "Appearance, character, visual details — what must stay stable shot to shot.",
+          )}
           className="resize-y rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-3 text-[13px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
         />
       </div>
@@ -96,17 +103,17 @@ export default function EntityForm({
           }
           className="min-h-10 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
         >
-          <option value="character">Персонаж</option>
-          <option value="location">Локация</option>
-          <option value="prop">Реквизит</option>
-          <option value="style">Стиль</option>
+          <option value="character">{t("Персонаж", "Character")}</option>
+          <option value="location">{t("Локация", "Location")}</option>
+          <option value="prop">{t("Реквизит", "Prop")}</option>
+          <option value="style">{t("Стиль", "Style")}</option>
         </select>
         <span className="flex-1" />
         <button
           onClick={() => startTransition(() => setEntityArchived(entity.id, !entity.archived))}
           className="min-h-10 rounded-md border border-[var(--border-subtle)] px-3 text-[11px] text-t300 hover:text-t100"
         >
-          {entity.archived ? "Вернуть из архива" : "В архив"}
+          {entity.archived ? t("Вернуть из архива", "Unarchive") : t("В архив", "Archive")}
         </button>
       </div>
 
@@ -118,7 +125,9 @@ export default function EntityForm({
         }}
         className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
       >
-        {confirmDelete ? "Точно удалить? (пропадёт из чипов шотов)" : "Удалить сущность"}
+        {confirmDelete
+          ? t("Точно удалить? (пропадёт из чипов шотов)", "Really delete? (disappears from shot chips)")
+          : t("Удалить сущность", "Delete entity")}
       </button>
     </div>
   );

@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { listEpisodes, createEpisode } from "@/lib/actions/episodes";
 import { deleteEpisode, deleteAllEpisodes } from "@/lib/actions/deletes";
 import { getAllSettings } from "@/lib/settings";
+import { getT } from "@/lib/i18n-server";
 import { EmptyState } from "@/components/ui";
 import QueuePill from "@/components/QueuePill";
 import ConfirmButton from "@/components/ConfirmButton";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function EpisodesPage() {
   await requireAuth();
   const [episodes, settings] = await Promise.all([listEpisodes(), getAllSettings()]);
+  const t = await getT();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
@@ -22,7 +24,10 @@ export default async function EpisodesPage() {
           {settings.series_title}
         </h1>
         <p className="mt-1.5 text-[11px] leading-relaxed text-t400">
-          Выберите серию — сюжет, промпты и видео живут внутри неё.
+          {t(
+            "Выберите серию — сюжет, промпты и видео живут внутри неё.",
+            "Pick an episode — its story, prompts and videos live inside.",
+          )}
         </p>
       </div>
 
@@ -30,10 +35,10 @@ export default async function EpisodesPage() {
       <nav className="flex gap-2 px-4 pb-4">
         <Link
           href="/bible"
-          title="Библия сущностей"
+          title={t("Библия сущностей", "Entity bible")}
           className="shrink-0 rounded-md border border-[var(--border-default)] bg-ink-600 px-3.5 py-2.5 font-mono text-[11px] font-semibold text-violet-100 hover:border-[var(--border-strong)] hover:bg-ink-500"
         >
-          ❖ Библия
+          ❖ {t("Библия", "Bible")}
         </Link>
         <span className="flex-1" />
         <QueuePill />
@@ -43,10 +48,13 @@ export default async function EpisodesPage() {
         {episodes.map((ep) => (
           <LongPressMenu
             key={ep.id}
-            title={`Серия ${String(ep.number).padStart(2, "0")} · ${ep.title || "Без названия"}`}
-            deleteLabel="Удалить серию"
-            confirmLabel="Точно удалить серию со всем содержимым?"
-            doneToast="Серия удалена"
+            title={`${t("Серия", "Episode")} ${String(ep.number).padStart(2, "0")} · ${ep.title || t("Без названия", "Untitled")}`}
+            deleteLabel={t("Удалить серию", "Delete episode")}
+            confirmLabel={t(
+              "Точно удалить серию со всем содержимым?",
+              "Really delete this episode with everything inside?",
+            )}
+            doneToast={t("Серия удалена", "Episode deleted")}
             action={deleteEpisode.bind(null, ep.id)}
           >
             <Link
@@ -59,16 +67,21 @@ export default async function EpisodesPage() {
                 </span>
               </div>
               <div className="min-w-0 flex-1">
-                <div className="eyebrow mb-1">Серия {String(ep.number).padStart(2, "0")}</div>
+                <div className="eyebrow mb-1">
+                  {t("Серия", "Episode")} {String(ep.number).padStart(2, "0")}
+                </div>
                 <div className="truncate text-[14px] font-semibold text-t100">
-                  {ep.title || "Без названия"}
+                  {ep.title || t("Без названия", "Untitled")}
                 </div>
                 <div className="mt-1 font-mono text-[10px] text-t400">
                   {ep.shotsTotal
-                    ? `${ep.shotsApproved} из ${ep.shotsTotal} шотов утверждено`
+                    ? t(
+                        `${ep.shotsApproved} из ${ep.shotsTotal} шотов утверждено`,
+                        `${ep.shotsApproved} of ${ep.shotsTotal} shots approved`,
+                      )
                     : ep.synopsisMd
-                      ? "сюжет написан · не раскадрован"
-                      : "пустая серия"}
+                      ? t("сюжет написан · не раскадрован", "story written · not storyboarded")
+                      : t("пустая серия", "empty episode")}
                 </div>
               </div>
             </Link>
@@ -77,14 +90,16 @@ export default async function EpisodesPage() {
 
         {episodes.length === 0 && (
           <EmptyState>
-            Серий пока нет. Создайте первую — напишете или сгенерируете сюжет, Claude разобьёт его
-            на шоты, дальше промпты и генерация.
+            {t(
+              "Серий пока нет. Создайте первую — напишете или сгенерируете сюжет, Claude разобьёт его на шоты, дальше промпты и генерация.",
+              "No episodes yet. Create the first one — write or generate a story, Claude splits it into shots, then prompts and generation.",
+            )}
           </EmptyState>
         )}
 
         {episodes.length > 0 && (
           <div className="pt-1 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-t400">
-            долгое зажатие по серии — удаление
+            {t("долгое зажатие по серии — удаление", "long-press an episode to delete")}
           </div>
         )}
 
@@ -93,16 +108,19 @@ export default async function EpisodesPage() {
             type="submit"
             className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border-[1.5px] border-dashed border-[var(--border-default)] px-4 py-4 text-[12px] font-medium text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
           >
-            + Новая серия — начните с сюжета
+            {t("+ Новая серия — начните с сюжета", "+ New episode — start with the story")}
           </button>
         </form>
 
         {episodes.length > 1 && (
           <ConfirmButton
             action={deleteAllEpisodes}
-            label={`Удалить все серии (${episodes.length})`}
-            confirmLabel="Точно удалить ВСЕ серии и их содержимое?"
-            doneToast="Все серии удалены"
+            label={t(`Удалить все серии (${episodes.length})`, `Delete all episodes (${episodes.length})`)}
+            confirmLabel={t(
+              "Точно удалить ВСЕ серии и их содержимое?",
+              "Really delete ALL episodes and their contents?",
+            )}
+            doneToast={t("Все серии удалены", "All episodes deleted")}
             className="mt-2 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
           />
         )}

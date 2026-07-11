@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { getDb, entities, references } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { ScreenHeader } from "@/components/ui";
+import { getT } from "@/lib/i18n-server";
 import BibleList from "@/components/bible/BibleList";
 
 export const dynamic = "force-dynamic";
@@ -24,9 +25,15 @@ export default async function BiblePage() {
     }
   }
 
+  const t = await getT();
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader backHref="/episodes" eyebrow="Весь сериал" title="Библия сущностей" />
+      <ScreenHeader
+        backHref="/episodes"
+        eyebrow={t("Весь сериал", "Whole series")}
+        title={t("Библия сущностей", "Entity bible")}
+      />
       <BibleList
         items={rows.map((e) => ({
           id: e.id,

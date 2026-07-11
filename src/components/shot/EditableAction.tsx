@@ -28,7 +28,7 @@ export default function EditableAction({
         onChange={(e) => onChange(e.target.value)}
         rows={Math.min(8, Math.max(3, value.split("\n").length + 1))}
         spellCheck={false}
-        className="w-full resize-y bg-transparent font-body text-[15px] italic leading-relaxed text-t200 outline-none"
+        className="w-full resize-y bg-transparent font-body text-[15px] leading-relaxed text-t200 outline-none"
       />
       {cameraHint && (
         <div className="mt-1 font-mono text-[10.5px] text-t400">🎥 {cameraHint}</div>

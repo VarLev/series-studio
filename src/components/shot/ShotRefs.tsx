@@ -10,6 +10,7 @@ import {
   detachShotReference,
   setShotReferenceRole,
 } from "@/lib/actions/shots";
+import { useT } from "@/components/I18nProvider";
 
 interface ShotRef {
   id: string;
@@ -25,7 +26,10 @@ interface PickerRef {
   sub: string;
 }
 
-const ROLE_LABEL = { start_frame: "start-frame", composition: "композиция" } as const;
+const ROLE_LABEL = {
+  start_frame: { ru: "start-frame", en: "start-frame" },
+  composition: { ru: "композиция", en: "composition" },
+} as const;
 
 /** Референсы шота (spec §2.3/§3.6): роли, прикрепление из референсов серии/библии, Nano Banana. */
 export default function ShotRefs({
@@ -43,15 +47,17 @@ export default function ShotRefs({
   bibleRefs: PickerRef[];
   promptText: string;
 }) {
+  const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [roleFor, setRoleFor] = useState<ShotRef | null>(null);
   const [nanoOpen, setNanoOpen] = useState(false);
   const [, startTransition] = useTransition();
+  const roleLabel = (role: keyof typeof ROLE_LABEL) => t(ROLE_LABEL[role].ru, ROLE_LABEL[role].en);
 
   function attach(refId: string) {
     startTransition(async () => {
       await attachReferenceToShot(shotId, refId, "composition");
-      toast("Референс прикреплён (роль — композиция)");
+      toast(t("Референс прикреплён (роль — композиция)", "Reference attached (role — composition)"));
     });
     setPickerOpen(false);
   }
@@ -78,11 +84,11 @@ export default function ShotRefs({
                     r.role === "start_frame" ? "rgba(192,138,62,.5)" : "rgba(139,95,176,.5)",
                 }}
               >
-                {ROLE_LABEL[r.role]}
+                {roleLabel(r.role)}
               </button>
             </div>
             <div className="mt-1 truncate font-mono text-[8.5px] text-t400">
-              {r.caption || ROLE_LABEL[r.role]}
+              {r.caption || roleLabel(r.role)}
             </div>
           </div>
         ))}
@@ -91,19 +97,19 @@ export default function ShotRefs({
           className="flex aspect-[9/16] w-[58px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-[var(--border-default)] text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
         >
           <span className="text-[14px] leading-none">+</span>
-          <span className="text-[8px] font-medium">из референсов</span>
+          <span className="text-[8px] font-medium">{t("из референсов", "from references")}</span>
         </button>
       </div>
 
       {/* Роль референса (spec §3.6) */}
-      <Sheet open={Boolean(roleFor)} onClose={() => setRoleFor(null)} title="Роль референса">
+      <Sheet open={Boolean(roleFor)} onClose={() => setRoleFor(null)} title={t("Роль референса", "Reference role")}>
         {roleFor && (
           <div className="flex flex-col gap-1.5 pb-2">
             <button
               onClick={() => {
                 startTransition(async () => {
                   await setShotReferenceRole(roleFor.id, "start_frame");
-                  toast("Start-frame назначен · прежний стал композицией");
+                  toast(t("Start-frame назначен · прежний стал композицией", "Start-frame set · the previous one became composition"));
                 });
                 setRoleFor(null);
               }}
@@ -115,14 +121,17 @@ export default function ShotRefs({
             >
               <span className="text-[12.5px] font-medium text-t100">Start-frame</span>
               <span className="text-[10px] text-t400">
-                первый кадр видео · один на шот — прежний станет композицией
+                {t(
+                  "первый кадр видео · один на шот — прежний станет композицией",
+                  "first frame of the video · one per shot — the previous one becomes composition",
+                )}
               </span>
             </button>
             <button
               onClick={() => {
                 startTransition(async () => {
                   await setShotReferenceRole(roleFor.id, "composition");
-                  toast("Роль — референс композиции");
+                  toast(t("Роль — референс композиции", "Role — composition reference"));
                 });
                 setRoleFor(null);
               }}
@@ -132,32 +141,37 @@ export default function ShotRefs({
                 background: roleFor.role === "composition" ? "var(--ink-600)" : "none",
               }}
             >
-              <span className="text-[12.5px] font-medium text-t100">Референс композиции</span>
+              <span className="text-[12.5px] font-medium text-t100">
+                {t("Референс композиции", "Composition reference")}
+              </span>
               <span className="text-[10px] text-t400">
-                кадрирование / свет / настроение — уходит моделям вместе с промптом
+                {t(
+                  "кадрирование / свет / настроение — уходит моделям вместе с промптом",
+                  "framing / light / mood — sent to the models along with the prompt",
+                )}
               </span>
             </button>
             <button
               onClick={() => {
                 startTransition(async () => {
                   await detachShotReference(roleFor.id);
-                  toast("Откреплено от шота · референс остался в серии");
+                  toast(t("Откреплено от шота · референс остался в серии", "Detached from shot · reference stays in the episode"));
                 });
                 setRoleFor(null);
               }}
               className="min-h-11 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
             >
-              Открепить от шота
+              {t("Открепить от шота", "Detach from shot")}
             </button>
           </div>
         )}
       </Sheet>
 
       {/* Прикрепление (spec §2.3): референсы серии + библии, Nano Banana, загрузка */}
-      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title="Прикрепить референс">
+      <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={t("Прикрепить референс", "Attach reference")}>
         {seriesRefs.length > 0 && (
           <>
-            <div className="section-label mb-2">Референсы серии</div>
+            <div className="section-label mb-2">{t("Референсы серии", "Episode references")}</div>
             <div className="mb-3 grid grid-cols-3 gap-2">
               {seriesRefs.map((r) => (
                 <button
@@ -177,7 +191,7 @@ export default function ShotRefs({
         )}
         {bibleRefs.length > 0 && (
           <>
-            <div className="section-label mb-2">Из библии (сущности шота)</div>
+            <div className="section-label mb-2">{t("Из библии (сущности шота)", "From the bible (shot entities)")}</div>
             <div className="mb-3 grid grid-cols-3 gap-2">
               {bibleRefs.map((r) => (
                 <button
@@ -195,7 +209,10 @@ export default function ShotRefs({
         )}
         {!seriesRefs.length && !bibleRefs.length && (
           <div className="pb-2 text-[12px] text-t400">
-            Референсов пока нет — нарисуйте Nano Banana или загрузите файл.
+            {t(
+              "Референсов пока нет — нарисуйте Nano Banana или загрузите файл.",
+              "No references yet — draw one with Nano Banana or upload a file.",
+            )}
           </div>
         )}
         <div className="flex flex-col gap-2">
@@ -207,9 +224,9 @@ export default function ShotRefs({
             className="min-h-11 rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            Нарисовать новый · Nano Banana
+            {t("Нарисовать новый · Nano Banana", "Draw new · Nano Banana")}
           </button>
-          <UploadButton kind="reference" shotId={shotId} label="Загрузить файл с устройства" />
+          <UploadButton kind="reference" shotId={shotId} label={t("Загрузить файл с устройства", "Upload a file from device")} />
         </div>
       </Sheet>
 

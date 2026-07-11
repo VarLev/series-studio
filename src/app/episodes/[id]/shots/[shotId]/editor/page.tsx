@@ -3,6 +3,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, entities, prompts, references, shots, shotEntities, episodes } from "@/lib/db";
 import { ScreenHeader } from "@/components/ui";
+import { getT } from "@/lib/i18n-server";
 import PromptEditor from "@/components/editor/PromptEditor";
 
 export const dynamic = "force-dynamic";
@@ -42,13 +43,14 @@ export default async function EditorPage(ctx: {
     );
 
   const grpN = String(shot.orderIndex).padStart(2, "0");
+  const t = await getT();
 
   return (
     <main className="mx-auto flex h-dvh w-full max-w-lg flex-col md:max-w-3xl">
       <ScreenHeader
         backHref={`/episodes/${episodeId}/shots/${shotId}`}
-        eyebrow="Редактор промпта"
-        title={`Группа ${grpN} · ${shot.title || episode?.title || ""}`}
+        eyebrow={t("Редактор промпта", "Prompt editor")}
+        title={`${t("Группа", "Group")} ${grpN} · ${shot.title || episode?.title || ""}`}
       />
       <PromptEditor
         shotId={shotId}
