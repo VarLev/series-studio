@@ -64,14 +64,57 @@ function trimText(s: string, max: number): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-/** Равномерная выборка n элементов из списка (если шотов больше, чем кадров). */
-function evenPick<T>(items: T[], n: number): T[] {
-  if (items.length <= n) return items;
-  const out: T[] = [];
-  for (let i = 0; i < n; i++) {
-    out.push(items[Math.round((i * (items.length - 1)) / (n - 1))]);
+/**
+ * Обрезка описания панели по границе предложения (без «…» посреди слова —
+ * обрезанные хвосты в промпте листа путали модель).
+ */
+function beatTrim(raw: string, max = 220): string {
+  const s = raw
+    .replace(/Шот\s*\d+\s*\([^)]*\)\s*:\s*/gi, "") // страховка от «Шот N (время):»
+    .replace(/\s+/g, " ")
+    .trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const sentenceEnd = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  if (sentenceEnd > 60) return cut.slice(0, sentenceEnd + 1);
+  const wordEnd = cut.lastIndexOf(" ");
+  return `${cut.slice(0, wordEnd > 60 ? wordEnd : max).trimEnd()}.`;
+}
+
+/**
+ * Ровно n панельных битов из пула (замечание заказчика: сцен в промпте должно
+ * быть столько же, сколько кадров на листе — не больше и не меньше).
+ * Избыток — равномерная выборка; недостаток — ключевые биты дублируются
+ * другим ракурсом, сохраняя порядок истории.
+ */
+const ANGLE_VARIANTS = [
+  "the same moment from a closer angle",
+  "the same moment as a wide shot",
+  "the same moment from an over-the-shoulder angle",
+  "a reaction close-up within the same moment",
+];
+
+function exactBeats(pool: string[], n: number): string[] {
+  if (!pool.length) return [];
+  if (pool.length >= n) {
+    if (pool.length === n) return pool;
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push(pool[Math.round((i * (pool.length - 1)) / (n - 1))]);
+    }
+    return out;
   }
-  return [...new Set(out)];
+  const base = Math.floor(n / pool.length);
+  const extra = n % pool.length;
+  const out: string[] = [];
+  pool.forEach((p, i) => {
+    const copies = base + (i < extra ? 1 : 0);
+    out.push(p);
+    for (let j = 1; j < copies; j++) {
+      out.push(`${p} — ${ANGLE_VARIANTS[(j - 1) % ANGLE_VARIANTS.length]}.`);
+    }
+  });
+  return out;
 }
 
 const PANEL_STRUCTURE_9 = `1. Introduction – establish the scene and mood.
@@ -106,22 +149,27 @@ function refLine(n: number, r: AttachRef): string {
 }
 
 function buildStory(scope: ShotListItem | null, frames: number, shots: ShotListItem[]): string {
-  if (scope) {
-    return (
-      `Scene (${scope.durationSec}s): ${scope.title ? scope.title + ". " : ""}${trimText(scope.action, 400)}\n` +
-      `The panels show the progression of this single scene moment by moment, with varied cinematic camera angles (wide, medium, close-up).`
-    );
+  // пул битов: шоты групп (чистые описания), группа без шотов даёт один бит
+  const pool: string[] = [];
+  const source = scope ? [scope] : shots;
+  for (const s of source) {
+    const beats = s.beats.length ? s.beats : [s.action];
+    for (const b of beats) {
+      const text = beatTrim(b);
+      if (text) pool.push(`${s.title ? s.title + " — " : ""}${text}`);
+    }
   }
-  const picked = evenPick(shots, frames);
-  if (!picked.length) return "[опишите историю — по биту на панель]";
-  const lines = picked.map(
-    (s, i) => `${i + 1}. ${s.title ? s.title + " — " : ""}${trimText(s.action, 160)}`,
+  const lines = exactBeats(pool, frames).map((b, i) => `${i + 1}. ${b}`);
+  if (!lines.length) return "[опишите историю — по биту на панель]";
+  const header = scope
+    ? `A single scene (${scope.durationSec}s) shown moment by moment:\n`
+    : "";
+  return (
+    header +
+    lines.join("\n") +
+    `\nExactly one numbered beat per panel, in order: panel N depicts beat N. ` +
+    `Do not add extra sub-scenes and do not split one beat across several panels.`
   );
-  const tail =
-    picked.length < frames
-      ? `\nDistribute these beats across all ${frames} panels, expanding key moments into additional angles.`
-      : "";
-  return lines.join("\n") + tail;
 }
 
 /** Сборка промпта листа из шаблона настроек: плейсхолдеры → значения. */

@@ -1,6 +1,8 @@
 /**
- * Библиотека режиссёрских приёмов: сид из JSFilmz Vault (500 промптов, vault.json),
- * выборка для промпт-фабрики и CRUD-помощники. Сеется при первом обращении.
+ * Библиотека режиссёрских приёмов: сид — кураторская выборка заказчика из
+ * JSFilmz Vault под Seedance 2.0 (46 промптов, vault2.json; полный вольт на
+ * 500 карточек лежит рядом в vault.json на будущее). CRUD-помощники и выборка
+ * для промпт-фабрики. Сеется при первом обращении.
  */
 import { asc, eq } from "drizzle-orm";
 import { getDb, settings, techniques } from "@/lib/db";
@@ -44,10 +46,10 @@ export async function ensureTechniques(): Promise<void> {
     await markSeeded();
     return;
   }
-  const { default: vault } = (await import("./director/vault.json")) as {
+  const { default: vault } = (await import("./director/vault2.json")) as {
     default: Array<Omit<TechniqueRow, "custom">>;
   };
-  // пакетами — 500 одиночных insert'ов в PGlite заметно медленнее;
+  // пакетами — одиночные insert'ы в PGlite заметно медленнее;
   // onConflictDoNothing: два параллельных запроса могут сеять одновременно
   for (let i = 0; i < vault.length; i += 50) {
     await db

@@ -42,19 +42,37 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     : [];
   const entityById = new Map(entityRows.map((e) => [e.id, e]));
 
-  const shotItems: ShotListItem[] = shotRows.map((s) => ({
-    id: s.id,
-    orderIndex: s.orderIndex,
-    title: s.title,
-    action: s.actionMd,
-    durationSec: s.durationSec,
-    timecode: s.timecode,
-    status: s.status,
-    entityNames: links
-      .filter((l) => l.shotId === s.id)
-      .map((l) => entityById.get(l.entityId)?.name ?? "")
-      .filter(Boolean),
-  }));
+  const shotItems: ShotListItem[] = shotRows.map((s) => {
+    // чистые визуальные описания шотов группы — промпт листа раскадровки
+    // не должен содержать «Шот N (00:00–00:05):» и обрезанные хвосты
+    let beats: string[] = [];
+    try {
+      const parsed = JSON.parse(s.beatsJson || "[]") as Array<{
+        action?: string;
+        camera?: string;
+        framing?: string;
+      }>;
+      if (Array.isArray(parsed)) {
+        beats = parsed
+          .map((b) => (b.action || b.camera || b.framing || "").trim())
+          .filter(Boolean);
+      }
+    } catch {}
+    return {
+      id: s.id,
+      orderIndex: s.orderIndex,
+      title: s.title,
+      action: s.actionMd,
+      durationSec: s.durationSec,
+      timecode: s.timecode,
+      status: s.status,
+      entityNames: links
+        .filter((l) => l.shotId === s.id)
+        .map((l) => entityById.get(l.entityId)?.name ?? "")
+        .filter(Boolean),
+      beats,
+    };
+  });
 
   // ---------- данные вкладки «Раскадровка» ----------
   // референсы серии этого эпизода: листы (grid), кадры (parent_id), прочие — для «приложить»

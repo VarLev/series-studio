@@ -18,6 +18,8 @@ export interface ShotListItem {
   timecode: string;
   status: string;
   entityNames: string[];
+  /** чистые визуальные описания шотов группы (без «Шот N (время):») — для промпта листа */
+  beats: string[];
 }
 
 export default function ShotsList({
