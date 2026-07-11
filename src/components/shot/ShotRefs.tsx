@@ -60,8 +60,8 @@ export default function ShotRefs({
     <>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {refs.map((r) => (
-          <div key={r.id} className="w-[92px] shrink-0">
-            <div className="relative h-[54px] overflow-hidden rounded-md border-[1.5px] bg-ink-600"
+          <div key={r.id} className="w-[58px] shrink-0">
+            <div className="relative aspect-[9/16] overflow-hidden rounded-md border-[1.5px] bg-ink-600"
               style={{
                 borderColor: r.role === "start_frame" ? "rgba(192,138,62,.55)" : "var(--border-default)",
               }}
@@ -88,7 +88,7 @@ export default function ShotRefs({
         ))}
         <button
           onClick={() => setPickerOpen(true)}
-          className="flex h-[54px] w-[92px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-[var(--border-default)] text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
+          className="flex aspect-[9/16] w-[58px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-[var(--border-default)] text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
         >
           <span className="text-[14px] leading-none">+</span>
           <span className="text-[8px] font-medium">из референсов</span>
@@ -166,7 +166,7 @@ export default function ShotRefs({
                   className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.url} alt="" className="aspect-[4/3] w-full object-cover" />
+                  <img src={r.url} alt="" className="aspect-[9/16] w-full object-cover" />
                   <div className="truncate px-1.5 py-1 font-mono text-[9px] text-violet-200">
                     {r.label}
                   </div>
@@ -186,7 +186,7 @@ export default function ShotRefs({
                   className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.url} alt="" className="aspect-[4/3] w-full object-cover" />
+                  <img src={r.url} alt="" className="aspect-[9/16] w-full object-cover" />
                   <div className="truncate px-1.5 py-1 text-[9px] text-t300">{r.label}</div>
                 </button>
               ))}

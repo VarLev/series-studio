@@ -248,7 +248,7 @@ export default function GenerateSheet({
           <img
             src={chosenFrame.url}
             alt=""
-            className="h-11 w-[72px] rounded-md border border-[var(--border-subtle)] object-cover"
+            className="aspect-[9/16] w-9 rounded-md border border-[var(--border-subtle)] object-cover"
           />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[12px] font-medium text-t100">

@@ -149,11 +149,11 @@ export default function SeriesRefs({
         </EmptyState>
       )}
 
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-3 gap-2">
         {pendingJobs.map((job) => (
           <div
             key={job.id}
-            className="flex aspect-[16/10] flex-col items-center justify-center gap-1.5 rounded-lg border border-[rgba(192,138,62,.35)]"
+            className="flex aspect-[9/16] flex-col items-center justify-center gap-1.5 rounded-lg border border-[rgba(192,138,62,.35)]"
             style={{
               background:
                 "repeating-linear-gradient(135deg, var(--ink-700) 0 12px, var(--ink-600) 12px 24px)",
@@ -169,16 +169,16 @@ export default function SeriesRefs({
             onClick={() => openDetail(r)}
             className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-700 text-left hover:border-[var(--border-strong)]"
           >
-            <span className="relative block aspect-[16/10] bg-black">
+            <span className="relative block aspect-[9/16] bg-black">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={r.url} alt={r.token} className="h-full w-full object-cover" />
-              <span className="absolute right-1 top-1 rounded bg-[rgba(6,5,9,.75)] px-1.5 py-0.5 font-mono text-[8.5px] text-t100">
+              <span className="absolute right-1 top-1 rounded bg-[rgba(6,5,9,.75)] px-1 py-0.5 font-mono text-[8px] text-t100">
                 {aspectLabel(r.width, r.height)}
               </span>
             </span>
-            <span className="flex items-center gap-1.5 px-2 py-1.5">
-              <span className="font-mono text-[10px] font-semibold text-violet-200">{r.token}</span>
-              <span className="min-w-0 flex-1 truncate text-[9.5px] text-t400">
+            <span className="flex items-center gap-1 px-1.5 py-1">
+              <span className="font-mono text-[9px] font-semibold text-violet-200">{r.token}</span>
+              <span className="min-w-0 flex-1 truncate text-[8.5px] text-t400">
                 {r.caption || SOURCE_LABEL[r.source] || r.source}
               </span>
             </span>
@@ -299,10 +299,10 @@ export default function SeriesRefs({
                         on ? prev.filter((x) => x !== r.id) : [...prev, r.id],
                       )
                     }
-                    className="w-[72px] shrink-0"
+                    className="w-[48px] shrink-0"
                   >
                     <span
-                      className="block h-11 overflow-hidden rounded-md border-2"
+                      className="block aspect-[9/16] overflow-hidden rounded-md border-2"
                       style={{ borderColor: on ? "var(--violet-400)" : "var(--border-subtle)" }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}

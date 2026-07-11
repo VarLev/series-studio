@@ -54,31 +54,31 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
             Утверждённых шотов пока нет. Выберите «Победителя» в ревью — шот попадёт сюда.
           </EmptyState>
         )}
-        {items.map(({ shot, model, url, isVideo }) => (
-          <div
-            key={shot.id}
-            className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-ink-700"
-          >
-            {url &&
-              (isVideo ? (
-                <video src={url} controls preload="metadata" className="aspect-video w-full bg-black" />
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={url} alt="" className="aspect-video w-full object-cover" />
-              ))}
-            <div className="flex items-center gap-2 px-3 py-2">
-              <span className="chrome-text font-display text-[16px] font-bold">
-                {String(shot.orderIndex).padStart(2, "0")}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[12px] text-t200">
-                {shot.title || shot.actionMd.slice(0, 50)}
-              </span>
-              <span className="font-mono text-[9.5px] text-t400">
-                {shot.durationSec}s · {model}
-              </span>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          {items.map(({ shot, url, isVideo }) => (
+            <div
+              key={shot.id}
+              className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-ink-700"
+            >
+              {url &&
+                (isVideo ? (
+                  <video src={url} controls preload="metadata" className="aspect-[9/16] w-full bg-black object-cover" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={url} alt="" className="aspect-[9/16] w-full object-cover" />
+                ))}
+              <div className="flex items-center gap-1.5 px-2 py-1.5">
+                <span className="chrome-text font-display text-[14px] font-bold">
+                  {String(shot.orderIndex).padStart(2, "0")}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-t200">
+                  {shot.title || shot.actionMd.slice(0, 50)}
+                </span>
+                <span className="shrink-0 font-mono text-[9px] text-t400">{shot.durationSec}s</span>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
         {items.length > 0 && (
           <a
             href={`/api/episodes/${id}/export`}

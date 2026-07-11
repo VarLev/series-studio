@@ -57,7 +57,7 @@ export default function ResultsStrip({
         return (
           <div
             key={g.id}
-            className="w-[230px] shrink-0 snap-start overflow-hidden rounded-lg border bg-ink-600"
+            className="w-[150px] shrink-0 snap-start overflow-hidden rounded-lg border bg-ink-600"
             style={{
               borderColor: g.isWinner
                 ? "rgba(79,143,125,.5)"
@@ -68,7 +68,7 @@ export default function ResultsStrip({
           >
             {active && (
               <div
-                className="flex aspect-video flex-col items-center justify-center gap-1.5"
+                className="flex aspect-[9/16] flex-col items-center justify-center gap-1.5"
                 style={{
                   background:
                     "repeating-linear-gradient(135deg, var(--ink-700) 0 12px, var(--ink-600) 12px 24px)",
@@ -83,7 +83,7 @@ export default function ResultsStrip({
             )}
 
             {failed && (
-              <div className="flex aspect-video flex-col items-start justify-center gap-1.5 bg-[rgba(194,71,106,.06)] p-3">
+              <div className="flex aspect-[9/16] flex-col items-start justify-center gap-1.5 bg-[rgba(194,71,106,.06)] p-3">
                 <span className="rounded-full border border-[rgba(194,71,106,.4)] bg-[rgba(194,71,106,.14)] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#e08aa4]">
                   {g.status === "nsfw" ? "Отказ · контент-фильтр" : "Ошибка"}
                 </span>
@@ -94,7 +94,7 @@ export default function ResultsStrip({
             {g.status === "done" && g.url && (
               <Link
                 href={`/episodes/${episodeId}/shots/${shotId}/review?g=${g.id}`}
-                className="relative block aspect-video bg-black"
+                className="relative block aspect-[9/16] bg-black"
               >
                 {g.isVideo ? (
                   <video src={g.url} preload="metadata" muted className="h-full w-full object-cover" />

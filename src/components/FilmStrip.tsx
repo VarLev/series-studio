@@ -31,11 +31,11 @@ export default function FilmStrip({
           <Link
             key={s.id}
             href={`/episodes/${episodeId}/shots/${s.id}`}
-            className="w-[54px] shrink-0"
+            className="w-[38px] shrink-0"
             title={`Группа ${String(s.orderIndex).padStart(2, "0")} · ${st.label}`}
           >
             <span
-              className="relative block h-8 overflow-hidden rounded border-[1.5px] bg-ink-600"
+              className="relative block aspect-[9/16] overflow-hidden rounded border-[1.5px] bg-ink-600"
               style={{
                 borderColor: st.color,
                 boxShadow: current ? "var(--glow-violet-sm)" : "none",

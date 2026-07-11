@@ -53,11 +53,11 @@ export default function ShotsList({
             href={`/episodes/${episodeId}/shots/${shot.id}`}
             className="flex min-w-0 flex-1 items-center gap-3"
           >
-            <div className="relative flex h-[60px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600">
-              <span className="chrome-text font-display text-[18px] font-bold">
+            <div className="relative flex aspect-[9/16] w-[42px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600">
+              <span className="chrome-text font-display text-[16px] font-bold">
                 {String(shot.orderIndex).padStart(2, "0")}
               </span>
-              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(6,5,9,.85)] px-1.5 pb-1 pt-2 font-mono text-[9px] font-semibold text-t200">
+              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(6,5,9,.85)] px-1 pb-0.5 pt-2 text-center font-mono text-[8.5px] font-semibold text-t200">
                 {shot.durationSec}s
               </span>
             </div>

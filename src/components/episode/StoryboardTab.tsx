@@ -294,10 +294,10 @@ export default function StoryboardTab({
                     onClick={() =>
                       setAttach((prev) => (on ? prev.filter((x) => x !== r.id) : [...prev, r.id]))
                     }
-                    className="w-[68px] shrink-0"
+                    className="w-[48px] shrink-0"
                   >
                     <span
-                      className="block h-11 overflow-hidden rounded-md border-2"
+                      className="block aspect-[9/16] overflow-hidden rounded-md border-2"
                       style={{ borderColor: on ? "var(--violet-400)" : "var(--border-subtle)" }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -365,9 +365,9 @@ export default function StoryboardTab({
             </span>
           </div>
 
-          <button onClick={() => setDetail(sheet)} className="block overflow-hidden rounded-lg bg-black">
+          <button onClick={() => setDetail(sheet)} className="mx-auto block overflow-hidden rounded-lg bg-black">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={sheet.url} alt={sheet.caption} className="mx-auto max-h-[64dvh] object-contain" />
+            <img src={sheet.url} alt={sheet.caption} className="max-h-[46dvh] w-auto object-contain" />
           </button>
 
           <div className="flex flex-wrap gap-1.5">
@@ -413,16 +413,16 @@ export default function StoryboardTab({
           </div>
 
           {sheet.frames.length > 0 && (
-            <div className={`grid gap-1.5 ${sheet.grid === 9 ? "grid-cols-3" : "grid-cols-2"}`}>
+            <div className="flex flex-wrap gap-1.5">
               {sheet.frames.map((f) => (
                 <button
                   key={f.id}
                   onClick={() => setDetail(f)}
-                  className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
+                  className="w-[58px] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={f.url} alt="" className="aspect-[9/16] w-full object-cover" />
-                  <span className="block truncate px-1.5 py-1 font-mono text-[8.5px] text-violet-200">
+                  <span className="block truncate px-1 py-0.5 text-center font-mono text-[7.5px] text-violet-200">
                     {f.token}
                   </span>
                 </button>
@@ -435,16 +435,16 @@ export default function StoryboardTab({
       {data.orphanFrames.length > 0 && (
         <div className="flex flex-col gap-2">
           <SectionLabel hint="их лист удалён — кадры живут сами">Отдельные кадры</SectionLabel>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {data.orphanFrames.map((f) => (
               <button
                 key={f.id}
                 onClick={() => setDetail(f)}
-                className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
+                className="w-[58px] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={f.url} alt="" className="aspect-[9/16] w-full object-cover" />
-                <span className="block truncate px-1.5 py-1 font-mono text-[8.5px] text-violet-200">
+                <span className="block truncate px-1 py-0.5 text-center font-mono text-[7.5px] text-violet-200">
                   {f.token}
                 </span>
               </button>

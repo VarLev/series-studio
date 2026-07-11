@@ -38,7 +38,7 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
             className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={r.url} alt={r.caption} className="aspect-square w-full object-cover" />
+            <img src={r.url} alt={r.caption} className="aspect-[9/16] w-full object-cover" />
             {r.caption && (
               <div className="truncate px-1.5 py-1 text-[9px] text-t300">{r.caption}</div>
             )}
