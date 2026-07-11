@@ -11,3 +11,10 @@ export const LLM_MODELS: Array<{ id: string; label: string; hint: string; hintEn
   { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", hint: "OpenAI, средняя (~как Sonnet)", hintEn: "OpenAI, mid (~Sonnet)" },
   { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", hint: "OpenAI, дешёвая (~как Haiku)", hintEn: "OpenAI, budget (~Haiku)" },
 ];
+
+/**
+ * Самая дешёвая модель (по LLM_PRICES: Haiku $1/$5 за 1М — минимальный выход).
+ * Используется автоматически для механических правок — переделка группы
+ * по замечанию (требование заказчика: реворк всегда дешёвой моделью).
+ */
+export const CHEAPEST_LLM = "claude-haiku-4-5";

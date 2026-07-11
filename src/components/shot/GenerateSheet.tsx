@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * Шторка «Генерация» (spec §3.1): мультивыбор моделей с оценкой, бегунок 4–15 с,
- * качество 480/720/1080p (Kling без 480 → авто-720), start-frame из референсов,
- * оценка = база × (сек/5) × коэф. качества, двухшаговое подтверждение сверх лимита.
+ * Шторка «Генерация» (spec §3.1): мультивыбор моделей, бегунок 4–15 с,
+ * качество 480/720/1080p (Kling без 480 → авто-720), start-frame из референсов.
+ * Стоимость — ТОЧНАЯ от Higgsfield (get_cost, debounce), формула — фолбэк «≈».
  */
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
-import { startGeneration } from "@/lib/actions/generate";
+import { preflightVideoCredits, startGeneration } from "@/lib/actions/generate";
 import { creditsToUsd, fmtUsd } from "@/lib/pricing";
 import { useT } from "@/components/I18nProvider";
 
@@ -26,7 +26,8 @@ export interface StartFrameOption {
   label: string;
 }
 
-const QUALITY_COEF: Record<string, number> = { "480p": 0.6, "720p": 1, "1080p": 1.6 };
+// фолбэк-коэффициенты (сверены с живым get_cost 2026-07-12); точные цены — preflight
+const QUALITY_COEF: Record<string, number> = { "480p": 0.4, "720p": 1, "1080p": 2 };
 const QUALITIES = ["480p", "720p", "1080p"] as const;
 const ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
 
@@ -80,17 +81,56 @@ export default function GenerateSheet({
   const [confirmStep, setConfirmStep] = useState(0); // двухшаговое подтверждение
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  // точные цены от Higgsfield (get_cost) по ключу `${duration}:${quality}` → {modelId: credits}
+  const [exactByKey, setExactByKey] = useState<Record<string, Record<string, number>>>({});
+  const exactKey = `${duration}:${quality}`;
+  const exact = exactByKey[exactKey];
 
-  const estimate = useMemo(
-    () =>
-      [...selected].reduce((sum, id) => {
-        const m = models.find((x) => x.id === id);
-        return sum + (m ? (estimateFor(m, duration, quality) ?? 0) : 0);
-      }, 0),
-    [selected, models, duration, quality],
-  );
+  // debounce-запрос точной стоимости при открытии/смене бегунка или качества
+  useEffect(() => {
+    if (!open || !models.length || exactByKey[exactKey]) return;
+    const timer = setTimeout(() => {
+      void preflightVideoCredits({
+        modelIds: models.map((m) => m.id),
+        durationSec: duration,
+        aspectRatio: "9:16", // на цену не влияет; фикс, чтобы не дёргать сеть при смене формата
+        quality,
+      }).then((rows) => {
+        const map: Record<string, number> = {};
+        for (const r of rows) if (r.exact && r.credits != null) map[r.id] = r.credits;
+        if (Object.keys(map).length) {
+          setExactByKey((prev) => ({ ...prev, [exactKey]: map }));
+        }
+      }).catch(() => {});
+    }, 450);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, exactKey, models.length]);
+
+  /** цена модели: точная от провайдера, иначе формула-фолбэк */
+  function priceFor(m: CatalogModel): { value: number | null; isExact: boolean } {
+    const ex = exact?.[m.id];
+    if (ex != null) return { value: ex, isExact: true };
+    return { value: estimateFor(m, duration, quality), isExact: false };
+  }
+
+  const { estimate, allExact } = useMemo(() => {
+    let sum = 0;
+    let allEx = selected.size > 0;
+    for (const id of selected) {
+      const m = models.find((x) => x.id === id);
+      if (!m) continue;
+      const ex = exact?.[id];
+      if (ex != null) sum += ex;
+      else {
+        allEx = false;
+        sum += estimateFor(m, duration, quality) ?? 0;
+      }
+    }
+    return { estimate: Math.round(sum * 10) / 10, allExact: allEx };
+  }, [selected, models, duration, quality, exact]);
   const hasUnknown = [...selected].some(
-    (id) => models.find((m) => m.id === id)?.credits == null,
+    (id) => exact?.[id] == null && models.find((m) => m.id === id)?.credits == null,
   );
   const klingFallback =
     quality === "480p" &&
@@ -122,10 +162,14 @@ export default function GenerateSheet({
         confirmed: confirmStep >= 2,
       });
       if (res.ok) {
+        // подтверждение приёма: сервер вернул job id каждой задачи, проверенный
+        // контрольным job_status — Higgsfield точно принял генерацию
+        const jobs = res.data?.jobs ?? [];
+        const ids = jobs.map((j) => j.jobId.slice(0, 8)).join(", ");
         toast(
           t(
-            `Запущено задач: ${selected.size} · ≈${estimate}${hasUnknown ? "+?" : ""} кр`,
-            `Jobs started: ${selected.size} · ≈${estimate}${hasUnknown ? "+?" : ""} cr`,
+            `Higgsfield подтвердил приём: ${jobs.length} задач(и) ✓${ids ? ` · ${ids}` : ""}`,
+            `Higgsfield confirmed: ${jobs.length} job(s) accepted ✓${ids ? ` · ${ids}` : ""}`,
           ),
         );
         setConfirmInfo(null);
@@ -146,7 +190,7 @@ export default function GenerateSheet({
       <div className="section-label mb-2">{t("Модели (A/B — отметьте несколько)", "Models (A/B — pick several)")}</div>
       <div className="flex flex-col gap-1.5">
         {models.map((m) => {
-          const est = estimateFor(m, duration, quality);
+          const { value: est, isExact } = priceFor(m);
           return (
             <label
               key={m.id}
@@ -171,7 +215,8 @@ export default function GenerateSheet({
               <span className="text-right font-mono text-[10.5px] text-t300">
                 {est != null ? (
                   <>
-                    {t(`≈${est} кр`, `≈${est} cr`)}
+                    {/* точная цена от Higgsfield — без «≈»; фолбэк-формула — с «≈» */}
+                    {isExact ? t(`${est} кр`, `${est} cr`) : t(`≈${est} кр`, `≈${est} cr`)}
                     <span className="block text-[9px] text-t400">~{fmtUsd(creditsToUsd(est))}</span>
                   </>
                 ) : (
@@ -340,12 +385,14 @@ export default function GenerateSheet({
         <span className="flex-1" />
         <span className="text-right font-mono font-semibold text-t100">
           <span className="text-[13px]">
-            ≈ {estimate}
+            {allExact ? "" : "≈ "}
+            {estimate}
             {hasUnknown ? "+?" : ""} {t("кр", "cr")}
           </span>
           {estimate > 0 && (
             <span className="block text-[10px] font-normal text-t400">
               ~{fmtUsd(creditsToUsd(estimate))}{hasUnknown ? "+?" : ""}
+              {allExact ? t(" · точно", " · exact") : ""}
             </span>
           )}
         </span>

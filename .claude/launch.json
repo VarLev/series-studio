@@ -2,16 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "series-studio",
+      "name": "series-studio-prod",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["run", "start"],
       "port": 3000,
       "cwd": "C:\\Users\\Lenov\\Desktop\\AI\\AIDirector\\series-studio"
     },
     {
-      "name": "series-studio-prod",
+      "name": "series-studio-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
+      "runtimeArgs": ["run", "dev"],
       "port": 3000,
       "cwd": "C:\\Users\\Lenov\\Desktop\\AI\\AIDirector\\series-studio"
     }

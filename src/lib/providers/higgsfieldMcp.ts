@@ -19,6 +19,19 @@ import { callMcpTool } from "@/lib/higgsfieldMcp";
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+/**
+ * job id ТОЛЬКО из подтверждённого формата сабмита
+ * («Submitted N job… \n- <uuid> "prompt"») — любой другой UUID в ответе
+ * (Request ID, id пресета, воркспейса) job id-ом НЕ считается.
+ */
+function parseSubmittedJobId(text: string): string | null {
+  if (!/submitted\s+\d+\s+job/i.test(text)) return null;
+  const dashLine = text.match(/^\s*-\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/im);
+  if (dashLine) return dashLine[1];
+  const all = [...text.matchAll(new RegExp(UUID_RE.source, "gi"))].map((m) => m[0]);
+  return all.length === 1 ? all[0] : null;
+}
+
 /** Заказчику нужны Seedance и Kling 3.0 (Omni) — сервисные модели MCP не показываем. */
 const VIDEO_WHITELIST = new Set(["seedance_2_0", "seedance_2_0_mini", "kling3_0"]);
 
@@ -56,7 +69,7 @@ export const MCP_CATALOG_SEED: ModelInfo[] = [
       start_image: "media",
       end_image: "media",
     },
-    credits: 45, // 5с std 720p (живой get_cost: fast 17.5, std 1080p 10с = 90)
+    credits: 22.5, // 5с std 720p (живой get_cost 2026-07-12: 9с 720p = 40.5, 10с 1080p = 90)
   },
   {
     id: "seedance_2_0_mini",
@@ -70,7 +83,7 @@ export const MCP_CATALOG_SEED: ModelInfo[] = [
       aspect_ratio: ["auto", "16:9", "9:16", "4:3", "3:4", "1:1", "21:9"],
       start_image: "media",
     },
-    credits: 5, // 4с 480p = 4 (живой get_cost)
+    credits: 12.5, // 5с 720p (живой get_cost 2026-07-12: 9с 720p = 22.5, 4с 480p = 4)
   },
 ];
 
@@ -136,10 +149,32 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     }
     if (medias.length) params.medias = medias;
 
-    const res = await callMcpTool("generate_video", { params });
+    let res = await callMcpTool("generate_video", { params });
     if (res.isError) throw new Error(`Higgsfield MCP: ${res.text.slice(0, 300)}`);
-    const jobId = res.text.match(UUID_RE)?.[0];
-    if (!jobId) throw new Error(`Higgsfield MCP не вернул job id: ${res.text.slice(0, 200)}`);
+    let jobId = parseSubmittedJobId(res.text);
+    // Сервер может вместо сабмита вернуть рекомендацию пресета (инцидент
+    // 2026-07-11: её UUID парсился как job id → зомби-задачи). Отклоняем
+    // пресет и повторяем ОДИН раз — только если сабмита точно не было.
+    if (!jobId && !/submit/i.test(res.text) && /preset/i.test(res.text)) {
+      const presetId = res.text.match(UUID_RE)?.[0];
+      if (presetId) {
+        res = await callMcpTool("generate_video", {
+          params: { ...params, declined_preset_id: presetId },
+        });
+        if (res.isError) throw new Error(`Higgsfield MCP: ${res.text.slice(0, 300)}`);
+        jobId = parseSubmittedJobId(res.text);
+      }
+    }
+    if (!jobId) {
+      throw new Error(`Higgsfield не принял задачу (job id не выдан). Ответ: ${res.text.slice(0, 300)}`);
+    }
+    // Подтверждение приёма: job_status обязан знать задачу — иначе это не сабмит
+    const check = await callMcpTool("job_status", { jobId }, { retry: true });
+    if (check.isError) {
+      throw new Error(
+        `Higgsfield вернул id ${jobId.slice(0, 8)}…, но не подтвердил задачу: ${check.text.slice(0, 200)}`,
+      );
+    }
     return { jobId };
   }
 
@@ -155,6 +190,14 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
   async getStatus(ref: JobRef): Promise<JobStatus> {
     const res = await callMcpTool("job_status", { jobId: ref.jobId }, { retry: true });
     const t = res.text;
+    if (res.isError) {
+      // сервер задачу не знает → отказ; иначе (внутренний сбой) — бросаем,
+      // поллер запишет ошибку связи и покажет её на карточке (не «вечная очередь»)
+      if (/not.?found|unknown|invalid/i.test(t)) {
+        return { status: "failed", resultUrls: [], error: `Higgsfield не знает задачу: ${t.slice(0, 250)}` };
+      }
+      throw new Error(`job_status: ${t.slice(0, 250)}`);
+    }
     const urls = [...t.matchAll(/https?:\/\/[^\s"')]+/g)].map((m) => m[0]);
     if (/completed/i.test(t)) return { status: "done", resultUrls: urls, credits: null };
     if (/nsfw|ip_detected/i.test(t))
@@ -188,10 +231,19 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     return mediaId;
   }
 
-  /** Точная стоимость генерации в кредитах подписки (get_cost, job не создаётся). */
+  /**
+   * Точная стоимость генерации в кредитах подписки (get_cost — job не
+   * создаётся, поэтому retry безопасен). Живой формат: «Cost preflight for
+   * seedance_2_0_mini: 22.5 credits (22.5 exact). No job submitted.»
+   */
   async preflightCost(params: Record<string, unknown>): Promise<number | null> {
     try {
-      const res = await callMcpTool("generate_video", { params: { ...params, get_cost: true } });
+      const res = await callMcpTool(
+        "generate_video",
+        { params: { ...params, get_cost: true } },
+        { retry: true },
+      );
+      if (res.isError) return null;
       const m = res.text.match(/([\d.]+)\s*credits/i);
       return m ? Number(m[1]) : null;
     } catch {

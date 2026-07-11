@@ -10,6 +10,7 @@ import {
   estimateJobCredits,
   getCatalog,
   pollActiveGenerations,
+  preflightJobCost,
   recalcShotStatus,
   refreshCatalog,
   submitJobs,
@@ -52,7 +53,7 @@ async function estimateTotal(input: SubmitInput): Promise<number> {
 /** U3/A-B: запуск задач по чекбоксам моделей; предохранитель по кредитам (M4). */
 export async function startGeneration(
   input: SubmitInput & { confirmed?: boolean },
-): Promise<Result> {
+): Promise<Result<{ jobs: Array<{ model: string; jobId: string }> }>> {
   await requireAuth();
   try {
     if (!input.modelIds.length) return { ok: false, error: "Выберите хотя бы одну модель" };
@@ -61,16 +62,68 @@ export async function startGeneration(
     if (!input.confirmed && limit > 0 && estimate > limit) {
       return { ok: false, needsConfirm: true, estimate, limit };
     }
-    await submitJobs(input);
+    // submitJobs подтверждает приём каждой задачи (job id + контрольный job_status);
+    // любая неподтверждённая задача — это ошибка с текстом ответа провайдера
+    const { jobs } = await submitJobs(input);
     const [shot] = await (await getDb()).select().from(shots).where(eq(shots.id, input.shotId));
     if (shot) {
       revalidatePath(`/episodes/${shot.episodeId}/shots/${input.shotId}`);
       revalidatePath("/queue");
     }
-    return { ok: true };
+    return { ok: true, data: { jobs } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Не удалось поставить задачу" };
   }
+}
+
+/**
+ * Точная стоимость по каждой модели ДО запуска (Higgsfield get_cost — задача
+ * не создаётся, кредиты не списываются). exact=false — сетевой фолбэк-формула.
+ */
+export async function preflightVideoCredits(input: {
+  modelIds: string[];
+  durationSec: number;
+  aspectRatio: string;
+  quality: string;
+}): Promise<Array<{ id: string; credits: number | null; exact: boolean }>> {
+  await requireAuth();
+  const catalog = await getCatalog("video");
+  return Promise.all(
+    input.modelIds.map(async (id) => {
+      const m = catalog.find((c) => c.id === id);
+      const quality = effectiveQuality(id, input.quality, m?.qualities ?? []);
+      const exact = await preflightJobCost(id, input.durationSec, input.aspectRatio, quality);
+      if (exact != null) return { id, credits: exact, exact: true };
+      return {
+        id,
+        credits: estimateJobCredits(m?.credits ?? null, input.durationSec, quality),
+        exact: false,
+      };
+    }),
+  );
+}
+
+/**
+ * «Проверить сейчас»: живой опрос статуса одной задачи по требованию —
+ * возвращает подтверждённый статус или текст ошибки связи (не молчит).
+ */
+export async function probeGeneration(generationId: string): Promise<{
+  status: string;
+  error: string | null;
+  pollError: string | null;
+}> {
+  await requireAuth();
+  await pollActiveGenerations([generationId]);
+  const db = await getDb();
+  const [gen] = await db.select().from(generations).where(eq(generations.id, generationId));
+  if (!gen) return { status: "unknown", error: "Задача не найдена", pollError: null };
+  const bundle = JSON.parse(gen.paramsJson || "{}") as { _poll?: { error?: string } };
+  if (gen.shotId) {
+    const [shot] = await db.select().from(shots).where(eq(shots.id, gen.shotId));
+    if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${gen.shotId}`);
+  }
+  revalidatePath("/queue");
+  return { status: gen.status, error: gen.error ?? null, pollError: bundle._poll?.error ?? null };
 }
 
 /** Nano Banana: новый референс серии (spec §3.2). */
@@ -195,6 +248,7 @@ export async function cancelGeneration(generationId: string): Promise<void> {
   const [gen] = await db.select().from(generations).where(eq(generations.id, generationId));
   if (!gen || (gen.status !== "queued" && gen.status !== "running")) return;
   const provider = getProvider();
+  const remoteCancel = Boolean(provider.cancel) && gen.provider === provider.name;
   if (provider.cancel && gen.providerJobId && gen.provider === provider.name) {
     const bundle = JSON.parse(gen.paramsJson || "{}") as { _urls?: { cancelUrl?: string } };
     await provider
@@ -203,7 +257,14 @@ export async function cancelGeneration(generationId: string): Promise<void> {
   }
   await db
     .update(generations)
-    .set({ status: "failed", error: "Отменено пользователем · кредиты не списаны" })
+    .set({
+      status: "failed",
+      // честно: MCP не умеет отменять — принятая задача у Higgsfield может
+      // доработать и списать кредиты, мы лишь перестаём её отслеживать
+      error: remoteCancel
+        ? "Отменено пользователем · кредиты не списаны"
+        : "Отменено пользователем · принятая задача у провайдера могла продолжиться",
+    })
     .where(eq(generations.id, generationId));
   // отмена последней активной задачи откатывает статус шота назад (spec §1)
   if (gen.shotId) {
@@ -215,7 +276,9 @@ export async function cancelGeneration(generationId: string): Promise<void> {
 }
 
 /** Повторить неудавшуюся задачу тем же промптом и моделью. */
-export async function retryGeneration(generationId: string): Promise<Result> {
+export async function retryGeneration(
+  generationId: string,
+): Promise<Result<{ jobs: Array<{ model: string; jobId: string }> }>> {
   await requireAuth();
   const db = await getDb();
   const [gen] = await db.select().from(generations).where(eq(generations.id, generationId));

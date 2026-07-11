@@ -146,9 +146,13 @@ export async function availableImageModels(): Promise<ImageModelMeta[]> {
 
 // ---------- Оценка кредитов (spec §3.1) ----------
 
-const QUALITY_COEF: Record<string, number> = { "480p": 0.6, "720p": 1, "1080p": 1.6 };
+// коэффициенты сверены с живым get_cost 2026-07-12 (1080p = ×2, 480p ≈ ×0.4)
+const QUALITY_COEF: Record<string, number> = { "480p": 0.4, "720p": 1, "1080p": 2 };
 
-/** оценка = база × (сек/5) × коэф. качества */
+/**
+ * Оценка-фолбэк = база × (сек/5) × коэф. качества. Реальный прайс Higgsfield
+ * сложнее — точную цифру даёт preflightCost (get_cost) перед запуском.
+ */
 export function estimateJobCredits(
   base: number | null,
   durationSec: number,
@@ -168,6 +172,8 @@ export function effectiveQuality(modelId: string, quality: string, qualities: st
 
 interface UrlBundle {
   _urls?: { statusUrl?: string; cancelUrl?: string };
+  /** здоровье поллинга: время последней попытки + ошибка связи (если была) */
+  _poll?: { at: number; error?: string; fails?: number };
   [key: string]: unknown;
 }
 
@@ -225,7 +231,29 @@ export interface SubmitInput {
   quality: string;
 }
 
-export async function submitJobs(input: SubmitInput): Promise<{ submitted: number }> {
+/**
+ * Точная стоимость задачи в кредитах у провайдера (get_cost) — задача НЕ
+ * создаётся. null — провайдер не умеет preflight или сеть недоступна.
+ */
+export async function preflightJobCost(
+  modelId: string,
+  durationSec: number,
+  aspectRatio: string,
+  quality: string,
+): Promise<number | null> {
+  const provider = await pickVideoProvider();
+  if (!provider.preflightCost) return null;
+  const virtual = VIRTUAL_MODELS[modelId];
+  const params = {
+    ...shapeVideoParams(modelId, durationSec, aspectRatio, quality),
+    ...(virtual?.params ?? {}),
+  };
+  return provider.preflightCost({ model: virtual?.base ?? modelId, prompt: "cost preflight", ...params });
+}
+
+export async function submitJobs(
+  input: SubmitInput,
+): Promise<{ submitted: number; jobs: Array<{ model: string; jobId: string }> }> {
   const db = await getDb();
   const provider = await pickVideoProvider();
   const [prompt] = await db.select().from(prompts).where(eq(prompts.id, input.promptId));
@@ -238,7 +266,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ submitted: numbe
     ? ((await publicUrlForReference(input.startFrameRefId)) ?? undefined)
     : undefined;
 
-  let submitted = 0;
+  const jobs: Array<{ model: string; jobId: string }> = [];
   for (const modelId of input.modelIds) {
     const model = catalog.find((m) => m.id === modelId);
     const quality = effectiveQuality(modelId, input.quality, model?.qualities ?? []);
@@ -247,6 +275,11 @@ export async function submitJobs(input: SubmitInput): Promise<{ submitted: numbe
       ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
       ...(virtual?.params ?? {}),
     };
+    // точная стоимость ДО запуска (get_cost) — в очередь и в учёт затрат идёт она,
+    // формула — только фолбэк при сетевом сбое
+    const exactCost = provider.preflightCost
+      ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: prompt.text, ...params }).catch(() => null)
+      : null;
     const sub = await provider.submit({
       model: virtual?.base ?? modelId,
       prompt: prompt.text,
@@ -258,7 +291,8 @@ export async function submitJobs(input: SubmitInput): Promise<{ submitted: numbe
       ...params,
       quality,
       start_frame_ref: input.startFrameRefId ?? null,
-      estimate: estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
+      estimate: exactCost ?? estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
+      estimate_exact: exactCost != null,
       _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
     };
     await db.insert(generations).values({
@@ -274,10 +308,10 @@ export async function submitJobs(input: SubmitInput): Promise<{ submitted: numbe
       providerJobId: sub.jobId,
       source: "api",
     });
-    submitted++;
+    jobs.push({ model: modelId, jobId: sub.jobId });
   }
   await db.update(shots).set({ status: "generating" }).where(eq(shots.id, input.shotId));
-  return { submitted };
+  return { submitted: jobs.length, jobs };
 }
 
 // ---------- Задачи-референсы (Nano Banana / Upscale / Правка, spec §2.6/§3.2) ----------
@@ -489,6 +523,15 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
         statusUrl: bundle._urls?.statusUrl,
         cancelUrl: bundle._urls?.cancelUrl,
       });
+      // связь с провайдером ок — снимаем предупреждение, если оно было
+      if (bundle._poll?.error) {
+        bundle._poll = { at: Date.now() };
+        await db
+          .update(generations)
+          .set({ paramsJson: JSON.stringify(bundle) })
+          .where(eq(generations.id, gen.id));
+        updated++;
+      }
       if (status.status === "queued" || status.status === "running") {
         if (status.status !== gen.status) {
           await db.update(generations).set({ status: status.status }).where(eq(generations.id, gen.id));
@@ -555,6 +598,19 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
           .set({ status: "failed", error: message })
           .where(eq(generations.id, gen.id));
         if (gen.shotId) await recalcShotStatus(gen.shotId);
+        updated++;
+      } else {
+        // ошибка связи НЕ глотается молча: пишем в _poll — карточка покажет
+        // «нет связи с Higgsfield» вместо вечной «очереди» (инцидент 2026-07-11)
+        bundle._poll = {
+          at: Date.now(),
+          error: message.slice(0, 200),
+          fails: (bundle._poll?.fails ?? 0) + 1,
+        };
+        await db
+          .update(generations)
+          .set({ paramsJson: JSON.stringify(bundle) })
+          .where(eq(generations.id, gen.id));
         updated++;
       }
     }

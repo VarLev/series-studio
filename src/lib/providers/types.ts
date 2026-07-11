@@ -59,4 +59,6 @@ export interface GenerationProvider {
   uploadFile?(data: Buffer, contentType: string): Promise<string>;
   /** байты синхронно сгенерированного результата (Google) по jobId */
   takeResult?(jobId: string): { data: Buffer; mimeType: string } | null;
+  /** точная стоимость задачи в кредитах БЕЗ её создания (Higgsfield MCP get_cost) */
+  preflightCost?(params: Record<string, unknown>): Promise<number | null>;
 }

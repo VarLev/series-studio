@@ -6,6 +6,7 @@ import { getDb, episodes, shots, shotEntities, references } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
 import { llmReviseGroup } from "@/lib/llm/factory";
+import { CHEAPEST_LLM } from "@/lib/llm/models";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
 
@@ -89,6 +90,8 @@ export async function reviseGroup(
       durationSec: shot.durationSec,
       beats: currentBeats,
       feedback,
+      // переделка по замечанию — всегда самой дешёвой моделью (замечание заказчика)
+      model: CHEAPEST_LLM,
     });
     const { beats, durationSec } = normalizeBeats(patch.shots, patch.duration_sec);
     await db

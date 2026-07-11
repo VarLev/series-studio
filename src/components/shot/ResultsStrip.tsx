@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cancelGeneration, retryGeneration } from "@/lib/actions/generate";
+import { cancelGeneration, probeGeneration, retryGeneration } from "@/lib/actions/generate";
 import { deleteGeneration } from "@/lib/actions/deletes";
 import ConfirmButton from "@/components/ConfirmButton";
+import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
 export interface ResultItem {
@@ -20,6 +21,10 @@ export interface ResultItem {
   createdAt: string;
   promptVersion: number | null;
   credits: number | null;
+  /** job id провайдера — доказательство, что Higgsfield принял задачу */
+  jobId: string | null;
+  /** последняя ошибка связи при поллинге статуса (если есть) */
+  pollError: string | null;
 }
 
 function Elapsed({ since }: { since: string }) {
@@ -70,7 +75,7 @@ export default function ResultsStrip({
           >
             {active && (
               <div
-                className="flex aspect-[9/16] flex-col items-center justify-center gap-1.5"
+                className="flex aspect-[9/16] flex-col items-center justify-center gap-1.5 px-2 text-center"
                 style={{
                   background:
                     "repeating-linear-gradient(135deg, var(--ink-700) 0 12px, var(--ink-600) 12px 24px)",
@@ -81,6 +86,17 @@ export default function ResultsStrip({
                 <span className="text-[9.5px] font-medium uppercase tracking-[0.12em] text-t400">
                   Higgsfield · {g.status === "queued" ? t("в очереди", "queued") : t("в работе", "running")}
                 </span>
+                {/* доказательство приёма: job id, выданный Higgsfield при сабмите */}
+                {g.jobId && (
+                  <span className="font-mono text-[8.5px] text-success">
+                    ✓ {t("принята", "accepted")} · {g.jobId.slice(0, 8)}
+                  </span>
+                )}
+                {g.pollError && (
+                  <span className="font-mono text-[8.5px] leading-snug text-warning">
+                    ⚠ {t("нет связи — статус может отставать", "no link — status may lag")}
+                  </span>
+                )}
               </div>
             )}
 
@@ -118,24 +134,69 @@ export default function ResultsStrip({
               </Link>
             )}
 
-            <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-2">
-              <span className="font-mono text-[10px] font-semibold text-chrome-mid">{g.model}</span>
-              {g.promptVersion != null && (
-                <span className="font-mono text-[10px] text-magenta-400">v{g.promptVersion}</span>
-              )}
-              <span className="flex-1" />
-              <span className="font-mono text-[10px] text-t300">
-                {g.credits != null ? `${g.credits} ${t("кр", "cr")}` : g.source}
-              </span>
-              {!active && (
-                <ConfirmButton
-                  action={deleteGeneration.bind(null, g.id)}
-                  label="🗑"
-                  confirmLabel={t("Удалить?", "Delete?")}
-                  className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
-                  armedClassName="text-danger"
-                />
-              )}
+            {/* футер фиксированной структуры: [модель·v] / [кредиты | действия] —
+                длинные имена моделей обрезаются, кнопки не «прыгают» между карточками */}
+            <div className="px-2.5 py-2">
+              <div className="flex items-center gap-1.5">
+                <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-chrome-mid">
+                  {g.model}
+                </span>
+                {g.promptVersion != null && (
+                  <span className="shrink-0 font-mono text-[10px] text-magenta-400">v{g.promptVersion}</span>
+                )}
+              </div>
+              <div className="mt-1 flex min-h-7 items-center gap-1.5">
+                <span className="font-mono text-[10px] text-t300">
+                  {g.credits != null ? `${g.credits} ${t("кр", "cr")}` : g.source}
+                </span>
+                <span className="flex-1" />
+                {active ? (
+                  <>
+                    {/* живой опрос статуса по требованию — подтверждение, что задача идёт */}
+                    <button
+                      disabled={pending}
+                      title={t("Проверить статус в Higgsfield", "Check status at Higgsfield")}
+                      onClick={() =>
+                        startTransition(async () => {
+                          const res = await probeGeneration(g.id);
+                          toast(
+                            res.pollError
+                              ? t(
+                                  `Нет связи с Higgsfield: ${res.pollError.slice(0, 80)}`,
+                                  `No link to Higgsfield: ${res.pollError.slice(0, 80)}`,
+                                )
+                              : t(`Higgsfield: ${res.status}`, `Higgsfield: ${res.status}`),
+                          );
+                          router.refresh();
+                        })
+                      }
+                      className="rounded-md px-1.5 py-1 text-[11px] text-t400 hover:bg-ink-500 hover:text-violet-200 disabled:opacity-50"
+                    >
+                      ↻
+                    </button>
+                    <button
+                      disabled={pending}
+                      onClick={() =>
+                        startTransition(async () => {
+                          await cancelGeneration(g.id);
+                          router.refresh();
+                        })
+                      }
+                      className="rounded-md px-2 py-1 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
+                    >
+                      {t("Отменить", "Cancel")}
+                    </button>
+                  </>
+                ) : (
+                  <ConfirmButton
+                    action={deleteGeneration.bind(null, g.id)}
+                    label="🗑"
+                    confirmLabel={t("Удалить?", "Delete?")}
+                    className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
+                    armedClassName="text-danger"
+                  />
+                )}
+              </div>
             </div>
 
             {failed && (
@@ -157,23 +218,6 @@ export default function ResultsStrip({
                   className="rounded-md px-2.5 py-2 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
                 >
                   {t("Повторить", "Retry")}
-                </button>
-              </div>
-            )}
-
-            {active && (
-              <div className="px-2.5 pb-2.5">
-                <button
-                  disabled={pending}
-                  onClick={() =>
-                    startTransition(async () => {
-                      await cancelGeneration(g.id);
-                      router.refresh();
-                    })
-                  }
-                  className="rounded-md px-2 py-1.5 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
-                >
-                  {t("Отменить", "Cancel")}
                 </button>
               </div>
             )}

@@ -176,19 +176,29 @@ export default async function ShotPage(ctx: {
     .where(eq(generations.shotId, shotId))
     .orderBy(desc(generations.createdAt));
   const results = await Promise.all(
-    genRows.map(async (g) => ({
-      id: g.id,
-      model: g.model,
-      status: g.status,
-      source: g.source,
-      error: g.error ?? "",
-      url: g.resultStoragePath ? await getFileUrl(g.resultStoragePath) : null,
-      isVideo: Boolean(g.resultStoragePath?.match(/\.(mp4|webm|mov)$/i)),
-      isWinner: shot.winnerGenerationId === g.id,
-      createdAt: g.createdAt.toISOString(),
-      promptVersion: g.promptId ? (promptVersionById.get(g.promptId) ?? null) : null,
-      credits: g.creditsSpent,
-    })),
+    genRows.map(async (g) => {
+      // здоровье поллинга из paramsJson: карточка предупреждает о потере связи
+      let pollError: string | null = null;
+      try {
+        const bundle = JSON.parse(g.paramsJson || "{}") as { _poll?: { error?: string } };
+        pollError = bundle._poll?.error ?? null;
+      } catch {}
+      return {
+        id: g.id,
+        model: g.model,
+        status: g.status,
+        source: g.source,
+        error: g.error ?? "",
+        url: g.resultStoragePath ? await getFileUrl(g.resultStoragePath) : null,
+        isVideo: Boolean(g.resultStoragePath?.match(/\.(mp4|webm|mov)$/i)),
+        isWinner: shot.winnerGenerationId === g.id,
+        createdAt: g.createdAt.toISOString(),
+        promptVersion: g.promptId ? (promptVersionById.get(g.promptId) ?? null) : null,
+        credits: g.creditsSpent,
+        jobId: g.providerJobId,
+        pollError,
+      };
+    }),
   );
   const activeCount = results.filter((r) => r.status === "queued" || r.status === "running").length;
 
@@ -326,7 +336,7 @@ export default async function ShotPage(ctx: {
               >
                 {t("Шоты группы", "Group shots")}
               </SectionLabel>
-              <GroupShotsEditor shotId={shotId} initialBeats={beats} llmModel={settings.llm_model} />
+              <GroupShotsEditor shotId={shotId} initialBeats={beats} />
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">

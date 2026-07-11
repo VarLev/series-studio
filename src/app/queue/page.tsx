@@ -41,7 +41,10 @@ export default async function QueuePage() {
   const toItem = (g: (typeof gens)[number]) => {
     const shot = g.shotId ? shotById.get(g.shotId) : undefined;
     const ep = shot ? epById.get(shot.episodeId) : g.episodeId ? epById.get(g.episodeId) : undefined;
-    const params = JSON.parse(g.paramsJson || "{}") as { estimate?: number | null };
+    const params = JSON.parse(g.paramsJson || "{}") as {
+      estimate?: number | null;
+      _poll?: { error?: string };
+    };
     const label =
       g.kind === "reference"
         ? t(
@@ -58,7 +61,8 @@ export default async function QueuePage() {
       credits: g.creditsSpent,
       estimate: params.estimate ?? null,
       createdAt: g.createdAt.toISOString(),
-      error: g.error ?? "",
+      // для активных задач показываем ошибку связи поллинга (если есть)
+      error: g.error || (params._poll?.error ? t("⚠ нет связи с провайдером", "⚠ no link to provider") : ""),
       label,
       href:
         g.kind === "reference"

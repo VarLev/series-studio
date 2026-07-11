@@ -10,6 +10,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateGroupBeats, reviseGroup } from "@/lib/actions/shots";
 import type { GroupShot } from "@/lib/llm/contracts";
+import { CHEAPEST_LLM } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
@@ -20,16 +21,15 @@ const fieldCls =
 export default function GroupShotsEditor({
   shotId,
   initialBeats,
-  llmModel,
 }: {
   shotId: string;
   initialBeats: GroupShot[];
-  llmModel: string;
 }) {
   const router = useRouter();
   const t = useT();
-  // переделка группы: ~1.5К входных (группа+сюжет+библия) + типовой вывод
-  const reviseUsd = fmtUsd(estTextUsd(llmModel, 1500, OUT_TOKENS.revise));
+  // переделка по замечанию всегда идёт самой дешёвой моделью (reviseGroup →
+  // CHEAPEST_LLM): ~1.5К входных (группа+сюжет+библия) + типовой вывод
+  const reviseUsd = fmtUsd(estTextUsd(CHEAPEST_LLM, 1500, OUT_TOKENS.revise));
   const [beats, setBeats] = useState<GroupShot[]>(initialBeats);
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [dirty, setDirty] = useState(false);
