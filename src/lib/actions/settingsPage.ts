@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, settings } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { setSetting } from "@/lib/settings";
-import { upsertTechniqueRow, deleteTechniqueRow } from "@/lib/director";
+import { upsertTechniqueRow, deleteTechniqueRow, deleteAllTechniqueRows } from "@/lib/director";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -52,6 +52,13 @@ export async function saveTechnique(input: {
 export async function deleteTechnique(id: string): Promise<void> {
   await requireAuth();
   await deleteTechniqueRow(id);
+  revalidatePath("/settings");
+}
+
+/** «Удалить все» приёмы — библиотека остаётся пустой и не пересеивается вольтом. */
+export async function deleteAllTechniques(): Promise<void> {
+  await requireAuth();
+  await deleteAllTechniqueRows();
   revalidatePath("/settings");
 }
 

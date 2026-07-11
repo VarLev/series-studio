@@ -1,9 +1,17 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { updateEntity, setEntityArchived, deleteEntity, type EntityType } from "@/lib/actions/entities";
 import { SectionLabel } from "@/components/ui";
+import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
+
+interface Fields {
+  name: string;
+  elementName: string;
+  description: string;
+  type: string;
+}
 
 export default function EntityForm({
   entity,
@@ -19,24 +27,41 @@ export default function EntityForm({
   };
 }) {
   const t = useT();
-  const [name, setName] = useState(entity.name);
-  const [elementName, setElementName] = useState(entity.elementName);
-  const [description, setDescription] = useState(entity.description);
+  // сохранение только по кнопке Save (замечание заказчика) — правки живут
+  // локально, dirty сравнивается со снимком последнего сохранённого состояния
+  const initial: Fields = {
+    name: entity.name,
+    elementName: entity.elementName,
+    description: entity.description,
+    type: entity.type,
+  };
+  const [fields, setFields] = useState<Fields>(initial);
+  const [saved, setSaved] = useState<Fields>(initial);
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [, startTransition] = useTransition();
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pending, startTransition] = useTransition();
+  const dirty =
+    fields.name !== saved.name ||
+    fields.elementName !== saved.elementName ||
+    fields.description !== saved.description ||
+    fields.type !== saved.type;
 
-  function save(patch: { name?: string; elementName?: string; description?: string }) {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(
-      () => startTransition(() => updateEntity(entity.id, patch as Parameters<typeof updateEntity>[1])),
-      800,
-    );
+  function save() {
+    const snapshot = { ...fields };
+    startTransition(async () => {
+      await updateEntity(entity.id, {
+        name: snapshot.name,
+        elementName: snapshot.elementName,
+        description: snapshot.description,
+        type: snapshot.type as EntityType,
+      });
+      setSaved(snapshot);
+      toast(t("Сущность сохранена", "Entity saved"));
+    });
   }
 
   async function copyElement() {
-    await navigator.clipboard.writeText(elementName);
+    await navigator.clipboard.writeText(fields.elementName);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -46,11 +71,8 @@ export default function EntityForm({
       <div className="flex flex-col gap-1.5">
         <SectionLabel>{t("Имя", "Name")}</SectionLabel>
         <input
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            save({ name: e.target.value });
-          }}
+          value={fields.name}
+          onChange={(e) => setFields({ ...fields, name: e.target.value })}
           className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[14px] font-semibold text-t100 outline-none focus:border-[var(--border-strong)]"
         />
       </div>
@@ -59,11 +81,8 @@ export default function EntityForm({
         <SectionLabel hint={t("подставляется в промпты", "inserted into prompts")}>element_name</SectionLabel>
         <div className="flex gap-2">
           <input
-            value={elementName}
-            onChange={(e) => {
-              setElementName(e.target.value);
-              save({ elementName: e.target.value });
-            }}
+            value={fields.elementName}
+            onChange={(e) => setFields({ ...fields, elementName: e.target.value })}
             spellCheck={false}
             className="min-h-11 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 font-mono text-[13px] text-violet-200 outline-none focus:border-[var(--border-strong)]"
           />
@@ -81,11 +100,8 @@ export default function EntityForm({
           {t("Описание", "Description")}
         </SectionLabel>
         <textarea
-          value={description}
-          onChange={(e) => {
-            setDescription(e.target.value);
-            save({ description: e.target.value });
-          }}
+          value={fields.description}
+          onChange={(e) => setFields({ ...fields, description: e.target.value })}
           rows={5}
           placeholder={t(
             "Внешность, характер, визуальные детали — то, что должно быть стабильным от шота к шоту.",
@@ -97,10 +113,8 @@ export default function EntityForm({
 
       <div className="flex items-center gap-3">
         <select
-          defaultValue={entity.type}
-          onChange={(e) =>
-            startTransition(() => updateEntity(entity.id, { type: e.target.value as EntityType }))
-          }
+          value={fields.type}
+          onChange={(e) => setFields({ ...fields, type: e.target.value })}
           className="min-h-10 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
         >
           <option value="character">{t("Персонаж", "Character")}</option>
@@ -116,6 +130,19 @@ export default function EntityForm({
           {entity.archived ? t("Вернуть из архива", "Unarchive") : t("В архив", "Archive")}
         </button>
       </div>
+
+      <button
+        onClick={save}
+        disabled={pending || !dirty}
+        className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-50"
+        style={{ boxShadow: dirty ? "var(--glow-violet-sm)" : "none" }}
+      >
+        {pending
+          ? t("Сохранение…", "Saving…")
+          : dirty
+            ? t("Сохранить", "Save")
+            : t("Сохранено", "Saved")}
+      </button>
 
       {/* spec §2.7: удаление — пропадает из библии и из чипов шотов */}
       <button

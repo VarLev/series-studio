@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { EntityAvatar, ENTITY_TYPE_LABEL, EmptyState } from "@/components/ui";
-import { quickCreateEntity, type EntityType } from "@/lib/actions/entities";
+import { quickCreateEntity, deleteEntity, type EntityType } from "@/lib/actions/entities";
 import { deleteAllEntities } from "@/lib/actions/deletes";
 import ConfirmButton from "@/components/ConfirmButton";
 import { useT } from "@/components/I18nProvider";
@@ -133,29 +133,42 @@ export default function BibleList({ items }: { items: BibleItem[] }) {
             )}
 
             {group.map((item) => (
-              <Link
+              <div
                 key={item.id}
-                href={`/bible/${item.id}`}
-                className="flex min-h-14 items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5 hover:border-[var(--border-strong)] hover:bg-ink-600"
+                className="flex min-h-14 items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5 hover:border-[var(--border-strong)]"
                 style={{ opacity: item.archived ? 0.5 : 1 }}
               >
-                <EntityAvatar name={item.name} imageUrl={item.avatarUrl} size={36} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13.5px] font-semibold text-t100">
-                    {item.name}
-                    {item.archived ? t(" · архив", " · archived") : ""}
+                <Link
+                  href={`/bible/${item.id}`}
+                  className="flex min-w-0 flex-1 items-center gap-3"
+                >
+                  <EntityAvatar name={item.name} imageUrl={item.avatarUrl} size={36} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold text-t100">
+                      {item.name}
+                      {item.archived ? t(" · архив", " · archived") : ""}
+                    </span>
+                    <span className="block text-[10px] text-t400">
+                      {item.refCount} {t("реф.", "refs")} ·{" "}
+                      {ENTITY_TYPE_LABEL[item.type]
+                        ? t(ENTITY_TYPE_LABEL[item.type].ru, ENTITY_TYPE_LABEL[item.type].en)
+                        : item.type}
+                    </span>
                   </span>
-                  <span className="block text-[10px] text-t400">
-                    {item.refCount} {t("реф.", "refs")} ·{" "}
-                    {ENTITY_TYPE_LABEL[item.type]
-                      ? t(ENTITY_TYPE_LABEL[item.type].ru, ENTITY_TYPE_LABEL[item.type].en)
-                      : item.type}
+                  <span className="rounded border border-[rgba(139,95,176,.3)] bg-[rgba(139,95,176,.1)] px-1.5 py-1 font-mono text-[10px] font-semibold text-violet-200">
+                    {item.elementName}
                   </span>
-                </span>
-                <span className="rounded border border-[rgba(139,95,176,.3)] bg-[rgba(139,95,176,.1)] px-1.5 py-1 font-mono text-[10px] font-semibold text-violet-200">
-                  {item.elementName}
-                </span>
-              </Link>
+                </Link>
+                {/* удаление прямо с карточки, не заходя в сущность (замечание заказчика) */}
+                <ConfirmButton
+                  action={deleteEntity.bind(null, item.id)}
+                  label="✕"
+                  confirmLabel={t("удалить?", "delete?")}
+                  doneToast={t("Сущность удалена", "Entity deleted")}
+                  className="min-h-9 shrink-0 rounded-md border border-[var(--border-subtle)] px-2.5 text-[11px] font-semibold text-t400 hover:border-[rgba(194,71,106,.4)] hover:text-danger disabled:opacity-50"
+                  armedClassName="border-danger text-danger"
+                />
+              </div>
             ))}
           </div>
         );

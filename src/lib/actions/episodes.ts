@@ -7,6 +7,7 @@ import { getDb, episodes, shots, shotEntities, entities, prompts } from "@/lib/d
 import { requireAuth } from "@/lib/auth";
 import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
+import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
 import type { Breakdown } from "@/lib/llm/contracts";
 
 export async function createEpisode(): Promise<void> {
@@ -88,27 +89,17 @@ export async function saveBreakdown(
     mode === "append" ? Math.max(0, ...oldShots.map((s) => s.orderIndex)) + 1 : 1;
   for (const group of [...breakdown.groups].sort((a, b) => a.order - b.order)) {
     const shotId = crypto.randomUUID();
-    const beats = [...group.shots].sort((a, b) => a.order - b.order);
-    // фрагмент сюжета группы: строка на шот — читается в списке и правится вручную
-    const actionMd = beats.length
-      ? beats
-          .map((b) => {
-            const head = `Шот ${b.order}${b.time ? ` (${b.time})` : ""}: `;
-            const parts = [b.action || b.camera || b.framing];
-            if (b.dialogue) parts.push(`«${b.dialogue}»`);
-            return head + parts.filter(Boolean).join(" — ");
-          })
-          .join("\n")
-      : group.title;
+    // время шотов нормализуется от 00:00 (группа = отдельное видео),
+    // сквозной таймкод групп пересчитывается ниже по фактическим длительностям
+    const { beats, durationSec } = normalizeBeats(group.shots, group.duration_sec);
     await db.insert(shots).values({
       id: shotId,
       episodeId,
       orderIndex: index++,
       title: group.title,
-      durationSec: Math.min(15, Math.max(3, group.duration_sec)),
-      timecode: group.time,
+      durationSec,
       beatsJson: JSON.stringify(beats),
-      actionMd,
+      actionMd: composeActionMd(beats, group.title),
       cameraHint: "",
       status: "draft",
     });
@@ -125,6 +116,7 @@ export async function saveBreakdown(
       }
     }
   }
+  await recomputeEpisodeTimecodes(episodeId);
   await db.update(episodes).set({ status: "storyboarded" }).where(eq(episodes.id, episodeId));
   revalidatePath(`/episodes/${episodeId}`);
 }

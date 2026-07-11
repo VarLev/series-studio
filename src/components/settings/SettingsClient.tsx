@@ -14,6 +14,7 @@ import {
   resetTemplate,
   saveTechnique,
   deleteTechnique,
+  deleteAllTechniques,
   saveUiPref,
 } from "@/lib/actions/settingsPage";
 import { SectionLabel } from "@/components/ui";
@@ -265,12 +266,24 @@ export default function SettingsClient({
 
       <SectionLabel
         right={
-          <button
-            onClick={openNew}
-            className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:text-violet-100"
-          >
-            {t("+ Добавить приём", "+ Add technique")}
-          </button>
+          <span className="flex items-center gap-3">
+            {techniques.length > 0 && (
+              <ConfirmButton
+                action={deleteAllTechniques}
+                label={t("удалить все", "delete all")}
+                confirmLabel={t(`Удалить все приёмы (${techniques.length})?`, `Delete all techniques (${techniques.length})?`)}
+                doneToast={t("Приёмы удалены", "Techniques deleted")}
+                className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-t400 hover:text-danger disabled:opacity-50"
+                armedClassName="text-danger"
+              />
+            )}
+            <button
+              onClick={openNew}
+              className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:text-violet-100"
+            >
+              {t("+ Добавить приём", "+ Add technique")}
+            </button>
+          </span>
         }
       >
         {t("Режиссёрские приёмы", "Director techniques")} · {techniques.length}

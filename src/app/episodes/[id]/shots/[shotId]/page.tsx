@@ -27,6 +27,7 @@ import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
+import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
 import ResultsStrip from "@/components/shot/ResultsStrip";
 import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
@@ -318,50 +319,21 @@ export default async function ShotPage(ctx: {
             </div>
           </div>
 
-          {beats.length > 0 && (
+          {beats.length > 0 ? (
             <div className="flex flex-col gap-1.5">
-              <SectionLabel hint={t("из раскадровки сюжета", "from the story breakdown")}>
+              <SectionLabel
+                hint={t("правятся вручную · замечание уходит в Claude", "edit by hand · feedback goes to Claude")}
+              >
                 {t("Шоты группы", "Group shots")}
               </SectionLabel>
-              <div className="flex flex-col gap-1.5">
-                {beats.map((b) => (
-                  <div
-                    key={b.order}
-                    className="rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-2.5"
-                  >
-                    <div className="mb-1 font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
-                      {t("Шот", "Shot")} {b.order}
-                      {b.time ? ` · ${b.time}` : ""}
-                    </div>
-                    {(b.framing || b.camera) && (
-                      <div className="mb-1 font-mono text-[10px] leading-relaxed text-t400">
-                        {b.framing && <>🎥 {b.framing}</>}
-                        {b.framing && b.camera && " · "}
-                        {b.camera}
-                      </div>
-                    )}
-                    {b.action && (
-                      <div className="text-[12px] leading-relaxed text-t200">{b.action}</div>
-                    )}
-                    {b.dialogue && (
-                      <div className="mt-1 text-[12px] leading-relaxed text-violet-200">
-                        «{b.dialogue}»
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <GroupShotsEditor shotId={shotId} initialBeats={beats} />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <SectionLabel>{t("Фрагмент сюжета", "Story fragment")}</SectionLabel>
+              <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
             </div>
           )}
-
-          <div className="flex flex-col gap-1.5">
-            <SectionLabel
-              hint={beats.length ? t("правится, уходит в фабрику", "editable, feeds the factory") : undefined}
-            >
-              {t("Фрагмент сюжета", "Story fragment")}
-            </SectionLabel>
-            <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
-          </div>
 
           <div className="flex flex-col gap-1.5">
             <SectionLabel

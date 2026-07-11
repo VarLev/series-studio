@@ -3,7 +3,7 @@
  * выборка для промпт-фабрики и CRUD-помощники. Сеется при первом обращении.
  */
 import { asc, eq } from "drizzle-orm";
-import { getDb, techniques } from "@/lib/db";
+import { getDb, settings, techniques } from "@/lib/db";
 
 export interface TechniqueRow {
   id: string;
@@ -20,13 +20,28 @@ export interface TechniqueRow {
 
 let seeded = false;
 
+/** Флаг «сид уже был»: после «удалить все» пустая таблица НЕ пересеивается. */
+async function markSeeded(): Promise<void> {
+  const db = await getDb();
+  await db
+    .insert(settings)
+    .values({ key: "techniques_seeded", value: "1" })
+    .onConflictDoNothing();
+}
+
 /** Первый запуск: заливаем вольт в БД (после — только пользовательские правки). */
 export async function ensureTechniques(): Promise<void> {
   if (seeded) return;
   const db = await getDb();
+  const [flag] = await db.select().from(settings).where(eq(settings.key, "techniques_seeded"));
+  if (flag) {
+    seeded = true;
+    return;
+  }
   const [first] = await db.select().from(techniques).limit(1);
   if (first) {
     seeded = true;
+    await markSeeded();
     return;
   }
   const { default: vault } = (await import("./director/vault.json")) as {
@@ -40,6 +55,15 @@ export async function ensureTechniques(): Promise<void> {
       .values(vault.slice(i, i + 50).map((t) => ({ ...t, custom: false })))
       .onConflictDoNothing();
   }
+  seeded = true;
+  await markSeeded();
+}
+
+/** Очистить библиотеку целиком (замечание заказчика: «удали пока все приёмы»). */
+export async function deleteAllTechniqueRows(): Promise<void> {
+  const db = await getDb();
+  await db.delete(techniques);
+  await markSeeded(); // пустая библиотека не пересеивается вольтом
   seeded = true;
 }
 

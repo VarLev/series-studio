@@ -12,13 +12,16 @@ import {
   shotEntities,
 } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
+import { TIMING_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { runJson } from "./client";
 import {
   breakdownSchema,
+  groupPatchSchema,
   shotPromptSchema,
   techniquePickSchema,
   type Breakdown,
+  type GroupPatch,
   type GroupShot,
   type ShotPrompt,
 } from "./contracts";
@@ -93,12 +96,65 @@ export async function llmBreakdown(
         '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
         "Соответствие формату задания: группа = «# ГРУППА NN» (не длиннее 15 секунд, пригодна для " +
         "отдельной AI-видеогенерации), shots = «### Шот N» внутри группы, duration_sec — длительность " +
-        "группы в секундах. Все правила задания (хронометраж, реплики, планы) действуют.\n" +
+        "группы в секундах. Время шотов (shots[].time) отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот " +
+        "каждой группы начинается с 00:00. Время группы (time) — сквозное по эпизоду. " +
+        "Все правила задания (хронометраж, реплики, планы) действуют.\n" +
         "Если персонаж или локация совпадает с сущностью из библии выше — пиши в characters/location " +
         "ТОЧНОЕ имя (name) этой сущности, чтобы приложение связало их автоматически.",
       user,
     },
     breakdownSchema,
+  );
+}
+
+/**
+ * Переделать одну группу шотов по замечанию пользователя: модель получает
+ * текущие шоты группы, фрагмент сюжета для контекста и замечание — возвращает
+ * обновлённую группу тем же JSON-форматом (время шотов от 00:00).
+ */
+export async function llmReviseGroup(input: {
+  episodeId: string;
+  synopsis: string;
+  groupTitle: string;
+  durationSec: number;
+  beats: GroupShot[];
+  feedback: string;
+  model?: string;
+}): Promise<GroupPatch> {
+  const { rules, model } = await seriesSystemBase();
+  const bible = await bibleContext();
+  const current =
+    `Группа «${input.groupTitle}» (${input.durationSec} сек):\n` +
+    input.beats
+      .map(
+        (b) =>
+          `Шот ${b.order} (${b.time}): План/ракурс: ${b.framing}. Камера видит: ${b.camera}. ` +
+          `Действие: ${b.action}.${b.dialogue ? ` Реплика: «${b.dialogue}»` : ""}`,
+      )
+      .join("\n");
+  return runJson(
+    {
+      kind: "breakdown",
+      model: input.model || model,
+      episodeId: input.episodeId,
+      maxTokens: 8000,
+      system:
+        `${rules}\n\n${bible}\n\n` +
+        "Ты правишь ОДНУ группу шотов раскадровки вертикального сериала (группа = отдельное " +
+        "AI-видео не длиннее 15 секунд). Перепиши группу с учётом замечания пользователя, " +
+        "сохранив рабочие части и не выходя за события сюжета.\n" +
+        `${TIMING_RULES}\n` +
+        "Верни ТОЛЬКО JSON без пояснений:\n" +
+        '{"title":"название группы","duration_sec":14,' +
+        '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
+        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}\n' +
+        "Время шотов отсчитывается от начала группы (первый шот с 00:00).",
+      user:
+        `Фрагмент сюжета эпизода (контекст):\n${input.synopsis}\n\n` +
+        `Текущая группа:\n${current}\n\n` +
+        `Замечание пользователя: ${input.feedback}`,
+    },
+    groupPatchSchema,
   );
 }
 
@@ -225,10 +281,11 @@ export async function llmShotPrompt(shotId: string, targetModel: string): Promis
         "element_name сущностей, чьи референсы нужно прикрепить к задаче.\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
         '"used_technique_ids":["..."],"params":{"aspect_ratio":"9:16","duration":15}}',
+      // actionMd собирается из шотов группы — при наличии beats не дублируем его
       user:
-        `Действие группы (${shot.durationSec} сек): ${shot.actionMd}\n` +
-        (shot.timecode ? `Тайминг в эпизоде: ${shot.timecode}\n` : "") +
-        (beatsBlock ? `${beatsBlock}\n` : "") +
+        (beatsBlock
+          ? `Группа (${shot.durationSec} сек).\n${beatsBlock}\n`
+          : `Действие группы (${shot.durationSec} сек): ${shot.actionMd}\n`) +
         (shot.cameraHint ? `Подсказка по камере: ${shot.cameraHint}\n` : "") +
         (shot.title ? `Название: ${shot.title}` : ""),
     },

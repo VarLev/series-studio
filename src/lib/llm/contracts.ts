@@ -32,6 +32,14 @@ export const breakdownSchema = z.object({
 });
 export type Breakdown = z.infer<typeof breakdownSchema>;
 
+/** Переделка одной группы по замечанию пользователя (llmReviseGroup). */
+export const groupPatchSchema = z.object({
+  title: z.string().default(""),
+  duration_sec: z.number().int().min(1).max(60).default(15),
+  shots: z.array(groupShotSchema).default([]),
+});
+export type GroupPatch = z.infer<typeof groupPatchSchema>;
+
 /** TZ §7 — Промпт шота */
 export const shotPromptSchema = z.object({
   prompt: z.string(),

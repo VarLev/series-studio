@@ -16,6 +16,7 @@ import {
 } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { deleteFile } from "@/lib/storage";
+import { recomputeEpisodeTimecodes } from "@/lib/beats";
 import type { EntityType } from "./entities";
 
 /** Удалить файл в хранилище, только если на него не ссылается другая запись references/generations. */
@@ -94,6 +95,7 @@ export async function deleteShot(shotId: string): Promise<void> {
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot) return;
   await deleteShotDeep(shotId);
+  await recomputeEpisodeTimecodes(shot.episodeId); // сквозной отсчёт без дыр
   revalidatePath(`/episodes/${shot.episodeId}`);
   redirect(`/episodes/${shot.episodeId}`);
 }
