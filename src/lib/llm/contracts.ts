@@ -1,15 +1,32 @@
 import { z } from "zod";
 
-/** TZ §7 — Раскадровка: выход JSON {shots:[...]} */
+/**
+ * Раскадровка v2: шаблон заказчика (tpl_breakdown) даёт группы шотов
+ * (единица AI-видеогенерации ≤15 сек), внутри каждой — шоты с таймингом.
+ */
+export const groupShotSchema = z.object({
+  order: z.number().int(),
+  time: z.string().default(""), // «00:00–00:05»
+  framing: z.string().default(""), // план и ракурс
+  camera: z.string().default(""), // что видит камера
+  action: z.string().default(""), // действие и эмоция
+  dialogue: z.string().default(""),
+});
+export type GroupShot = z.infer<typeof groupShotSchema>;
+
 export const breakdownSchema = z.object({
-  shots: z.array(
+  summary: z.string().default(""),
+  characters: z.array(z.string()).default([]),
+  locations: z.array(z.string()).default([]),
+  groups: z.array(
     z.object({
       order: z.number().int(),
       title: z.string().default(""),
-      duration_sec: z.number().int().min(3).max(15).default(15),
-      action: z.string(),
-      entities: z.array(z.string()).default([]),
-      camera_hint: z.string().default(""),
+      time: z.string().default(""), // «00:00–00:14»
+      duration_sec: z.number().int().min(1).max(60).default(15),
+      location: z.string().default(""),
+      characters: z.array(z.string()).default([]),
+      shots: z.array(groupShotSchema).default([]),
     }),
   ),
 });

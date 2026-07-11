@@ -30,6 +30,7 @@ export default async function SettingsPage() {
       <SettingsClient
         uiLang={settings.ui_lang}
         uiTheme={settings.ui_theme}
+        breakdownTemplate={settings.tpl_breakdown}
         storyboardTemplate={settings.tpl_storyboard}
         videoTemplate={settings.tpl_video}
         techniques={techniques.map((t) => ({

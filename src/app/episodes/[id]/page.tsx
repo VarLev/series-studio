@@ -48,6 +48,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     title: s.title,
     action: s.actionMd,
     durationSec: s.durationSec,
+    timecode: s.timecode,
     status: s.status,
     entityNames: links
       .filter((l) => l.shotId === s.id)
@@ -191,7 +192,6 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         initialLogline={episode.logline}
         initialSynopsis={episode.synopsisMd}
         shots={shotItems}
-        synopsisModel={settings.llm_model_synopsis}
         breakdownModel={settings.llm_model}
         storyboard={storyboard}
       />

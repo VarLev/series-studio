@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   updateEpisode,
-  generateSynopsis,
   breakdownEpisode,
   saveBreakdown,
   saveLlmModelChoice,
@@ -51,9 +50,7 @@ export default function SynopsisEditor({
   initialSynopsis,
   shotsCount,
   shotTitles = [],
-  synopsisModel,
   breakdownModel,
-  onSynopsisModelChange,
   onBreakdownModelChange,
 }: {
   episodeId: string;
@@ -62,9 +59,7 @@ export default function SynopsisEditor({
   initialSynopsis: string;
   shotsCount: number;
   shotTitles?: string[];
-  synopsisModel: string;
   breakdownModel: string;
-  onSynopsisModelChange: (m: string) => void;
   onBreakdownModelChange: (m: string) => void;
 }) {
   const router = useRouter();
@@ -77,25 +72,23 @@ export default function SynopsisEditor({
   const [logline, setLogline] = useState(initialLogline);
   const [synopsis, setSynopsis] = useState(initialSynopsis);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [brief, setBrief] = useState("");
-  const [generating, setGenerating] = useState(false);
   const [breakingDown, setBreakingDown] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [preview, setPreview] = useState<Breakdown | null>(null);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // счётчик секунд, пока Claude пишет — чтобы ожидание не выглядело зависанием
+  // счётчик секунд, пока Claude раскадрирует — чтобы ожидание не выглядело зависанием
   useEffect(() => {
-    if (!generating && !breakingDown) return;
+    if (!breakingDown) return;
     const t0 = Date.now();
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
     return () => clearInterval(id);
-  }, [generating, breakingDown]);
+  }, [breakingDown]);
 
-  function pickModel(kind: "synopsis" | "breakdown", model: string) {
-    (kind === "synopsis" ? onSynopsisModelChange : onBreakdownModelChange)(model);
-    void saveLlmModelChoice(kind, model); // сразу в настройки — переживает перезагрузку
+  function pickModel(model: string) {
+    onBreakdownModelChange(model);
+    void saveLlmModelChoice(model); // сразу в настройки — переживает перезагрузку
   }
 
   function stashPreview(b: Breakdown | null) {
@@ -124,7 +117,8 @@ export default function SynopsisEditor({
       const rawBd = localStorage.getItem(bdKey);
       if (rawBd) {
         const bd = JSON.parse(rawBd) as Breakdown;
-        if (Array.isArray(bd?.shots) && bd.shots.length) setPreview(bd);
+        // предпросмотры старого формата ({shots:[…]}) молча пропускаем
+        if (Array.isArray(bd?.groups) && bd.groups.length) setPreview(bd);
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,18 +157,6 @@ export default function SynopsisEditor({
     if (patch.logline !== undefined) setLogline(patch.logline);
     if (patch.synopsis !== undefined) setSynopsis(patch.synopsis);
     scheduleSave(next);
-  }
-
-  async function onGenerate() {
-    setElapsed(0);
-    setGenerating(true);
-    setError("");
-    const res = await generateSynopsis(episodeId, brief, synopsisModel);
-    setGenerating(false);
-    if (res.ok) {
-      setSynopsis(res.synopsis);
-      setSaveState("saved");
-    } else setError(res.error);
   }
 
   async function onBreakdown() {
@@ -232,8 +214,8 @@ export default function SynopsisEditor({
           value={logline}
           onChange={(e) => onChange({ logline: e.target.value })}
           placeholder={t(
-            "Логлайн — одна фраза о серии (попадает в контекст следующих серий)",
-            "Logline — one sentence about the episode (feeds the next episodes' context)",
+            "Логлайн — одна фраза о серии",
+            "Logline — one sentence about the episode",
           )}
           className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
         />
@@ -248,60 +230,28 @@ export default function SynopsisEditor({
         onChange={(e) => onChange({ synopsis: e.target.value })}
         spellCheck={false}
         placeholder={t(
-          "Опишите серию как рассказ — Claude раскадрирует его на группы шотов до 15 секунд.",
-          "Describe the episode as a story — Claude will break it into shot groups of up to 15 seconds.",
+          "Вставьте сюда готовый литературный сюжет серии — Claude разобьёт его на группы шотов по шаблону из настроек.",
+          "Paste the finished literary story of the episode here — Claude will break it into shot groups per your Settings template.",
         )}
         className="min-h-[40dvh] flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-3 font-body text-[15px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
       />
 
       {error && <div className="text-[12px] text-danger">{error}</div>}
 
-      {!synopsis.trim() && (
-        <div className="flex flex-col gap-2">
-          <input
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
-            placeholder={t(
-              "Задание для Claude: что должно случиться в этой серии?",
-              "Brief for Claude: what should happen in this episode?",
-            )}
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
-          />
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-t400">{t("Модель сюжета:", "Story model:")}</span>
-            <ModelSelect
-              value={synopsisModel}
-              onChange={(m) => pickModel("synopsis", m)}
-              en={t("ru", "en") === "en"}
-            />
-          </div>
-          <button
-            onClick={onGenerate}
-            disabled={generating}
-            className="min-h-[52px] w-full rounded-lg bg-violet-500 px-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
-            style={{ boxShadow: "var(--glow-violet-sm)" }}
-          >
-            {generating
-              ? t(`Claude пишет сюжет… ${elapsed}с`, `Claude is writing the story… ${elapsed}s`)
-              : t("Сгенерировать сюжет", "Generate story")}
-          </button>
-        </div>
-      )}
-
       {synopsis.trim() && (
         <div className="flex flex-col gap-2 pb-4">
           <div className="text-[11px] leading-relaxed text-t400">
             <span className="text-violet-600">✦</span>&nbsp;{" "}
             {t(
-              "Claude прочитает сюжет, разобьёт его на группы шотов ≤ 15 сек и сам определит сущности в каждой.",
-              "Claude reads the story, breaks it into shot groups of ≤ 15 sec and detects the entities in each.",
+              "Claude разобьёт сюжет по шаблону из настроек: группы шотов ≤ 15 сек, внутри — шоты с таймингом, персонажи подтянутся из библии.",
+              "Claude breaks the story per the Settings template: shot groups ≤ 15 sec with timed shots inside; characters are linked from the bible.",
             )}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-t400">{t("Модель раскадровки:", "Breakdown model:")}</span>
             <ModelSelect
               value={breakdownModel}
-              onChange={(m) => pickModel("breakdown", m)}
+              onChange={pickModel}
               en={t("ru", "en") === "en"}
             />
           </div>
@@ -315,7 +265,7 @@ export default function SynopsisEditor({
               ? t(`Claude раскадрирует… ${elapsed}с`, `Claude is storyboarding… ${elapsed}s`)
               : shotsCount > 0
                 ? t("Раскадровать (готовые группы не дублируются)", "Break down (existing groups are kept)")
-                : t("Разбить на шоты", "Break into shots")}
+                : t("Разбить на группы шотов", "Break into shot groups")}
           </button>
         </div>
       )}

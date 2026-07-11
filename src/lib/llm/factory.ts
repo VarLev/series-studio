@@ -2,11 +2,10 @@
  * Промпт-фабрика (M3) и LLM-вызовы M2 — системные промпты собираются из:
  * правил проекта (settings) + релевантных выдержек базы знаний + библии сущностей.
  */
-import { asc, eq, inArray, ne } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   getDb,
   entities,
-  episodes,
   knowledgeDocs,
   prompts,
   shots,
@@ -14,38 +13,22 @@ import {
 } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
-import { runText, runJson } from "./client";
+import { runJson } from "./client";
 import {
   breakdownSchema,
   shotPromptSchema,
   techniquePickSchema,
   type Breakdown,
+  type GroupShot,
   type ShotPrompt,
 } from "./contracts";
 
-async function seriesSystemBase(): Promise<{ rules: string; model: string; synopsisModel: string }> {
+async function seriesSystemBase(): Promise<{ rules: string; model: string }> {
   const s = await getAllSettings();
   return {
     rules: `Сериал «${s.series_title}». Правила сериала:\n${s.series_rules}`,
     model: s.llm_model,
-    synopsisModel: s.llm_model_synopsis,
   };
-}
-
-async function previousEpisodesContext(currentEpisodeId: string): Promise<string> {
-  const db = await getDb();
-  const rows = await db
-    .select()
-    .from(episodes)
-    .where(ne(episodes.id, currentEpisodeId))
-    .orderBy(asc(episodes.number));
-  if (!rows.length) return "Это первый эпизод сериала.";
-  return (
-    "Предыдущие эпизоды (логлайны):\n" +
-    rows
-      .map((e) => `Серия ${e.number} «${e.title}»: ${e.logline || "(логлайн не задан)"}`)
-      .join("\n")
-  );
 }
 
 async function bibleContext(entityIds?: string[]): Promise<string> {
@@ -77,26 +60,11 @@ async function knowledgeContext(targetModel: string): Promise<string> {
   return `База знаний по промптам:\n${excerpts}`;
 }
 
-/** U1/M2 — сгенерировать литературный сюжет эпизода */
-export async function llmSynopsis(
-  episodeId: string,
-  brief: string,
-  modelOverride?: string,
-): Promise<string> {
-  const { rules, synopsisModel } = await seriesSystemBase();
-  const prev = await previousEpisodesContext(episodeId);
-  const bible = await bibleContext();
-  return runText({
-    kind: "synopsis",
-    model: modelOverride || synopsisModel,
-    episodeId,
-    maxTokens: 16000,
-    system: `${rules}\n\n${prev}\n\n${bible}\n\nТы — сценарист сериала. Пиши литературный сюжет эпизода на русском языке, в формате markdown. Только сюжет, без предисловий.`,
-    user: brief || "Напиши сюжет следующего эпизода, развивая историю сериала.",
-  });
-}
-
-/** M2 — разбить сюжет на группы шотов ≤15 сек (JSON) */
+/**
+ * M2 — разбить готовый литературный сюжет на группы шотов (JSON).
+ * Творческое задание — редактируемый шаблон заказчика (tpl_breakdown, настройки);
+ * JSON-контракт добавляется программно и не зависит от правок шаблона.
+ */
 export async function llmBreakdown(
   episodeId: string,
   synopsis: string,
@@ -104,21 +72,31 @@ export async function llmBreakdown(
 ): Promise<Breakdown> {
   const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext();
+  const settings = await getAllSettings();
+  const user = settings.tpl_breakdown
+    .replaceAll("{{STORY}}", synopsis)
+    .replaceAll("[ВСТАВИТЬ ТЕКСТ]", synopsis);
   return runJson(
     {
       kind: "breakdown",
       model: modelOverride || model,
       episodeId,
-      maxTokens: 16000,
+      maxTokens: 24000,
       system:
         `${rules}\n\n${bible}\n\n` +
-        "Ты — режиссёр раскадровки AI-видео. Разбей сюжет на последовательность видеофрагментов " +
-        "(«групп шотов») длительностью до 15 секунд каждый: один фрагмент = одно связное действие, " +
-        "которое можно сгенерировать одной видеомоделью. Для каждого укажи задействованные сущности " +
-        "строго их element_name из библии (только если они там есть).\n" +
-        'Верни ТОЛЬКО JSON без пояснений, схема: {"shots":[{"order":1,"title":"...","duration_sec":15,' +
-        '"action":"описание действия","entities":["element_name"],"camera_hint":"движение камеры"}]}',
-      user: `Сюжет эпизода:\n\n${synopsis}`,
+        "Выполни задание пользователя (раскадровка эпизода), но результат верни НЕ markdown-текстом, " +
+        "а ТОЛЬКО одним JSON-объектом без пояснений:\n" +
+        '{"summary":"краткий сюжет эпизода","characters":["персонажи"],"locations":["локации"],' +
+        '"groups":[{"order":1,"title":"название группы","time":"00:00–00:14","duration_sec":14,' +
+        '"location":"локация группы","characters":["персонажи группы"],' +
+        '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
+        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
+        "Соответствие формату задания: группа = «# ГРУППА NN» (не длиннее 15 секунд, пригодна для " +
+        "отдельной AI-видеогенерации), shots = «### Шот N» внутри группы, duration_sec — длительность " +
+        "группы в секундах. Все правила задания (хронометраж, реплики, планы) действуют.\n" +
+        "Если персонаж или локация совпадает с сущностью из библии выше — пиши в characters/location " +
+        "ТОЧНОЕ имя (name) этой сущности, чтобы приложение связало их автоматически.",
+      user,
     },
     breakdownSchema,
   );
@@ -190,6 +168,26 @@ export async function llmShotPrompt(shotId: string, targetModel: string): Promis
     `${shot.title ? shot.title + ". " : ""}${shot.actionMd}` +
     (shot.cameraHint ? ` Камера: ${shot.cameraHint}.` : "") +
     ` Длительность ${shot.durationSec} сек.`;
+
+  // структура шотов группы из раскадровки v2: тайминг/план/камера/действие/реплика
+  let beats: GroupShot[] = [];
+  try {
+    const parsed = JSON.parse(shot.beatsJson || "[]");
+    if (Array.isArray(parsed)) beats = parsed as GroupShot[];
+  } catch {}
+  const beatsBlock = beats.length
+    ? "Шоты группы по раскадровке (соблюдай их тайминг и порядок в SHOT-блоках промпта):\n" +
+      beats
+        .map(
+          (b) =>
+            `Шот ${b.order}${b.time ? ` (${b.time})` : ""}:` +
+            (b.framing ? ` План/ракурс: ${b.framing}.` : "") +
+            (b.camera ? ` Камера видит: ${b.camera}.` : "") +
+            (b.action ? ` Действие: ${b.action}.` : "") +
+            (b.dialogue ? ` Реплика: «${b.dialogue}»` : ""),
+        )
+        .join("\n")
+    : "";
   const candidateIds = await pickTechniqueCandidates(shot.episodeId, shotDescription);
   const candidates = await getTechniquesByIds(candidateIds);
   const techniquesBlock = candidates.length
@@ -228,7 +226,9 @@ export async function llmShotPrompt(shotId: string, targetModel: string): Promis
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
         '"used_technique_ids":["..."],"params":{"aspect_ratio":"9:16","duration":15}}',
       user:
-        `Действие шота (${shot.durationSec} сек): ${shot.actionMd}\n` +
+        `Действие группы (${shot.durationSec} сек): ${shot.actionMd}\n` +
+        (shot.timecode ? `Тайминг в эпизоде: ${shot.timecode}\n` : "") +
+        (beatsBlock ? `${beatsBlock}\n` : "") +
         (shot.cameraHint ? `Подсказка по камере: ${shot.cameraHint}\n` : "") +
         (shot.title ? `Название: ${shot.title}` : ""),
     },

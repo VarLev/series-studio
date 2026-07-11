@@ -16,6 +16,7 @@ import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
 import { getTechniquesByIds } from "@/lib/director";
+import type { GroupShot } from "@/lib/llm/contracts";
 import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
@@ -44,6 +45,13 @@ export default async function ShotPage(ctx: {
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot || shot.episodeId !== episodeId) notFound();
   const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
+
+  // шоты внутри группы (раскадровка v2); у старых групп beats_json пуст
+  let beats: GroupShot[] = [];
+  try {
+    const parsed = JSON.parse(shot.beatsJson || "[]");
+    if (Array.isArray(parsed)) beats = parsed as GroupShot[];
+  } catch {}
 
   // все шоты серии — кинолента + master-список (spec §2.3/§4)
   const allShots = await db
@@ -299,7 +307,9 @@ export default async function ShotPage(ctx: {
                 <StatusPill status={shot.status} />
               </div>
               <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
-                {shot.durationSec} {t("сек", "sec")} ·{" "}
+                {shot.timecode ? `${shot.timecode} · ` : ""}
+                {shot.durationSec} {t("сек", "sec")}
+                {beats.length ? ` · ${t("шотов", "shots")} ${beats.length}` : ""} ·{" "}
                 {versions.length
                   ? `${t("промпт", "prompt")} v${current!.version}`
                   : t("промпта нет", "no prompt")}{" "}
@@ -308,8 +318,48 @@ export default async function ShotPage(ctx: {
             </div>
           </div>
 
+          {beats.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <SectionLabel hint={t("из раскадровки сюжета", "from the story breakdown")}>
+                {t("Шоты группы", "Group shots")}
+              </SectionLabel>
+              <div className="flex flex-col gap-1.5">
+                {beats.map((b) => (
+                  <div
+                    key={b.order}
+                    className="rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-2.5"
+                  >
+                    <div className="mb-1 font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
+                      {t("Шот", "Shot")} {b.order}
+                      {b.time ? ` · ${b.time}` : ""}
+                    </div>
+                    {(b.framing || b.camera) && (
+                      <div className="mb-1 font-mono text-[10px] leading-relaxed text-t400">
+                        {b.framing && <>🎥 {b.framing}</>}
+                        {b.framing && b.camera && " · "}
+                        {b.camera}
+                      </div>
+                    )}
+                    {b.action && (
+                      <div className="text-[12px] leading-relaxed text-t200">{b.action}</div>
+                    )}
+                    {b.dialogue && (
+                      <div className="mt-1 text-[12px] leading-relaxed text-violet-200">
+                        «{b.dialogue}»
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-1.5">
-            <SectionLabel>{t("Фрагмент сюжета", "Story fragment")}</SectionLabel>
+            <SectionLabel
+              hint={beats.length ? t("правится, уходит в фабрику", "editable, feeds the factory") : undefined}
+            >
+              {t("Фрагмент сюжета", "Story fragment")}
+            </SectionLabel>
             <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
           </div>
 

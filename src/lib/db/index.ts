@@ -137,6 +137,8 @@ ALTER TABLE "references" ADD COLUMN IF NOT EXISTS parent_id text;
 ALTER TABLE generations ADD COLUMN IF NOT EXISTS episode_id text;
 ALTER TABLE generations ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'video';
 ALTER TABLE generations ALTER COLUMN shot_id DROP NOT NULL;
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS timecode text NOT NULL DEFAULT '';
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS beats_json text NOT NULL DEFAULT '[]';
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

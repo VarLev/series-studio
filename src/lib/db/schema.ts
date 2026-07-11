@@ -55,6 +55,9 @@ export const shots = pgTable("shots", {
   orderIndex: integer("order_index").notNull(),
   title: text("title").notNull().default(""),
   durationSec: integer("duration_sec").notNull().default(15),
+  timecode: text("timecode").notNull().default(""), // «00:00–00:14» внутри эпизода
+  // шоты внутри группы: JSON-массив GroupShot (order/time/framing/camera/action/dialogue)
+  beatsJson: text("beats_json").notNull().default("[]"),
   actionMd: text("action_md").notNull().default(""),
   cameraHint: text("camera_hint").notNull().default(""),
   status: text("status").notNull().default("draft"), // draft | prompted | generating | review | approved

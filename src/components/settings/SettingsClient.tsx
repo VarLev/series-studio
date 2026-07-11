@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Настройки: два шаблона промптов (раскадровка / видео) и библиотека
- * режиссёрских приёмов (сид JSFilmz Vault + свои карточки).
+ * Настройки: три шаблона промптов (разбивка сюжета / лист раскадровки / видео)
+ * и библиотека режиссёрских приёмов (сид JSFilmz Vault + свои карточки).
  */
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -40,7 +40,7 @@ function TemplateEditor({
   hint,
   initial,
 }: {
-  settingKey: "tpl_storyboard" | "tpl_video";
+  settingKey: "tpl_breakdown" | "tpl_storyboard" | "tpl_video";
   title: string;
   hint: string;
   initial: string;
@@ -113,12 +113,14 @@ function TemplateEditor({
 }
 
 export default function SettingsClient({
+  breakdownTemplate,
   storyboardTemplate,
   videoTemplate,
   techniques,
   uiLang,
   uiTheme,
 }: {
+  breakdownTemplate: string;
   storyboardTemplate: string;
   videoTemplate: string;
   techniques: TechniqueCard[];
@@ -233,6 +235,15 @@ export default function SettingsClient({
       </div>
 
       <SectionLabel>{t("Шаблоны промптов", "Prompt templates")}</SectionLabel>
+      <TemplateEditor
+        settingKey="tpl_breakdown"
+        title={t("Шаблон разбивки сюжета на шоты (Claude)", "Story-to-shots breakdown template (Claude)")}
+        hint={t(
+          "Кнопка «Разбить на группы шотов» на вкладке «Сюжет». Плейсхолдер {{STORY}} (или [ВСТАВИТЬ ТЕКСТ]) — сюда подставляется литературный сюжет. JSON-формат ответа приложение добавляет само.",
+          "The Break into shot groups button on the Story tab. Placeholder {{STORY}} (or [ВСТАВИТЬ ТЕКСТ]) is replaced with the literary story. The JSON response format is appended automatically.",
+        )}
+        initial={breakdownTemplate}
+      />
       <TemplateEditor
         settingKey="tpl_storyboard"
         title={t("Шаблон раскадровки (Nano Banana)", "Storyboard template (Nano Banana)")}

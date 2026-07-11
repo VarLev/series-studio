@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb, episodes, shots, shotEntities, entities, prompts } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { llmSynopsis, llmBreakdown } from "@/lib/llm/factory";
+import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
 import type { Breakdown } from "@/lib/llm/contracts";
 
@@ -30,30 +30,9 @@ export async function updateEpisode(
 }
 
 /** Выбор LLM-модели сохраняется сразу при смене в селекте — переживает вкладки и перезагрузку. */
-export async function saveLlmModelChoice(
-  kind: "synopsis" | "breakdown",
-  model: string,
-): Promise<void> {
+export async function saveLlmModelChoice(model: string): Promise<void> {
   await requireAuth();
-  await setSetting(kind === "synopsis" ? "llm_model_synopsis" : "llm_model", model);
-}
-
-export async function generateSynopsis(
-  episodeId: string,
-  brief: string,
-  model?: string,
-): Promise<{ ok: true; synopsis: string } | { ok: false; error: string }> {
-  await requireAuth();
-  try {
-    if (model) await setSetting("llm_model_synopsis", model);
-    const synopsis = await llmSynopsis(episodeId, brief, model);
-    const db = await getDb();
-    await db.update(episodes).set({ synopsisMd: synopsis }).where(eq(episodes.id, episodeId));
-    revalidatePath(`/episodes/${episodeId}`);
-    return { ok: true, synopsis };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
-  }
+  await setSetting("llm_model", model);
 }
 
 export async function breakdownEpisode(
@@ -66,7 +45,8 @@ export async function breakdownEpisode(
     const db = await getDb();
     const [ep] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
     if (!ep) return { ok: false, error: "Эпизод не найден" };
-    if (!ep.synopsisMd.trim()) return { ok: false, error: "Сначала напишите или сгенерируйте сюжет" };
+    if (!ep.synopsisMd.trim())
+      return { ok: false, error: "Сначала вставьте литературный сюжет во вкладке «Сюжет»" };
     const breakdown = await llmBreakdown(episodeId, ep.synopsisMd, model);
     return { ok: true, breakdown };
   } catch (e) {
@@ -87,8 +67,13 @@ export async function saveBreakdown(
 ): Promise<void> {
   await requireAuth();
   const db = await getDb();
+  // персонажи/локации из ответа модели → сущности библии: по name и element_name
   const allEntities = await db.select().from(entities);
-  const byElement = new Map(allEntities.map((e) => [e.elementName.toLowerCase(), e.id]));
+  const byName = new Map<string, string>();
+  for (const e of allEntities) {
+    byName.set(e.elementName.trim().toLowerCase(), e.id);
+    byName.set(e.name.trim().toLowerCase(), e.id);
+  }
 
   const oldShots = await db.select().from(shots).where(eq(shots.episodeId, episodeId));
   if (mode === "replace") {
@@ -101,21 +86,38 @@ export async function saveBreakdown(
 
   let index =
     mode === "append" ? Math.max(0, ...oldShots.map((s) => s.orderIndex)) + 1 : 1;
-  for (const item of [...breakdown.shots].sort((a, b) => a.order - b.order)) {
+  for (const group of [...breakdown.groups].sort((a, b) => a.order - b.order)) {
     const shotId = crypto.randomUUID();
+    const beats = [...group.shots].sort((a, b) => a.order - b.order);
+    // фрагмент сюжета группы: строка на шот — читается в списке и правится вручную
+    const actionMd = beats.length
+      ? beats
+          .map((b) => {
+            const head = `Шот ${b.order}${b.time ? ` (${b.time})` : ""}: `;
+            const parts = [b.action || b.camera || b.framing];
+            if (b.dialogue) parts.push(`«${b.dialogue}»`);
+            return head + parts.filter(Boolean).join(" — ");
+          })
+          .join("\n")
+      : group.title;
     await db.insert(shots).values({
       id: shotId,
       episodeId,
       orderIndex: index++,
-      title: item.title,
-      durationSec: Math.min(15, Math.max(3, item.duration_sec)),
-      actionMd: item.action,
-      cameraHint: item.camera_hint,
+      title: group.title,
+      durationSec: Math.min(15, Math.max(3, group.duration_sec)),
+      timecode: group.time,
+      beatsJson: JSON.stringify(beats),
+      actionMd,
+      cameraHint: "",
       status: "draft",
     });
-    for (const el of item.entities) {
-      const entityId = byElement.get(el.toLowerCase());
-      if (entityId) {
+    const mentioned = [...group.characters, group.location];
+    const linked = new Set<string>();
+    for (const name of mentioned) {
+      const entityId = byName.get(name.trim().toLowerCase());
+      if (entityId && !linked.has(entityId)) {
+        linked.add(entityId);
         await db
           .insert(shotEntities)
           .values({ shotId, entityId, auto: true })

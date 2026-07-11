@@ -18,7 +18,6 @@ export default function EpisodeTabs({
   initialLogline,
   initialSynopsis,
   shots,
-  synopsisModel,
   breakdownModel,
   storyboard,
 }: {
@@ -27,7 +26,6 @@ export default function EpisodeTabs({
   initialLogline: string;
   initialSynopsis: string;
   shots: ShotListItem[];
-  synopsisModel: string;
   breakdownModel: string;
   storyboard: StoryboardData;
 }) {
@@ -35,9 +33,8 @@ export default function EpisodeTabs({
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>(
     shots.length > 0 ? "Шоты" : "Сюжет",
   );
-  // выбор моделей живёт здесь, а не в SynopsisEditor: переключение вкладок
+  // выбор модели живёт здесь, а не в SynopsisEditor: переключение вкладок
   // размонтирует редактор, и выбор терялся (замечание заказчика)
-  const [synModel, setSynModel] = useState(synopsisModel);
   const [bdModel, setBdModel] = useState(breakdownModel);
 
   return (
@@ -72,9 +69,7 @@ export default function EpisodeTabs({
           initialSynopsis={initialSynopsis}
           shotsCount={shots.length}
           shotTitles={shots.map((s) => s.title)}
-          synopsisModel={synModel}
           breakdownModel={bdModel}
-          onSynopsisModelChange={setSynModel}
           onBreakdownModelChange={setBdModel}
         />
       )}

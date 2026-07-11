@@ -1,10 +1,13 @@
 import { eq } from "drizzle-orm";
 import { getDb, settings } from "./db";
-import { DEFAULT_STORYBOARD_TEMPLATE, DEFAULT_VIDEO_TEMPLATE } from "./templates";
+import {
+  DEFAULT_BREAKDOWN_TEMPLATE,
+  DEFAULT_STORYBOARD_TEMPLATE,
+  DEFAULT_VIDEO_TEMPLATE,
+} from "./templates";
 
 export const DEFAULT_SETTINGS = {
   llm_model: "claude-sonnet-4-6",
-  llm_model_synopsis: "claude-sonnet-4-6", // switchable to claude-opus-4-8
   series_title: "The Edge of Stigma",
   series_rules:
     "Жанр: тёмная романтика / психологический триллер (Boys Love). " +
@@ -16,6 +19,7 @@ export const DEFAULT_SETTINGS = {
   llm_price_in: "3", // $ за 1М входных токенов (конфигурируемый тариф, TZ M7)
   llm_price_out: "15", // $ за 1М выходных токенов
   // шаблоны промптов (редактируются в «Настройках»)
+  tpl_breakdown: DEFAULT_BREAKDOWN_TEMPLATE,
   tpl_storyboard: DEFAULT_STORYBOARD_TEMPLATE,
   tpl_video: DEFAULT_VIDEO_TEMPLATE,
   // интерфейс

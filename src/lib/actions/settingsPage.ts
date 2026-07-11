@@ -9,9 +9,9 @@ import { upsertTechniqueRow, deleteTechniqueRow } from "@/lib/director";
 
 type Result = { ok: true } | { ok: false; error: string };
 
-/** Сохранить шаблон промпта (tpl_storyboard | tpl_video). */
+/** Сохранить шаблон промпта (tpl_breakdown | tpl_storyboard | tpl_video). */
 export async function saveTemplate(
-  key: "tpl_storyboard" | "tpl_video",
+  key: "tpl_breakdown" | "tpl_storyboard" | "tpl_video",
   value: string,
 ): Promise<Result> {
   await requireAuth();
@@ -22,7 +22,9 @@ export async function saveTemplate(
 }
 
 /** Сбросить шаблон к стандартному (удалить переопределение). */
-export async function resetTemplate(key: "tpl_storyboard" | "tpl_video"): Promise<void> {
+export async function resetTemplate(
+  key: "tpl_breakdown" | "tpl_storyboard" | "tpl_video",
+): Promise<void> {
   await requireAuth();
   const db = await getDb();
   await db.delete(settings).where(eq(settings.key, key));

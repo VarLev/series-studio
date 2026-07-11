@@ -91,7 +91,6 @@ export default async function CostsPage() {
       textarea: true,
     },
     { key: "llm_model", label: t("Модель LLM (промпты, раскадровка)", "LLM model (prompts, breakdown)") },
-    { key: "llm_model_synopsis", label: t("Модель LLM для сюжетов", "LLM model for stories"), hint: t("например claude-opus-4-8", "e.g. claude-opus-4-8") },
     { key: "llm_price_in", label: t("Тариф LLM, $ за 1М входных токенов", "LLM price, $ per 1M input tokens") },
     { key: "llm_price_out", label: t("Тариф LLM, $ за 1М выходных токенов", "LLM price, $ per 1M output tokens") },
     { key: "target_models", label: t("Модели A/B по умолчанию (id через запятую)", "Default A/B models (comma-separated ids)"), hint: t("из каталога ниже", "from the catalog below") },

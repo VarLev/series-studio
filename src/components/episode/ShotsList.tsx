@@ -15,6 +15,7 @@ export interface ShotListItem {
   title: string;
   action: string;
   durationSec: number;
+  timecode: string;
   status: string;
   entityNames: string[];
 }
@@ -34,8 +35,8 @@ export default function ShotsList({
       <div className="p-4">
         <EmptyState>
           {t(
-            "Групп пока нет. Напишите сюжет во вкладке «Сюжет» и нажмите «Разбить на шоты».",
-            "No shot groups yet. Write the story on the Story tab and press Break into shots.",
+            "Групп пока нет. Вставьте литературный сюжет во вкладке «Сюжет» и нажмите «Разбить на группы шотов».",
+            "No shot groups yet. Paste the literary story on the Story tab and press Break into shot groups.",
           )}
         </EmptyState>
       </div>
@@ -75,6 +76,9 @@ export default function ShotsList({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <StatusPill status={shot.status} />
+                {shot.timecode && (
+                  <span className="font-mono text-[9.5px] text-t400">{shot.timecode}</span>
+                )}
                 {shot.entityNames.length > 0 && (
                   <span className="truncate font-mono text-[9.5px] text-t400">
                     {shot.entityNames.join(" · ")}
