@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@electric-sql/pglite": "^0.5.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.110.2",
     "archiver": "^8.0.0",
     "drizzle-orm": "^0.45.2",

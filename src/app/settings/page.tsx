@@ -2,6 +2,7 @@ import { requireAuth } from "@/lib/auth";
 import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
 import { listTechniques } from "@/lib/director";
+import { isConnected } from "@/lib/higgsfieldMcp";
 import SettingsClient from "@/components/settings/SettingsClient";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,7 @@ export default async function SettingsPage() {
   await requireAuth();
   const settings = await getAllSettings();
   const techniques = await listTechniques();
+  const hfConnected = await isConnected();
   const t = await getT();
 
   return (
@@ -30,6 +32,7 @@ export default async function SettingsPage() {
       <SettingsClient
         uiLang={settings.ui_lang}
         uiTheme={settings.ui_theme}
+        hfConnected={hfConnected}
         breakdownTemplate={settings.tpl_breakdown}
         storyboardTemplate={settings.tpl_storyboard}
         videoTemplate={settings.tpl_video}

@@ -16,6 +16,8 @@ import {
   deleteTechnique,
   deleteAllTechniques,
   saveUiPref,
+  hfMcpDisconnect,
+  hfMcpListTools,
 } from "@/lib/actions/settingsPage";
 import { SectionLabel } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
@@ -113,6 +115,90 @@ function TemplateEditor({
   );
 }
 
+function HiggsfieldConnect({ connected }: { connected: boolean }) {
+  const router = useRouter();
+  const t = useT();
+  const [tools, setTools] = useState<Array<{ name: string; description: string }> | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function check() {
+    setChecking(true);
+    setError("");
+    const res = await hfMcpListTools();
+    setChecking(false);
+    if (res.ok) setTools(res.tools);
+    else setError(res.error);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5">
+      <div className="flex items-center gap-2">
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: connected ? "var(--success)" : "var(--text-400)" }}
+        />
+        <span className="text-[13px] font-semibold text-t100">
+          {connected
+            ? t("Higgsfield подключён — видео на кредитах подписки", "Higgsfield connected — video on plan credits")
+            : t("Higgsfield не подключён", "Higgsfield not connected")}
+        </span>
+      </div>
+      <div className="text-[10.5px] leading-relaxed text-t400">
+        {t(
+          "Подключение через ваш аккаунт Higgsfield (OAuth, без API-ключей). Генерация видео Kling/Seedance списывает кредиты подписки — как при ручной работе на сайте, без отдельной оплаты Cloud API.",
+          "Connects via your Higgsfield account (OAuth, no API keys). Kling/Seedance video generation spends your plan credits — same as working on the site, no separate Cloud API billing.",
+        )}
+      </div>
+      <div className="flex gap-2">
+        {connected ? (
+          <>
+            <button
+              onClick={check}
+              disabled={checking}
+              className="min-h-10 flex-1 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t200 hover:bg-ink-500 disabled:opacity-50"
+            >
+              {checking ? t("Проверяю…", "Checking…") : t("Проверить (список моделей)", "Test (list models)")}
+            </button>
+            <ConfirmButton
+              action={async () => {
+                await hfMcpDisconnect();
+                router.refresh();
+              }}
+              label={t("Отключить", "Disconnect")}
+              confirmLabel={t("Отключить аккаунт?", "Disconnect account?")}
+              doneToast={t("Higgsfield отключён", "Higgsfield disconnected")}
+              className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] px-3 text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
+            />
+          </>
+        ) : (
+          <a
+            href="/api/higgsfield/oauth/start"
+            className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400"
+            style={{ boxShadow: "var(--glow-violet-sm)" }}
+          >
+            {t("Подключить аккаунт Higgsfield", "Connect Higgsfield account")}
+          </a>
+        )}
+      </div>
+      {error && <div className="text-[11px] text-danger">{error}</div>}
+      {tools && (
+        <div className="flex flex-col gap-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-2.5">
+          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-t400">
+            {t(`Инструменты сервера · ${tools.length}`, `Server tools · ${tools.length}`)}
+          </span>
+          {tools.map((tool) => (
+            <div key={tool.name} className="text-[11px] leading-relaxed text-t200">
+              <span className="font-mono text-violet-200">{tool.name}</span>
+              {tool.description && <span className="text-t400"> — {tool.description.slice(0, 120)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsClient({
   breakdownTemplate,
   storyboardTemplate,
@@ -120,6 +206,7 @@ export default function SettingsClient({
   techniques,
   uiLang,
   uiTheme,
+  hfConnected,
 }: {
   breakdownTemplate: string;
   storyboardTemplate: string;
@@ -127,6 +214,7 @@ export default function SettingsClient({
   techniques: TechniqueCard[];
   uiLang: string;
   uiTheme: string;
+  hfConnected: boolean;
 }) {
   const router = useRouter();
   const t = useT();
@@ -234,6 +322,9 @@ export default function SettingsClient({
           </select>
         </label>
       </div>
+
+      <SectionLabel>{t("Генерация видео (Higgsfield)", "Video generation (Higgsfield)")}</SectionLabel>
+      <HiggsfieldConnect connected={hfConnected} />
 
       <SectionLabel>{t("Шаблоны промптов", "Prompt templates")}</SectionLabel>
       <TemplateEditor

@@ -68,3 +68,26 @@ export async function saveUiPref(key: "ui_lang" | "ui_theme", value: string): Pr
   await setSetting(key, value);
   revalidatePath("/", "layout");
 }
+
+// ---------- Higgsfield MCP (видео на кредитах подписки) ----------
+
+export async function hfMcpDisconnect(): Promise<void> {
+  await requireAuth();
+  const { disconnect } = await import("@/lib/higgsfieldMcp");
+  await disconnect();
+  revalidatePath("/settings");
+}
+
+/** Список инструментов MCP — проверка подключения и discovery моделей. */
+export async function hfMcpListTools(): Promise<
+  { ok: true; tools: Array<{ name: string; description: string }> } | { ok: false; error: string }
+> {
+  await requireAuth();
+  try {
+    const { listMcpTools } = await import("@/lib/higgsfieldMcp");
+    const tools = await listMcpTools();
+    return { ok: true, tools: tools.map((t) => ({ name: t.name, description: t.description })) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
