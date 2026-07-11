@@ -44,6 +44,7 @@ export async function saveLlmModelChoice(model: string): Promise<void> {
 export async function breakdownEpisode(
   episodeId: string,
   model?: string,
+  duration?: { min: number; max: number },
 ): Promise<{ ok: true; breakdown: Breakdown } | { ok: false; error: string }> {
   await requireAuth();
   try {
@@ -53,7 +54,7 @@ export async function breakdownEpisode(
     if (!ep) return { ok: false, error: "Эпизод не найден" };
     if (!ep.synopsisMd.trim())
       return { ok: false, error: "Сначала вставьте литературный сюжет во вкладке «Сюжет»" };
-    const breakdown = await llmBreakdown(episodeId, ep.synopsisMd, model);
+    const breakdown = await llmBreakdown(episodeId, ep.synopsisMd, model, duration);
     return { ok: true, breakdown };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };

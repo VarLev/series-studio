@@ -331,8 +331,8 @@ export default function SettingsClient({
         settingKey="tpl_breakdown"
         title={t("Шаблон разбивки сюжета на шоты (Claude)", "Story-to-shots breakdown template (Claude)")}
         hint={t(
-          "Кнопка «Разбить на группы шотов» на вкладке «Сюжет». Плейсхолдер {{STORY}} (или [ВСТАВИТЬ ТЕКСТ]) — сюда подставляется литературный сюжет. JSON-формат ответа приложение добавляет само.",
-          "The Break into shot groups button on the Story tab. Placeholder {{STORY}} (or [ВСТАВИТЬ ТЕКСТ]) is replaced with the literary story. The JSON response format is appended automatically.",
+          "Кнопка «Разбить на группы шотов» на вкладке «Сюжет». Плейсхолдеры: {{STORY}} (или [ВСТАВИТЬ ТЕКСТ]) — литературный сюжет; {{DURATION}} — диапазон хронометража с бегунка на вкладке «Сюжет» (например «3–5 минут»). JSON-формат ответа приложение добавляет само.",
+          "The Break into shot groups button on the Story tab. Placeholders: {{STORY}} (or [ВСТАВИТЬ ТЕКСТ]) is the literary story; {{DURATION}} is the duration range from the slider on the Story tab (e.g. “3–5 минут”). The JSON response format is appended automatically.",
         )}
         initial={breakdownTemplate}
       />

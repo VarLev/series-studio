@@ -72,13 +72,21 @@ export async function llmBreakdown(
   episodeId: string,
   synopsis: string,
   modelOverride?: string,
+  duration?: { min: number; max: number },
 ): Promise<Breakdown> {
   const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext();
   const settings = await getAllSettings();
+  // диапазон хронометража эпизода задаётся бегунком на вкладке «Сюжет» (дефолт 3–5 мин)
+  const durMin = duration?.min ?? 3;
+  const durMax = duration?.max ?? 5;
+  const durPhrase = durMin === durMax ? `${durMin} минут` : `${durMin}–${durMax} минут`;
   const user = settings.tpl_breakdown
     .replaceAll("{{STORY}}", synopsis)
-    .replaceAll("[ВСТАВИТЬ ТЕКСТ]", synopsis);
+    .replaceAll("[ВСТАВИТЬ ТЕКСТ]", synopsis)
+    .replaceAll("{{DURATION}}", durPhrase)
+    // старые сохранённые шаблоны с зашитым «N–M минут» — подменяем на выбранный диапазон
+    .replace(/(продолжительность эпизода:\s*)\d+\s*[–—-]\s*\d+\s*минут/i, `$1${durPhrase}`);
   return runJson(
     {
       kind: "breakdown",
@@ -99,6 +107,9 @@ export async function llmBreakdown(
         "группы в секундах. Время шотов (shots[].time) отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот " +
         "каждой группы начинается с 00:00. Время группы (time) — сквозное по эпизоду. " +
         "Все правила задания (хронометраж, реплики, планы) действуют.\n" +
+        `Целевая продолжительность всего эпизода: ${durPhrase}. Это значение приоритетно — оно ` +
+        "заменяет любую другую длительность эпизода, упомянутую в задании; распредели события так, " +
+        "чтобы суммарный хронометраж уложился в этот диапазон.\n" +
         `${LANGUAGE_RULES}`,
       user,
     },

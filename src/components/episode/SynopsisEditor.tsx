@@ -12,8 +12,14 @@ import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS } from "@/lib/llm/models";
 import { estTextUsd, estTokens, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import BreakdownPreview from "./BreakdownPreview";
+import DualRange from "@/components/DualRange";
 import { SectionLabel } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
+
+// границы бегунка хронометража эпизода (минуты) и дефолт 3–5
+const DUR_MIN = 1;
+const DUR_MAX = 15;
+const DUR_DEFAULT: [number, number] = [3, 5];
 
 type SaveState = "saved" | "saving" | "local" | "idle";
 
@@ -69,9 +75,13 @@ export default function SynopsisEditor({
   // раскадровка стоит реальных денег — предпросмотр переживает переключение
   // вкладок и перезагрузку страницы через localStorage (замечание заказчика)
   const bdKey = `ss-bd:${episodeId}`;
+  // хронометраж эпизода задаётся бегунком; переживает вкладки/перезагрузку (per-episode)
+  const durKey = `ss-dur:${episodeId}`;
   const [title, setTitle] = useState(initialTitle);
   const [logline, setLogline] = useState(initialLogline);
   const [synopsis, setSynopsis] = useState(initialSynopsis);
+  const [durMin, setDurMin] = useState(DUR_DEFAULT[0]);
+  const [durMax, setDurMax] = useState(DUR_DEFAULT[1]);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [breakingDown, setBreakingDown] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -90,6 +100,14 @@ export default function SynopsisEditor({
   function pickModel(model: string) {
     onBreakdownModelChange(model);
     void saveLlmModelChoice(model); // сразу в настройки — переживает перезагрузку
+  }
+
+  function setDuration(lo: number, hi: number) {
+    setDurMin(lo);
+    setDurMax(hi);
+    try {
+      localStorage.setItem(durKey, JSON.stringify([lo, hi]));
+    } catch {}
   }
 
   function stashPreview(b: Breakdown | null) {
@@ -120,6 +138,14 @@ export default function SynopsisEditor({
         const bd = JSON.parse(rawBd) as Breakdown;
         // предпросмотры старого формата ({shots:[…]}) молча пропускаем
         if (Array.isArray(bd?.groups) && bd.groups.length) setPreview(bd);
+      }
+      const rawDur = localStorage.getItem(durKey);
+      if (rawDur) {
+        const [lo, hi] = JSON.parse(rawDur);
+        if (Number.isFinite(lo) && Number.isFinite(hi)) {
+          setDurMin(lo);
+          setDurMax(hi);
+        }
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,7 +190,7 @@ export default function SynopsisEditor({
     setElapsed(0);
     setBreakingDown(true);
     setError("");
-    const res = await breakdownEpisode(episodeId, breakdownModel);
+    const res = await breakdownEpisode(episodeId, breakdownModel, { min: durMin, max: durMax });
     setBreakingDown(false);
     if (res.ok) stashPreview(res.breakdown);
     else setError(res.error);
@@ -248,6 +274,31 @@ export default function SynopsisEditor({
               "Claude breaks the story per the Settings template: shot groups ≤ 15 sec with timed shots inside; characters are linked from the bible.",
             )}
           </div>
+          {/* двойной бегунок: диапазон хронометража эпизода (мин), применяется к промпту разбивки */}
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[11px] text-t400">
+                {t("Хронометраж эпизода:", "Episode duration:")}
+              </span>
+              <span className="font-mono text-[12px] font-semibold text-t100">
+                {durMin === durMax
+                  ? `${durMin} ${t("мин", "min")}`
+                  : `${durMin}–${durMax} ${t("мин", "min")}`}
+              </span>
+            </div>
+            <DualRange
+              min={DUR_MIN}
+              max={DUR_MAX}
+              low={durMin}
+              high={durMax}
+              onChange={setDuration}
+            />
+            <div className="flex justify-between font-mono text-[9px] text-t400">
+              <span>{DUR_MIN} {t("мин", "min")}</span>
+              <span>{DUR_MAX} {t("мин", "min")}</span>
+            </div>
+          </div>
+
           {/* label над селектом + w-full: длинные подписи моделей не вылезают за карточку */}
           <div className="flex min-w-0 flex-col gap-1">
             <span className="text-[11px] text-t400">{t("Модель раскадровки:", "Breakdown model:")}</span>
