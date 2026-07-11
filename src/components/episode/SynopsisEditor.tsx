@@ -30,8 +30,8 @@ function ModelSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="min-h-9 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none"
-      title="Claude model"
+      className="min-h-9 w-full min-w-0 max-w-full truncate rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none"
+      title="LLM model"
     >
       {LLM_MODELS.map((m) => (
         <option key={m.id} value={m.id}>
@@ -247,7 +247,8 @@ export default function SynopsisEditor({
               "Claude breaks the story per the Settings template: shot groups ≤ 15 sec with timed shots inside; characters are linked from the bible.",
             )}
           </div>
-          <div className="flex items-center gap-2">
+          {/* label над селектом + w-full: длинные подписи моделей не вылезают за карточку */}
+          <div className="flex min-w-0 flex-col gap-1">
             <span className="text-[11px] text-t400">{t("Модель раскадровки:", "Breakdown model:")}</span>
             <ModelSelect
               value={breakdownModel}
