@@ -32,11 +32,13 @@ export async function ensureTechniques(): Promise<void> {
   const { default: vault } = (await import("./director/vault.json")) as {
     default: Array<Omit<TechniqueRow, "custom">>;
   };
-  // пакетами — 500 одиночных insert'ов в PGlite заметно медленнее
+  // пакетами — 500 одиночных insert'ов в PGlite заметно медленнее;
+  // onConflictDoNothing: два параллельных запроса могут сеять одновременно
   for (let i = 0; i < vault.length; i += 50) {
-    await db.insert(techniques).values(
-      vault.slice(i, i + 50).map((t) => ({ ...t, custom: false })),
-    );
+    await db
+      .insert(techniques)
+      .values(vault.slice(i, i + 50).map((t) => ({ ...t, custom: false })))
+      .onConflictDoNothing();
   }
   seeded = true;
 }
