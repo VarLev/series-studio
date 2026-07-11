@@ -34,14 +34,32 @@ const SOURCE_LABEL: Record<string, string> = {
   edit: "правка",
 };
 
+const KNOWN_ASPECTS: Array<[string, number]> = [
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+  ["1:1", 1],
+  ["4:3", 4 / 3],
+  ["3:4", 3 / 4],
+  ["21:9", 21 / 9],
+  ["3:2", 3 / 2],
+  ["2:3", 2 / 3],
+  ["4:5", 4 / 5],
+  ["5:4", 5 / 4],
+];
+
+/** «Прилипает» к ближайшему стандартному соотношению (±3%) — 1080×1920 это 9:16, а не 0.56. */
 function aspectLabel(w: number | null, h: number | null): string {
   if (!w || !h) return "—";
+  const ratio = w / h;
+  for (const [label, value] of KNOWN_ASPECTS) {
+    if (Math.abs(ratio - value) / value < 0.03) return label;
+  }
   const g = (a: number, b: number): number => (b ? g(b, a % b) : a);
   const d = g(w, h);
   const rw = w / d;
   const rh = h / d;
   if (rw <= 32 && rh <= 32) return `${rw}:${rh}`;
-  return (w / h).toFixed(2);
+  return ratio.toFixed(2);
 }
 
 export default function SeriesRefs({

@@ -17,7 +17,7 @@ import { getAllSettings } from "@/lib/settings";
 import { getCatalog } from "@/lib/generation";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
-import { deleteShot, deleteAllGenerations } from "@/lib/actions/deletes";
+import { deleteAllGenerations } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
 import StyleChips from "@/components/shot/StyleChips";
 import ShotRefs from "@/components/shot/ShotRefs";
@@ -284,13 +284,6 @@ export default async function ShotPage(ctx: {
                 {results.filter((r) => r.status === "done").length}
               </div>
             </div>
-            <ConfirmButton
-              action={deleteShot.bind(null, shotId)}
-              label="🗑"
-              confirmLabel="Удалить шот?"
-              doneToast="Шот удалён"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] text-[13px] text-t400 hover:border-[rgba(194,71,106,.4)] hover:text-danger disabled:opacity-50"
-            />
           </div>
 
           <div className="flex flex-col gap-1.5">

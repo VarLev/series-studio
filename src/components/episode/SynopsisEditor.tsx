@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { updateEpisode, generateSynopsis, breakdownEpisode, saveBreakdown } from "@/lib/actions/episodes";
+import {
+  updateEpisode,
+  generateSynopsis,
+  breakdownEpisode,
+  saveBreakdown,
+  saveLlmModelChoice,
+} from "@/lib/actions/episodes";
 import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS } from "@/lib/llm/models";
 import BreakdownPreview from "./BreakdownPreview";
@@ -42,8 +48,10 @@ export default function SynopsisEditor({
   initialSynopsis,
   shotsCount,
   shotTitles = [],
-  defaultSynopsisModel,
-  defaultBreakdownModel,
+  synopsisModel,
+  breakdownModel,
+  onSynopsisModelChange,
+  onBreakdownModelChange,
 }: {
   episodeId: string;
   initialTitle: string;
@@ -51,23 +59,39 @@ export default function SynopsisEditor({
   initialSynopsis: string;
   shotsCount: number;
   shotTitles?: string[];
-  defaultSynopsisModel: string;
-  defaultBreakdownModel: string;
+  synopsisModel: string;
+  breakdownModel: string;
+  onSynopsisModelChange: (m: string) => void;
+  onBreakdownModelChange: (m: string) => void;
 }) {
   const router = useRouter();
   const draftKey = `ss-draft:${episodeId}`;
+  // раскадровка стоит реальных денег — предпросмотр переживает переключение
+  // вкладок и перезагрузку страницы через localStorage (замечание заказчика)
+  const bdKey = `ss-bd:${episodeId}`;
   const [title, setTitle] = useState(initialTitle);
   const [logline, setLogline] = useState(initialLogline);
   const [synopsis, setSynopsis] = useState(initialSynopsis);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [brief, setBrief] = useState("");
-  const [synopsisModel, setSynopsisModel] = useState(defaultSynopsisModel);
-  const [breakdownModel, setBreakdownModel] = useState(defaultBreakdownModel);
   const [generating, setGenerating] = useState(false);
   const [breakingDown, setBreakingDown] = useState(false);
   const [preview, setPreview] = useState<Breakdown | null>(null);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function pickModel(kind: "synopsis" | "breakdown", model: string) {
+    (kind === "synopsis" ? onSynopsisModelChange : onBreakdownModelChange)(model);
+    void saveLlmModelChoice(kind, model); // сразу в настройки — переживает перезагрузку
+  }
+
+  function stashPreview(b: Breakdown | null) {
+    setPreview(b);
+    try {
+      if (b) localStorage.setItem(bdKey, JSON.stringify(b));
+      else localStorage.removeItem(bdKey);
+    } catch {}
+  }
 
   // restore local draft if it is newer than what the server rendered;
   // localStorage существует только в браузере, поэтому восстановление — в эффекте
@@ -83,6 +107,11 @@ export default function SynopsisEditor({
         }
         if (draft.title && draft.title !== initialTitle) setTitle(draft.title);
         if (draft.logline && draft.logline !== initialLogline) setLogline(draft.logline);
+      }
+      const rawBd = localStorage.getItem(bdKey);
+      if (rawBd) {
+        const bd = JSON.parse(rawBd) as Breakdown;
+        if (Array.isArray(bd?.shots) && bd.shots.length) setPreview(bd);
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -139,13 +168,13 @@ export default function SynopsisEditor({
     setError("");
     const res = await breakdownEpisode(episodeId, breakdownModel);
     setBreakingDown(false);
-    if (res.ok) setPreview(res.breakdown);
+    if (res.ok) stashPreview(res.breakdown);
     else setError(res.error);
   }
 
   async function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace") {
     await saveBreakdown(episodeId, confirmed, mode);
-    setPreview(null);
+    stashPreview(null);
     router.refresh();
   }
 
@@ -163,8 +192,14 @@ export default function SynopsisEditor({
       <BreakdownPreview
         breakdown={preview}
         existingTitles={shotTitles}
-        onCancel={() => setPreview(null)}
+        onCancel={() => stashPreview(null)}
         onConfirm={onConfirmBreakdown}
+        onEdited={(b) => {
+          // правки в предпросмотре тоже не должны теряться при переключении вкладок
+          try {
+            localStorage.setItem(bdKey, JSON.stringify(b));
+          } catch {}
+        }}
       />
     );
   }
@@ -210,7 +245,7 @@ export default function SynopsisEditor({
           />
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-t400">Модель сюжета:</span>
-            <ModelSelect value={synopsisModel} onChange={setSynopsisModel} />
+            <ModelSelect value={synopsisModel} onChange={(m) => pickModel("synopsis", m)} />
           </div>
           <button
             onClick={onGenerate}
@@ -231,7 +266,7 @@ export default function SynopsisEditor({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-t400">Модель раскадровки:</span>
-            <ModelSelect value={breakdownModel} onChange={setBreakdownModel} />
+            <ModelSelect value={breakdownModel} onChange={(m) => pickModel("breakdown", m)} />
           </div>
           <button
             onClick={onBreakdown}

@@ -20,11 +20,17 @@ const HOTKEYS: Array<[string, string]> = [
   ["Esc", "назад"],
 ];
 
+/**
+ * Таб-бар живёт только на четырёх верхних экранах: на вложенных (карточка шота,
+ * серия, референсы) у экранов свои нижние панели — таб-бар их перекрывал.
+ */
+const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/costs"];
+
 /** Нижний таб-бар (мобайл, spec §2.1) + сайдбар (десктоп, spec §4). */
 export default function NavClient({ activeJobs }: { activeJobs: number }) {
   const pathname = usePathname();
   if (pathname === "/login") return null;
-  const fullscreen = pathname.includes("/review") || pathname.includes("/editor");
+  const showTabBar = TOP_LEVEL.includes(pathname);
 
   const isActive = (href: string) =>
     href === "/episodes" ? pathname === "/episodes" || pathname.startsWith("/episodes/") : pathname.startsWith(href);
@@ -32,7 +38,7 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
   return (
     <>
       {/* мобильный таб-бар */}
-      {!fullscreen && (
+      {showTabBar && (
         <nav
           className="fixed inset-x-0 bottom-0 z-40 flex border-t border-[var(--border-default)] lg:hidden"
           style={{
@@ -117,12 +123,12 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
   );
 }
 
-/** Обёртка контента: отступ под сайдбар/таб-бар. */
+/** Обёртка контента: отступ под сайдбар/таб-бар (таб-бар — только на верхних экранах). */
 export function ContentShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   if (pathname === "/login") return <>{children}</>;
-  const fullscreen = pathname.includes("/review") || pathname.includes("/editor");
+  const showTabBar = TOP_LEVEL.includes(pathname);
   return (
-    <div className={`lg:pl-56 ${fullscreen ? "" : "pb-16 lg:pb-0"}`}>{children}</div>
+    <div className={`lg:pl-56 ${showTabBar ? "pb-16 lg:pb-0" : ""}`}>{children}</div>
   );
 }

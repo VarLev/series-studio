@@ -27,6 +27,10 @@ export default function EpisodeTabs({
   const [tab, setTab] = useState<(typeof TABS)[number]>(
     shots.length > 0 ? "Шоты" : "Сюжет",
   );
+  // выбор моделей живёт здесь, а не в SynopsisEditor: переключение вкладок
+  // размонтирует редактор, и выбор терялся (замечание заказчика)
+  const [synModel, setSynModel] = useState(synopsisModel);
+  const [bdModel, setBdModel] = useState(breakdownModel);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -59,8 +63,10 @@ export default function EpisodeTabs({
           initialSynopsis={initialSynopsis}
           shotsCount={shots.length}
           shotTitles={shots.map((s) => s.title)}
-          defaultSynopsisModel={synopsisModel}
-          defaultBreakdownModel={breakdownModel}
+          synopsisModel={synModel}
+          breakdownModel={bdModel}
+          onSynopsisModelChange={setSynModel}
+          onBreakdownModelChange={setBdModel}
         />
       )}
 

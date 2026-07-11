@@ -14,10 +14,14 @@ export default function GenPoller({ activeCount }: { activeCount: number }) {
   useEffect(() => {
     if (activeCount <= 0) return;
     const tick = async () => {
-      if (busy.current) return;
+      // не поллим фоновую вкладку и не даём подвисшему запросу заблокировать цикл
+      if (busy.current || document.visibilityState === "hidden") return;
       busy.current = true;
       try {
-        const res = await fetch("/api/generations/poll", { method: "POST" });
+        const res = await fetch("/api/generations/poll", {
+          method: "POST",
+          signal: AbortSignal.timeout(20_000),
+        });
         const data = (await res.json()) as { updated: number };
         if (data.updated > 0) router.refresh();
       } catch {

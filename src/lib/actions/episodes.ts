@@ -29,6 +29,15 @@ export async function updateEpisode(
   revalidatePath("/episodes");
 }
 
+/** Выбор LLM-модели сохраняется сразу при смене в селекте — переживает вкладки и перезагрузку. */
+export async function saveLlmModelChoice(
+  kind: "synopsis" | "breakdown",
+  model: string,
+): Promise<void> {
+  await requireAuth();
+  await setSetting(kind === "synopsis" ? "llm_model_synopsis" : "llm_model", model);
+}
+
 export async function generateSynopsis(
   episodeId: string,
   brief: string,

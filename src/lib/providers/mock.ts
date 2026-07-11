@@ -35,6 +35,7 @@ const MOCK_CREDITS: Record<string, number> = {
   kling3_0_turbo: 20,
   kling2_6: 25,
   seedance_2_0: 30,
+  seedance_2_0_fast: 18,
   seedance_2_0_mini: 12,
   nano_banana_2: 4,
   gpt_image_2: 6,

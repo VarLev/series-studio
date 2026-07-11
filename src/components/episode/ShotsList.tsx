@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useTransition } from "react";
 import { moveShot } from "@/lib/actions/shots";
-import { deleteAllShots } from "@/lib/actions/deletes";
+import { deleteShot, deleteAllShots } from "@/lib/actions/deletes";
 import { StatusPill, EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
+import LongPressMenu from "@/components/LongPressMenu";
 
 export interface ShotListItem {
   id: string;
@@ -39,8 +40,13 @@ export default function ShotsList({
   return (
     <div className="flex flex-col gap-2.5 p-4 pb-10">
       {shots.map((shot, i) => (
-        <div
+        <LongPressMenu
           key={shot.id}
+          title={`Группа ${String(shot.orderIndex).padStart(2, "0")} · ${shot.title || "Без названия"}`}
+          deleteLabel="Удалить шот"
+          confirmLabel="Точно удалить шот с промптами и видео?"
+          doneToast="Шот удалён"
+          action={deleteShot.bind(null, shot.id)}
           className="flex items-stretch gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-2.5 hover:border-[var(--border-strong)]"
         >
           <Link
@@ -87,8 +93,12 @@ export default function ShotsList({
               ↓
             </button>
           </div>
-        </div>
+        </LongPressMenu>
       ))}
+
+      <div className="pt-1 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-t400">
+        долгое зажатие по шоту — удаление
+      </div>
 
       {shots.length > 1 && (
         <ConfirmButton

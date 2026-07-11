@@ -76,6 +76,20 @@ export const CATALOG_SEED: ModelInfo[] = [
     },
   },
   {
+    // виртуальная строка каталога: провайдеру уходит seedance_2_0 c mode=fast
+    // (быстрее и дешевле стандартного режима)
+    id: "seedance_2_0_fast",
+    name: "Seedance 2.0 Fast",
+    kind: "video",
+    params: {
+      aspect_ratio: ["auto", "16:9", "9:16", "4:3", "3:4", "1:1", "21:9"],
+      duration: "integer",
+      resolution: ["480p", "720p", "1080p"],
+      start_image: "uuid|url",
+      end_image: "uuid|url",
+    },
+  },
+  {
     id: "seedance_2_0_mini",
     name: "Seedance 2.0 Mini",
     kind: "video",

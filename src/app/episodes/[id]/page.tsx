@@ -70,9 +70,10 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
             <Link
               href={`/episodes/${episode.id}/gallery`}
               title="Галерея утверждённых шотов"
-              className="flex min-h-8 items-center rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
+              className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
             >
-              ▦
+              <span className="text-[13px] leading-none">🎞</span>
+              <span className="hidden md:inline">Галерея</span>
             </Link>
             <QueuePill />
           </div>

@@ -21,11 +21,9 @@ export default function Sheet({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
+    // ВАЖНО: body.style.overflow здесь сознательно не трогаем — если очистка
+    // не успевала отработать (быстрое переключение/refresh), страница «замирала».
+    return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
   if (!open) return null;

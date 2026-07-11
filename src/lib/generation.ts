@@ -13,14 +13,29 @@ import {
   videoModels,
 } from "@/lib/db";
 import { getProvider, providerConfigured } from "@/lib/providers";
+import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
 
 // ---------- Каталог моделей (TZ §0.2) ----------
 
+/**
+ * Виртуальные модели: в каталоге и UI — отдельная строка, провайдеру уходит
+ * базовый id с фиксированными параметрами (Seedance Fast = seedance_2_0 mode=fast).
+ */
+const VIRTUAL_MODELS: Record<string, { base: string; params: Record<string, string | number> }> = {
+  seedance_2_0_fast: { base: "seedance_2_0", params: { mode: "fast" } },
+};
+
 export async function refreshCatalog(): Promise<{ count: number; source: string }> {
   const provider = getProvider();
   const models = await provider.listModels();
+  // живой каталог провайдера не знает про виртуальные строки — добавляем их из сида
+  for (const seed of CATALOG_SEED) {
+    if (VIRTUAL_MODELS[seed.id] && !models.some((m) => m.id === seed.id)) {
+      models.push({ ...seed });
+    }
+  }
   const db = await getDb();
   let sort = 0;
   for (const m of models) {
@@ -78,7 +93,9 @@ export async function getCatalog(kind?: "video" | "image"): Promise<CatalogModel
     .from(videoModels)
     .where(eq(videoModels.active, true))
     .orderBy(asc(videoModels.sortIndex));
-  if (!rows.length) {
+  // пустой каталог или каталог, засеянный до появления виртуальных моделей → пересеять
+  const missingVirtual = Object.keys(VIRTUAL_MODELS).some((id) => !rows.some((r) => r.id === id));
+  if (!rows.length || missingVirtual) {
     await refreshCatalog();
     rows = await db
       .select()
@@ -184,9 +201,13 @@ export async function submitJobs(input: SubmitInput): Promise<{ submitted: numbe
   for (const modelId of input.modelIds) {
     const model = catalog.find((m) => m.id === modelId);
     const quality = effectiveQuality(modelId, input.quality, model?.qualities ?? []);
-    const params = shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality);
+    const virtual = VIRTUAL_MODELS[modelId];
+    const params = {
+      ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
+      ...(virtual?.params ?? {}),
+    };
     const sub = await provider.submit({
-      model: modelId,
+      model: virtual?.base ?? modelId,
       prompt: prompt.text,
       negativePrompt: prompt.negativePrompt ?? undefined,
       params,

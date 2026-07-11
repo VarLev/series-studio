@@ -19,11 +19,14 @@ export default function BreakdownPreview({
   existingTitles,
   onCancel,
   onConfirm,
+  onEdited,
 }: {
   breakdown: Breakdown;
   existingTitles: string[];
   onCancel: () => void;
   onConfirm: (confirmed: Breakdown, mode: "append" | "replace") => Promise<void>;
+  /** Правки полей предпросмотра — родитель сохраняет их (localStorage), чтобы не терять. */
+  onEdited?: (b: Breakdown) => void;
 }) {
   const existing = useMemo(() => new Set(existingTitles.map(normalize).filter(Boolean)), [existingTitles]);
   const hasExisting = existingTitles.length > 0;
@@ -39,7 +42,18 @@ export default function BreakdownPreview({
   const [saving, setSaving] = useState(false);
 
   function patch(i: number, p: Partial<Item>) {
-    setItems((prev) => prev.map((item, idx) => (idx === i ? { ...item, ...p } : item)));
+    const next = items.map((item, idx) => (idx === i ? { ...item, ...p } : item));
+    setItems(next);
+    onEdited?.({
+      shots: next.map((item) => ({
+        order: item.order,
+        title: item.title,
+        duration_sec: item.duration_sec,
+        action: item.action,
+        entities: item.entities,
+        camera_hint: item.camera_hint,
+      })),
+    });
   }
 
   async function confirm() {
