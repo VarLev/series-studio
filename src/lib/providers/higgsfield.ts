@@ -4,8 +4,11 @@
  * По живой документации (июль 2026, TZ §0.1):
  *  - auth: заголовок `Authorization: Key <key>` (ключ HF_KEY выдаётся в формате
  *    `key:secret` — кладётся в HIGGSFIELD_API_KEY целиком; подтверждено исходниками SDK);
- *  - submit: POST {BASE}/applications/{application} c JSON-аргументами →
- *    {request_id, status_url, cancel_url}; application = namespaced id модели;
+ *  - submit: POST {BASE}/{model_id} c JSON-аргументами → {request_id, status_url,
+ *    cancel_url}; model_id = namespaced слаг (проверено живым API);
+ *    подтверждённые видео-слаги: kling-video/v3.0/pro/image-to-video,
+ *    kling-video/v3.0/std/image-to-video, kling-video/v3.0/pro/text-to-video,
+ *    kling-video/v2.1/pro/image-to-video (для Kling 3.0 "omni"-тира в API нет);
  *  - status: GET status_url → status: Queued|InProgress|Completed|Failed|NSFW|Cancelled;
  *  - cancel: POST cancel_url;
  *  - файлы: POST {BASE}/files/generate-upload-url → {upload_url, public_url}, затем PUT байтов;
@@ -232,9 +235,10 @@ export class HiggsfieldProvider implements GenerationProvider {
     if (job.referenceUrls?.length) args.image_references = job.referenceUrls;
     if (job.webhookUrl) args.webhook_url = job.webhookUrl;
 
-    // submit: POST /applications/{application}; application = namespaced id
-    // модели (напр. bytedance/seedance/...), приходит из каталога video_models
-    const res = await hfFetch(`${BASE_URL}/applications/${job.model}`, {
+    // submit: POST {BASE}/{model_id} напрямую (подтверждено живым API + доками:
+    // docs.higgsfield.ai/docs/how-to/introduction). model_id — namespaced слаг
+    // из каталога, напр. kling-video/v3.0/pro/image-to-video
+    const res = await hfFetch(`${BASE_URL}/${job.model}`, {
       method: "POST",
       body: JSON.stringify(args),
     });
