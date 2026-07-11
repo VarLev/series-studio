@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, prompts, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmShotPrompt, llmRevisePrompt } from "@/lib/llm/factory";
+import { collapseAt } from "@/lib/entityName";
 import type { ShotPrompt } from "@/lib/llm/contracts";
 
 type Result = { ok: true; promptId: string } | { ok: false; error: string };
@@ -35,8 +36,9 @@ async function insertVersion(
     version: await nextVersion(shotId),
     parentId,
     targetModel,
-    text: data.prompt,
-    negativePrompt: data.negative_prompt || null,
+    // @@Craig → @Craig: element_name уже содержит @, модель могла задвоить
+    text: collapseAt(data.prompt),
+    negativePrompt: data.negative_prompt ? collapseAt(data.negative_prompt) : null,
     paramsJson: JSON.stringify({
       ...data.params,
       reference_element_names: data.reference_element_names,
@@ -55,11 +57,15 @@ async function insertVersion(
   return id;
 }
 
-/** U2 — сгенерировать промпт шота (промпт-фабрика). */
-export async function generateShotPrompt(shotId: string, targetModel: string): Promise<Result> {
+/** U2 — сгенерировать промпт шота (промпт-фабрика). llmModel — какая ИИ пишет промпт. */
+export async function generateShotPrompt(
+  shotId: string,
+  targetModel: string,
+  llmModel?: string,
+): Promise<Result> {
   await requireAuth();
   try {
-    const data = await llmShotPrompt(shotId, targetModel);
+    const data = await llmShotPrompt(shotId, targetModel, llmModel);
     const promptId = await insertVersion(shotId, targetModel, data, null, null);
     return { ok: true, promptId };
   } catch (e) {

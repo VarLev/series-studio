@@ -326,7 +326,7 @@ export default async function ShotPage(ctx: {
               >
                 {t("Шоты группы", "Group shots")}
               </SectionLabel>
-              <GroupShotsEditor shotId={shotId} initialBeats={beats} />
+              <GroupShotsEditor shotId={shotId} initialBeats={beats} llmModel={settings.llm_model} />
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
@@ -372,6 +372,7 @@ export default async function ShotPage(ctx: {
             versions={versions}
             tokens={tokens}
             targetModels={catalog.map((m) => m.id)}
+            llmModel={settings.llm_model}
             usedTechniques={usedTechniques}
           />
 

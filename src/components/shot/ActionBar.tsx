@@ -1,17 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import CopyPackSheet, { type CopyPackRef } from "./CopyPackSheet";
 import GenerateSheet, { type CatalogModel, type StartFrameOption } from "./GenerateSheet";
 import { useT } from "@/components/I18nProvider";
 
 /**
- * Панель действий карточки шота: [Редактор] [Генерировать] [Копи-пак].
- * Мобайл — закреплена снизу; десктоп — вертикальная панель справа (без нижних панелей).
+ * Панель действий карточки шота: [Генерировать] [Копи-пак] (правка промпта —
+ * кнопкой ✎ в блоке промпта, отдельная кнопка «Редактор» убрана — замечание заказчика).
+ * Мобайл — закреплена снизу; десктоп — вертикальная панель справа.
  */
 export default function ActionBar({
-  episodeId,
   shotId,
   promptText,
   promptVersion,
@@ -50,15 +49,6 @@ export default function ActionBar({
     return () => window.removeEventListener("ss:open-generate", onOpen);
   }, [hasPrompt]);
 
-  const editorBtn = (
-    <Link
-      href={`/episodes/${episodeId}/shots/${shotId}/editor`}
-      className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-ink-500 text-t100 hover:bg-ink-400"
-    >
-      <span>⌨</span>
-      {t("Редактор", "Editor")}
-    </Link>
-  );
   const generateBtn = (
     <button
       onClick={() => setGenerateOpen(true)}
@@ -93,10 +83,9 @@ export default function ActionBar({
         }}
       >
         <div
-          className="grid grid-cols-3 gap-2 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] [&>*]:min-h-[50px] [&>*]:flex-col"
+          className="grid grid-cols-2 gap-2 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] [&>*]:min-h-[50px] [&>*]:flex-col"
           style={{ paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}
         >
-          {editorBtn}
           {generateBtn}
           {copyBtn}
         </div>
@@ -109,7 +98,6 @@ export default function ActionBar({
       >
         <div className="section-label mb-1">{t("Действия", "Actions")}</div>
         {generateBtn}
-        {editorBtn}
         {copyBtn}
       </div>
 

@@ -10,6 +10,7 @@ import {
 } from "@/lib/actions/episodes";
 import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS } from "@/lib/llm/models";
+import { estTextUsd, estTokens, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import BreakdownPreview from "./BreakdownPreview";
 import { SectionLabel } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
@@ -264,9 +265,17 @@ export default function SynopsisEditor({
           >
             {breakingDown
               ? t(`Claude раскадрирует… ${elapsed}с`, `Claude is storyboarding… ${elapsed}s`)
-              : shotsCount > 0
-                ? t("Раскадровать (готовые группы не дублируются)", "Break down (existing groups are kept)")
-                : t("Разбить на группы шотов", "Break into shot groups")}
+              : (() => {
+                  const usd = fmtUsd(
+                    estTextUsd(breakdownModel, estTokens(synopsis) + 1500, OUT_TOKENS.breakdown),
+                  );
+                  return shotsCount > 0
+                    ? t(
+                        `Раскадровать (готовые не дублируются) · ~${usd}`,
+                        `Break down (existing kept) · ~${usd}`,
+                      )
+                    : t(`Разбить на группы шотов · ~${usd}`, `Break into shot groups · ~${usd}`);
+                })()}
           </button>
         </div>
       )}

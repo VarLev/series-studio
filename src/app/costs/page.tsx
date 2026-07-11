@@ -16,6 +16,7 @@ import { ScreenHeader, SectionLabel, EmptyState } from "@/components/ui";
 import KnowledgeIngest from "@/components/costs/KnowledgeIngest";
 import CatalogRefresh from "@/components/costs/CatalogRefresh";
 import LimitStepper from "@/components/costs/LimitStepper";
+import HiggsfieldBalance from "@/components/costs/HiggsfieldBalance";
 import ConfirmButton from "@/components/ConfirmButton";
 import { deleteKnowledgeDoc, clearKnowledge } from "@/lib/actions/deletes";
 
@@ -100,6 +101,9 @@ export default async function CostsPage() {
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
       <ScreenHeader backHref="/episodes" eyebrow={t("Пульт", "Console")} title={t("Затраты и настройки", "Costs & settings")} />
       <div className="flex flex-col gap-6 p-4 pb-12">
+        {/* Живой баланс кредитов подписки Higgsfield */}
+        <HiggsfieldBalance />
+
         {/* M7 — сводка */}
         <div className="flex flex-col gap-2">
           <SectionLabel>{t("Итого", "Total")}</SectionLabel>

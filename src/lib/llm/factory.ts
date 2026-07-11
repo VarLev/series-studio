@@ -207,14 +207,20 @@ function enforceTemplateInvariants(res: ShotPrompt): ShotPrompt {
   return res;
 }
 
-/** M3 — сгенерировать промпт для шота под целевую модель (JSON) */
-export async function llmShotPrompt(shotId: string, targetModel: string): Promise<ShotPrompt> {
+/** M3 — сгенерировать промпт для шота под целевую модель (JSON).
+ *  modelOverride — какой ИИ пишет промпт (выбор на карточке шота). */
+export async function llmShotPrompt(
+  shotId: string,
+  targetModel: string,
+  modelOverride?: string,
+): Promise<ShotPrompt> {
   const db = await getDb();
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot) throw new Error("Шот не найден");
   const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
   const settings = await getAllSettings();
-  const { rules, model } = await seriesSystemBase();
+  const { rules, model: defaultModel } = await seriesSystemBase();
+  const model = modelOverride || defaultModel;
   const bible = await bibleContext(links.map((l) => l.entityId));
   const knowledge = await knowledgeContext(targetModel);
   const isKling = targetModel.toLowerCase().includes("kling");

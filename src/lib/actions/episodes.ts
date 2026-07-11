@@ -8,7 +8,12 @@ import { requireAuth } from "@/lib/auth";
 import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
 import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
+import { stripAt } from "@/lib/entityName";
 import type { Breakdown } from "@/lib/llm/contracts";
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export async function createEpisode(): Promise<void> {
   await requireAuth();
@@ -68,13 +73,22 @@ export async function saveBreakdown(
 ): Promise<void> {
   await requireAuth();
   const db = await getDb();
-  // персонажи/локации из ответа модели → сущности библии: по name и element_name
+  // персонажи/локации из ответа модели → сущности библии: по name и element_name,
+  // без учёта @ и регистра (element_name всегда с @, модель может писать и без)
   const allEntities = await db.select().from(entities);
   const byName = new Map<string, string>();
   for (const e of allEntities) {
-    byName.set(e.elementName.trim().toLowerCase(), e.id);
-    byName.set(e.name.trim().toLowerCase(), e.id);
+    byName.set(stripAt(e.elementName), e.id);
+    byName.set(stripAt(e.name), e.id);
   }
+  // индекс для скана текста битов: регэксп по границам слов → id сущности
+  const scanIndex = allEntities
+    .flatMap((e) => [
+      { key: stripAt(e.name), id: e.id },
+      { key: stripAt(e.elementName), id: e.id },
+    ])
+    .filter((x) => x.key.length >= 2)
+    .map((x) => ({ id: x.id, re: new RegExp(`(^|[^\\wа-яё])${escapeRe(x.key)}([^\\wа-яё]|$)`, "i") }));
 
   const oldShots = await db.select().from(shots).where(eq(shots.episodeId, episodeId));
   if (mode === "replace") {
@@ -103,17 +117,25 @@ export async function saveBreakdown(
       cameraHint: "",
       status: "draft",
     });
-    const mentioned = [...group.characters, group.location];
     const linked = new Set<string>();
-    for (const name of mentioned) {
-      const entityId = byName.get(name.trim().toLowerCase());
-      if (entityId && !linked.has(entityId)) {
-        linked.add(entityId);
-        await db
-          .insert(shotEntities)
-          .values({ shotId, entityId, auto: true })
-          .onConflictDoNothing();
-      }
+    // 1) явный список персонажей/локаций группы от модели
+    for (const name of [...group.characters, group.location]) {
+      const entityId = byName.get(stripAt(name));
+      if (entityId) linked.add(entityId);
+    }
+    // 2) скан текста битов: подхватываем упомянутых в кадре персонажей из библии,
+    //    которых модель забыла внести в characters[] (замечание заказчика: Craig в тени)
+    const beatsText = beats
+      .map((b) => `${b.framing} ${b.camera} ${b.action} ${b.dialogue}`)
+      .join(" ");
+    for (const { id, re } of scanIndex) {
+      if (re.test(beatsText)) linked.add(id);
+    }
+    for (const entityId of linked) {
+      await db
+        .insert(shotEntities)
+        .values({ shotId, entityId, auto: true })
+        .onConflictDoNothing();
     }
   }
   await recomputeEpisodeTimecodes(episodeId);

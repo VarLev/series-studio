@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { updateEntity, setEntityArchived, deleteEntity, type EntityType } from "@/lib/actions/entities";
+import { normalizeElementName } from "@/lib/entityName";
 import { SectionLabel } from "@/components/ui";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
@@ -31,7 +32,8 @@ export default function EntityForm({
   // локально, dirty сравнивается со снимком последнего сохранённого состояния
   const initial: Fields = {
     name: entity.name,
-    elementName: entity.elementName,
+    // element_name всегда с ведущим @ (нормализуем старые значения без @)
+    elementName: normalizeElementName(entity.elementName),
     description: entity.description,
     type: entity.type,
   };
@@ -78,14 +80,22 @@ export default function EntityForm({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <SectionLabel hint={t("подставляется в промпты", "inserted into prompts")}>element_name</SectionLabel>
+        <SectionLabel hint={t("всегда с @, подставляется в промпты", "always @-prefixed, inserted into prompts")}>
+          element_name
+        </SectionLabel>
         <div className="flex gap-2">
-          <input
-            value={fields.elementName}
-            onChange={(e) => setFields({ ...fields, elementName: e.target.value })}
-            spellCheck={false}
-            className="min-h-11 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 font-mono text-[13px] text-violet-200 outline-none focus:border-[var(--border-strong)]"
-          />
+          {/* @ — фиксированный префикс: сущности библии всегда начинаются с @ */}
+          <div className="flex min-h-11 flex-1 items-center rounded-lg border border-[var(--border-subtle)] bg-ink-700 pl-3 focus-within:border-[var(--border-strong)]">
+            <span className="select-none font-mono text-[13px] font-semibold text-violet-400">@</span>
+            <input
+              value={fields.elementName.replace(/^@/, "")}
+              onChange={(e) =>
+                setFields({ ...fields, elementName: normalizeElementName(e.target.value) })
+              }
+              spellCheck={false}
+              className="min-h-11 w-full min-w-0 bg-transparent px-1 font-mono text-[13px] text-violet-200 outline-none"
+            />
+          </div>
           <button
             onClick={copyElement}
             className="min-h-11 rounded-lg border border-[var(--border-default)] px-4 text-[11px] font-semibold text-t200 hover:bg-ink-500"

@@ -91,3 +91,26 @@ export async function hfMcpListTools(): Promise<
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
   }
 }
+
+/** Текущий баланс кредитов подписки Higgsfield (MCP balance). */
+export async function hfBalance(): Promise<
+  { ok: true; credits: number | null; plan: string; usd: number | null } | { ok: false; error: string }
+> {
+  await requireAuth();
+  try {
+    const { isConnected, callMcpTool } = await import("@/lib/higgsfieldMcp");
+    if (!(await isConnected())) return { ok: false, error: "not_connected" };
+    const res = await callMcpTool("balance", {}, { retry: true });
+    const credits = Number(res.text.match(/Credits:\s*([\d.]+)/i)?.[1] ?? "");
+    const plan = res.text.match(/Plan:\s*(\w+)/i)?.[1] ?? "";
+    const { creditsToUsd } = await import("@/lib/pricing");
+    return {
+      ok: true,
+      credits: Number.isFinite(credits) ? credits : null,
+      plan,
+      usd: Number.isFinite(credits) ? creditsToUsd(credits) : null,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}

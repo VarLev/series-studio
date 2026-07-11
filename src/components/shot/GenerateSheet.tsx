@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { startGeneration } from "@/lib/actions/generate";
+import { creditsToUsd, fmtUsd } from "@/lib/pricing";
 import { useT } from "@/components/I18nProvider";
 
 export interface CatalogModel {
@@ -167,8 +168,15 @@ export default function GenerateSheet({
                   {m.qualities.join(" / ") || "—"}
                 </span>
               </span>
-              <span className="font-mono text-[10.5px] text-t300">
-                {est != null ? t(`≈${est} кр`, `≈${est} cr`) : t("кр: ?", "cr: ?")}
+              <span className="text-right font-mono text-[10.5px] text-t300">
+                {est != null ? (
+                  <>
+                    {t(`≈${est} кр`, `≈${est} cr`)}
+                    <span className="block text-[9px] text-t400">~{fmtUsd(creditsToUsd(est))}</span>
+                  </>
+                ) : (
+                  t("кр: ?", "cr: ?")
+                )}
               </span>
             </label>
           );
@@ -330,9 +338,16 @@ export default function GenerateSheet({
           {duration}{t("с", "s")} · {quality} · {aspect}
         </span>
         <span className="flex-1" />
-        <span className="font-mono text-[13px] font-semibold text-t100">
-          ≈ {estimate}
-          {hasUnknown ? "+?" : ""} {t("кр", "cr")}
+        <span className="text-right font-mono font-semibold text-t100">
+          <span className="text-[13px]">
+            ≈ {estimate}
+            {hasUnknown ? "+?" : ""} {t("кр", "cr")}
+          </span>
+          {estimate > 0 && (
+            <span className="block text-[10px] font-normal text-t400">
+              ~{fmtUsd(creditsToUsd(estimate))}{hasUnknown ? "+?" : ""}
+            </span>
+          )}
         </span>
       </div>
 

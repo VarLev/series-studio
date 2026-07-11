@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { getDb, entities, references } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { deleteFile } from "@/lib/storage";
+import { normalizeElementName } from "@/lib/entityName";
 
 export type EntityType = "character" | "location" | "prop" | "style";
 
@@ -38,7 +39,8 @@ export async function createEntity(input: {
     id,
     type: input.type,
     name: input.name.trim(),
-    elementName: (input.elementName?.trim() || slugify(input.name)) ?? id,
+    // element_name всегда с ведущим @ (заказчик)
+    elementName: normalizeElementName(input.elementName?.trim() || slugify(input.name) || id),
     description: input.description ?? "",
   });
   revalidatePath("/bible");
@@ -67,10 +69,10 @@ export async function quickCreateEntity(type: EntityType): Promise<void> {
   const rows = await db.select().from(entities).where(eq(entities.type, type));
   const prefix = TYPE_TOKEN_PREFIX[type];
   const max = rows.reduce((acc, e) => {
-    const n = e.elementName.match(new RegExp(`^${prefix}_(\\d+)$`, "i"))?.[1];
+    const n = e.elementName.match(new RegExp(`^@?${prefix}_(\\d+)$`, "i"))?.[1];
     return n ? Math.max(acc, Number(n)) : acc;
   }, 0);
-  const token = `${prefix}_${max + 1}`;
+  const token = normalizeElementName(`${prefix}_${max + 1}`);
   const id = crypto.randomUUID();
   await db.insert(entities).values({
     id,
@@ -109,7 +111,11 @@ export async function updateEntity(
 ): Promise<void> {
   await requireAuth();
   const db = await getDb();
-  await db.update(entities).set(patch).where(eq(entities.id, id));
+  const clean =
+    patch.elementName !== undefined
+      ? { ...patch, elementName: normalizeElementName(patch.elementName) }
+      : patch;
+  await db.update(entities).set(clean).where(eq(entities.id, id));
   revalidatePath(`/bible/${id}`);
   revalidatePath("/bible");
 }

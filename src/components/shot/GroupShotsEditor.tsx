@@ -10,6 +10,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateGroupBeats, reviseGroup } from "@/lib/actions/shots";
 import type { GroupShot } from "@/lib/llm/contracts";
+import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
@@ -19,12 +20,16 @@ const fieldCls =
 export default function GroupShotsEditor({
   shotId,
   initialBeats,
+  llmModel,
 }: {
   shotId: string;
   initialBeats: GroupShot[];
+  llmModel: string;
 }) {
   const router = useRouter();
   const t = useT();
+  // переделка группы: ~1.5К входных (группа+сюжет+библия) + типовой вывод
+  const reviseUsd = fmtUsd(estTextUsd(llmModel, 1500, OUT_TOKENS.revise));
   const [beats, setBeats] = useState<GroupShot[]>(initialBeats);
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [dirty, setDirty] = useState(false);
@@ -192,7 +197,10 @@ export default function GroupShotsEditor({
         >
           {revising
             ? t(`Claude переделывает… ${elapsed}с`, `Claude is reworking… ${elapsed}s`)
-            : t("Переделать по замечанию (Claude)", "Rework per feedback (Claude)")}
+            : t(
+                `Переделать по замечанию · ~${reviseUsd}`,
+                `Rework per feedback · ~${reviseUsd}`,
+              )}
         </button>
       </div>
     </div>
