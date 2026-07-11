@@ -32,6 +32,8 @@ const SOURCE_LABEL: Record<string, string> = {
   "nano-banana": "Nano Banana",
   upscale: "upscale",
   edit: "правка",
+  storyboard: "лист раскадровки",
+  "storyboard-frame": "кадр раскадровки",
 };
 
 const KNOWN_ASPECTS: Array<[string, number]> = [

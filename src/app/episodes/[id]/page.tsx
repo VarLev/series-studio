@@ -1,13 +1,16 @@
 import { notFound } from "next/navigation";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
-import { getDb, episodes, shots, shotEntities, entities } from "@/lib/db";
+import { getDb, episodes, generations, references, shots, shotEntities, entities } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
+import { getFileUrl } from "@/lib/storage";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
 import EpisodeTabs from "@/components/episode/EpisodeTabs";
 import QueuePill from "@/components/QueuePill";
+import GenPoller from "@/components/GenPoller";
 import type { ShotListItem } from "@/components/episode/ShotsList";
+import type { StoryboardData, StoryboardSheetData } from "@/components/episode/StoryboardTab";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +53,95 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
       .filter(Boolean),
   }));
 
+  // ---------- данные вкладки «Раскадровка» ----------
+  // референсы серии этого эпизода: листы (grid), кадры (parent_id), прочие — для «приложить»
+  const seriesRefRows = await db
+    .select()
+    .from(references)
+    .where(
+      and(eq(references.episodeId, id), isNull(references.shotId), isNull(references.entityId)),
+    )
+    .orderBy(desc(references.createdAt));
+
+  const sheetRows = seriesRefRows.filter((r) => r.grid === 4 || r.grid === 9);
+  const frameRows = seriesRefRows.filter((r) => r.source === "storyboard-frame");
+  const sheetIds = new Set(sheetRows.map((r) => r.id));
+
+  const toItem = async (r: (typeof seriesRefRows)[number]) => ({
+    id: r.id,
+    url: await getFileUrl(r.storagePath),
+    token: r.token,
+    caption: r.caption,
+  });
+
+  const sheets: StoryboardSheetData[] = await Promise.all(
+    sheetRows.map(async (r) => ({
+      ...(await toItem(r)),
+      grid: r.grid!,
+      sbShotId: r.sbShotId,
+      frames: await Promise.all(
+        frameRows
+          .filter((f) => f.parentId === r.id)
+          .sort((a, b) => a.caption.localeCompare(b.caption, "ru", { numeric: true }))
+          .map(toItem),
+      ),
+    })),
+  );
+  const orphanFrames = await Promise.all(
+    frameRows.filter((f) => !f.parentId || !sheetIds.has(f.parentId)).map(toItem),
+  );
+
+  // «приложить референсы»: аватары сущностей серии + обычные референсы серии (не листы/кадры)
+  const entityAvatarRefs = entityIds.length
+    ? await db.select().from(references).where(inArray(references.entityId, entityIds))
+    : [];
+  const attachRefs = [
+    ...(await Promise.all(
+      entityAvatarRefs
+        .filter((r) => r.entityId && !r.shotId)
+        .map(async (r) => ({
+          id: r.id,
+          url: await getFileUrl(r.storagePath),
+          label: entityById.get(r.entityId!)?.name ?? "сущность",
+        })),
+    )),
+    ...(await Promise.all(
+      seriesRefRows
+        .filter((r) => !r.grid && r.source !== "storyboard-frame")
+        .map(async (r) => ({
+          id: r.id,
+          url: await getFileUrl(r.storagePath),
+          label: r.token ?? r.caption ?? "REF",
+        })),
+    )),
+  ];
+
+  // активные задачи-листы (для полосы «рисуется» и автообновления страницы)
+  const activeGenRows = await db
+    .select()
+    .from(generations)
+    .where(
+      and(
+        eq(generations.episodeId, id),
+        eq(generations.kind, "reference"),
+        inArray(generations.status, ["queued", "running"]),
+      ),
+    );
+  const pendingStoryboards = activeGenRows.filter((g) => {
+    try {
+      return (JSON.parse(g.paramsJson || "{}") as { source_tag?: string }).source_tag === "storyboard";
+    } catch {
+      return false;
+    }
+  }).length;
+
+  const storyboard: StoryboardData = {
+    sheets,
+    orphanFrames,
+    attachRefs,
+    pendingCount: pendingStoryboards,
+  };
+
   const epNumber = String(episode.number).padStart(2, "0");
 
   return (
@@ -79,6 +171,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
           </div>
         }
       />
+      <GenPoller activeCount={activeGenRows.length} />
       <EpisodeTabs
         episodeId={episode.id}
         initialTitle={episode.title}
@@ -87,6 +180,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         shots={shotItems}
         synopsisModel={settings.llm_model_synopsis}
         breakdownModel={settings.llm_model}
+        storyboard={storyboard}
       />
     </main>
   );

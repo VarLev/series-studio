@@ -3,7 +3,7 @@
 import { useState } from "react";
 import SynopsisEditor from "./SynopsisEditor";
 import ShotsList, { type ShotListItem } from "./ShotsList";
-import { EmptyState } from "@/components/ui";
+import StoryboardTab, { type StoryboardData } from "./StoryboardTab";
 
 const TABS = ["Сюжет", "Раскадровка", "Шоты"] as const;
 
@@ -15,6 +15,7 @@ export default function EpisodeTabs({
   shots,
   synopsisModel,
   breakdownModel,
+  storyboard,
 }: {
   episodeId: string;
   initialTitle: string;
@@ -23,6 +24,7 @@ export default function EpisodeTabs({
   shots: ShotListItem[];
   synopsisModel: string;
   breakdownModel: string;
+  storyboard: StoryboardData;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>(
     shots.length > 0 ? "Шоты" : "Сюжет",
@@ -71,12 +73,7 @@ export default function EpisodeTabs({
       )}
 
       {tab === "Раскадровка" && (
-        <div className="flex flex-col gap-3 p-4">
-          <EmptyState>
-            Визуальная раскадровка (листы Nano Banana по каждой группе) появится на Этапе 2 —
-            вместе с генерацией внутри приложения. Сейчас работайте через вкладку «Шоты».
-          </EmptyState>
-        </div>
+        <StoryboardTab episodeId={episodeId} shots={shots} data={storyboard} />
       )}
 
       {tab === "Шоты" && <ShotsList episodeId={episodeId} shots={shots} />}

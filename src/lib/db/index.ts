@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS token text;
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS width integer;
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS height integer;
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS grid integer;
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_shot_id text;
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS parent_id text;
 ALTER TABLE generations ADD COLUMN IF NOT EXISTS episode_id text;
 ALTER TABLE generations ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'video';
 ALTER TABLE generations ALTER COLUMN shot_id DROP NOT NULL;

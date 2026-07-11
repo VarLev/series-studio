@@ -248,8 +248,12 @@ export interface ReferenceJobInput {
   aspectRatio: string;
   resolution: string; // 1k | 2k | 4k
   sourceRefIds?: string[]; // референсы-входы (правка / upscale)
-  sourceTag: "nano-banana" | "upscale" | "edit";
+  sourceTag: "nano-banana" | "upscale" | "edit" | "storyboard";
   credits?: number | null;
+  /** Лист раскадровки: сколько кадров в сетке (4 | 9) и к какому шоту относится. */
+  sbGrid?: number;
+  sbShotId?: string | null;
+  caption?: string;
 }
 
 export async function submitReferenceJob(input: ReferenceJobInput): Promise<void> {
@@ -275,6 +279,9 @@ export async function submitReferenceJob(input: ReferenceJobInput): Promise<void
     source_tag: input.sourceTag,
     source_refs: input.sourceRefIds ?? [],
     estimate: input.credits ?? null,
+    sb_grid: input.sbGrid ?? null,
+    sb_shot_id: input.sbShotId ?? null,
+    caption: input.caption ?? null,
     _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
   };
   await db.insert(generations).values({
@@ -351,6 +358,9 @@ async function landReferenceResult(
   const params = JSON.parse(gen.paramsJson || "{}") as {
     source_tag?: string;
     aspect_ratio?: string;
+    sb_grid?: number | null;
+    sb_shot_id?: string | null;
+    caption?: string | null;
   };
   let data: Buffer;
   let ext = ".jpg";
@@ -373,11 +383,13 @@ async function landReferenceResult(
     id: refId,
     episodeId: gen.episodeId,
     storagePath,
-    caption: "",
+    caption: params.caption ?? "",
     source: params.source_tag ?? "nano-banana",
     token: await nextRefToken(gen.episodeId!),
     width,
     height,
+    grid: params.sb_grid ?? null,
+    sbShotId: params.sb_shot_id ?? null,
   });
   await db
     .update(generations)

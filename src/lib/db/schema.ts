@@ -30,6 +30,10 @@ export const references = pgTable("references", {
   token: text("token"), // REF_NN — референсы серии (spec §1)
   width: integer("width"),
   height: integer("height"),
+  // раскадровка: лист-сетка Nano Banana и вырезанные из него кадры
+  grid: integer("grid"), // лист: сколько кадров в сетке (4 = 2×2, 9 = 3×3)
+  sbShotId: text("sb_shot_id"), // раскадровка конкретного шота (null = вся серия)
+  parentId: text("parent_id"), // кадр: id листа, из которого вырезан
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
