@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { getDb, settings } from "./db";
 import {
   DEFAULT_BREAKDOWN_TEMPLATE,
+  DEFAULT_KLING_VIDEO_TEMPLATE,
   DEFAULT_STORYBOARD_TEMPLATE,
   DEFAULT_VIDEO_TEMPLATE,
 } from "./templates";
@@ -24,7 +25,8 @@ export const DEFAULT_SETTINGS = {
   // шаблоны промптов (редактируются в «Настройках»)
   tpl_breakdown: DEFAULT_BREAKDOWN_TEMPLATE,
   tpl_storyboard: DEFAULT_STORYBOARD_TEMPLATE,
-  tpl_video: DEFAULT_VIDEO_TEMPLATE,
+  tpl_video: DEFAULT_VIDEO_TEMPLATE, // трек Seedance
+  tpl_video_kling: DEFAULT_KLING_VIDEO_TEMPLATE, // трек Kling (<<<image_N>>>, нативный звук)
   // интерфейс
   ui_lang: "ru", // ru | en
   ui_theme: "stigma", // stigma (фиолетовый) | vault (графит + янтарь)

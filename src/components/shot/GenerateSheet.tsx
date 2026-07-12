@@ -10,6 +10,7 @@ import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { preflightVideoCredits, startGeneration } from "@/lib/actions/generate";
 import { creditsToUsd, fmtUsd } from "@/lib/pricing";
+import { promptFamily, type PromptFamily } from "@/lib/llm/models";
 import { useT } from "@/components/I18nProvider";
 
 export interface CatalogModel {
@@ -44,7 +45,7 @@ export default function GenerateSheet({
   open,
   onClose,
   shotId,
-  promptId,
+  promptFamilies,
   models,
   defaultModelIds,
   startFrames,
@@ -55,7 +56,8 @@ export default function GenerateSheet({
   open: boolean;
   onClose: () => void;
   shotId: string;
-  promptId: string;
+  /** какие промпт-треки существуют: модели без промпта своего семейства отключены */
+  promptFamilies: Record<PromptFamily, boolean>;
   models: CatalogModel[];
   defaultModelIds: string[];
   startFrames: StartFrameOption[];
@@ -65,7 +67,12 @@ export default function GenerateSheet({
 }) {
   const t = useT();
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(defaultModelIds.filter((id) => models.some((m) => m.id === id))),
+    () =>
+      new Set(
+        defaultModelIds.filter(
+          (id) => models.some((m) => m.id === id) && promptFamilies[promptFamily(id)],
+        ),
+      ),
   );
   const [duration, setDuration] = useState(Math.min(15, Math.max(4, groupDurationSec)));
   const [quality, setQuality] = useState<string>("720p");
@@ -149,9 +156,9 @@ export default function GenerateSheet({
   function launch() {
     setError("");
     startTransition(async () => {
+      // промпт каждой модели сервер подбирает по её семейству (Seedance/Kling)
       const res = await startGeneration({
         shotId,
-        promptId,
         modelIds: [...selected],
         startFrameRefId: startFrame || undefined,
         durationSec: duration,
@@ -188,10 +195,13 @@ export default function GenerateSheet({
       <div className="flex flex-col gap-1.5">
         {models.map((m) => {
           const { value: est, isExact } = priceFor(m);
+          // у каждой модели свой промпт-трек: без промпта семейства запуск закрыт
+          const fam = promptFamily(m.id);
+          const hasPrompt = promptFamilies[fam];
           return (
             <label
               key={m.id}
-              className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2"
+              className={`flex min-h-11 items-center gap-2.5 rounded-lg border px-3 py-2 ${hasPrompt ? "cursor-pointer" : "opacity-50"}`}
               style={{
                 borderColor: selected.has(m.id) ? "var(--border-strong)" : "var(--border-subtle)",
                 background: selected.has(m.id) ? "var(--ink-600)" : "none",
@@ -200,13 +210,19 @@ export default function GenerateSheet({
               <input
                 type="checkbox"
                 checked={selected.has(m.id)}
+                disabled={!hasPrompt}
                 onChange={() => toggle(m.id)}
                 className="h-5 w-5 accent-[var(--violet-400)]"
               />
               <span className="min-w-0 flex-1">
                 <span className="block font-mono text-[12px] font-semibold text-t100">{m.name}</span>
                 <span className="block font-mono text-[9px] text-t400">
-                  {m.qualities.join(" / ") || "—"}
+                  {hasPrompt
+                    ? m.qualities.join(" / ") || "—"
+                    : t(
+                        `нет промпта ${fam === "kling" ? "Kling" : "Seedance"} — создайте в блоке «Промпт»`,
+                        `no ${fam === "kling" ? "Kling" : "Seedance"} prompt — create it in the Prompt block`,
+                      )}
                 </span>
               </span>
               <span className="text-right font-mono text-[10.5px] text-t300">

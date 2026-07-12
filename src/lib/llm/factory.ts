@@ -16,7 +16,7 @@ import { getAllSettings } from "@/lib/settings";
 import { readFile } from "@/lib/storage";
 import { TIMING_RULES, LANGUAGE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
-import { visionModelFrom } from "./models";
+import { promptFamily, visionModelFrom } from "./models";
 import { runJson } from "./client";
 import {
   breakdownSchema,
@@ -285,7 +285,10 @@ export async function llmShotPrompt(
   const model = modelOverride || defaultModel;
   const bible = await bibleContext(links.map((l) => l.entityId));
   const knowledge = await knowledgeContext(targetModel);
-  const isKling = targetModel.toLowerCase().includes("kling");
+  const isKling = promptFamily(targetModel) === "kling";
+  // у каждого семейства свой шаблон: Seedance (tpl_video) и Kling (tpl_video_kling —
+  // референсы <<<image_N>>>, нативный звук, своя структура шотов)
+  const videoTemplate = isKling ? settings.tpl_video_kling : settings.tpl_video;
 
   const shotDescription =
     `${shot.title ? shot.title + ". " : ""}${shot.actionMd}` +
@@ -405,15 +408,17 @@ export async function llmShotPrompt(
       model,
       episodeId: shot.episodeId,
       maxTokens: 8000,
-      // шаблон видео-промпта заказчика (настройки) — основа системной инструкции
+      // шаблон видео-промпта заказчика (настройки, свой на семейство) — основа системной инструкции
       system:
-        `${settings.tpl_video}\n\n${rules}\n\n${bible}\n\n${sceneBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n` +
+        `${videoTemplate}\n\n${rules}\n\n${bible}\n\n${sceneBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
         "блоки Scene/Action/Performance/Camera/Audio/Strict rules; если есть реплика — DIALOGUE LOCK с точным текстом. " +
         (isKling
-          ? "Для Kling промпт начинается с описания камеры/ракурса (движение камеры — первым предложением). "
+          ? "Промпт для Kling 3.0 Omni: персонажей обозначай их element_name (@Name), стартовый кадр — @Start; " +
+            "приложение заменит якоря на токены <<<image_N>>> при отправке. Звук нативный — реплики в кавычках " +
+            "с тоном в скобках, эмбиент и SFX описывай в каждом шоте (тишина задаётся явно). "
           : "") +
         "Весь промпт — ТОЛЬКО на английском, независимо от языка исходного материала. Все имена " +
         "собственные (персонажи, локации, бренды) — латиницей по-английски; для сущностей библии " +
@@ -451,6 +456,9 @@ export async function llmRevisePrompt(
   const settings = await getAllSettings();
   const { rules, model } = await seriesSystemBase();
   const knowledge = await knowledgeContext(prev.targetModel);
+  // ревизия наследует шаблон семейства исходной версии (Seedance или Kling)
+  const reviseTemplate =
+    promptFamily(prev.targetModel) === "kling" ? settings.tpl_video_kling : settings.tpl_video;
   return runJson(
     {
       kind: "revision",
@@ -458,7 +466,7 @@ export async function llmRevisePrompt(
       episodeId: shot?.episodeId,
       maxTokens: 8000,
       system:
-        `${settings.tpl_video}\n\n${rules}\n\n${knowledge}\n\n` +
+        `${reviseTemplate}\n\n${rules}\n\n${knowledge}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. Промпт на английском.\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +

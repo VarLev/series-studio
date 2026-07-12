@@ -3,7 +3,7 @@
  * поллинг статусов, приземление результатов (M5). Используется server actions,
  * cron-роутом и вебхуком.
  */
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import {
   getDb,
   entities,
@@ -29,6 +29,7 @@ import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
 import { imageModelMeta, type ImageModelMeta } from "@/lib/imageModels";
+import { promptFamily } from "@/lib/llm/models";
 
 // ---------- Каталог моделей (TZ §0.2) ----------
 
@@ -402,7 +403,8 @@ function shapeVideoParams(
 
 export interface SubmitInput {
   shotId: string;
-  promptId: string;
+  /** конкретная версия промпта (ретрай); без неё промпт берётся по семейству модели */
+  promptId?: string;
   modelIds: string[];
   startFrameRefId?: string;
   durationSec: number;
@@ -446,21 +448,57 @@ export async function submitJobs(
   input: SubmitInput,
 ): Promise<{ submitted: number; jobs: Array<{ model: string; jobId: string }> }> {
   const db = await getDb();
-  const [prompt] = await db.select().from(prompts).where(eq(prompts.id, input.promptId));
-  if (!prompt) throw new Error("Промпт не найден");
   const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
   if (!shot) throw new Error("Шот не найден");
   const catalog = await getCatalog("video");
 
-  const promptParams = JSON.parse(prompt.paramsJson || "{}") as { reference_element_names?: string[] };
-  const refsRaw = await identityRefs(input.shotId, promptParams.reference_element_names ?? []);
+  // промпт-треки: у каждой модели — промпт её семейства (Seedance/Kling).
+  // Явный promptId (ретрай) побеждает, если его семейство совпадает с моделью.
+  const allPrompts = await db
+    .select()
+    .from(prompts)
+    .where(eq(prompts.shotId, input.shotId))
+    .orderBy(desc(prompts.version));
+  const explicit = input.promptId ? allPrompts.find((p) => p.id === input.promptId) : undefined;
+  if (input.promptId && !explicit) throw new Error("Промпт не найден");
+  function promptRowFor(modelId: string) {
+    const fam = promptFamily(modelId);
+    if (explicit && promptFamily(explicit.targetModel) === fam) return explicit;
+    const row = allPrompts.find((p) => promptFamily(p.targetModel) === fam);
+    if (!row) {
+      throw new Error(
+        fam === "kling"
+          ? "Для Kling нет промпта — создайте его в блоке «Промпт» (вкладка Kling)"
+          : "Для Seedance нет промпта — создайте его в блоке «Промпт» (вкладка Seedance)",
+      );
+    }
+    return row;
+  }
+
+  // референсы персонажей зависят от reference_element_names конкретного промпта
+  const refsCache = new Map<string, Awaited<ReturnType<typeof identityRefs>>>();
+  async function refsFor(promptRow: (typeof allPrompts)[number]) {
+    const cached = refsCache.get(promptRow.id);
+    if (cached) return cached;
+    const promptParams = JSON.parse(promptRow.paramsJson || "{}") as {
+      reference_element_names?: string[];
+    };
+    const refs = await identityRefs(input.shotId, promptParams.reference_element_names ?? []);
+    refsCache.set(promptRow.id, refs);
+    return refs;
+  }
 
   // медиа/элементы загружаются в хранилище КАЖДОГО задействованного провайдера
-  // (Higgsfield и Kling — разные аккаунты); результат кэшируется по провайдеру
+  // (Higgsfield и Kling — разные аккаунты); кэш по провайдеру×промпту
   const ctxCache = new Map<string, ProviderCtx>();
-  async function ctxFor(provider: GenerationProvider): Promise<ProviderCtx> {
-    const cached = ctxCache.get(provider.name);
+  async function ctxFor(
+    provider: GenerationProvider,
+    promptRow: (typeof allPrompts)[number],
+  ): Promise<ProviderCtx> {
+    const cacheKey = `${provider.name}:${promptRow.id}`;
+    const cached = ctxCache.get(cacheKey);
     if (cached) return cached;
+    const refsRaw = await refsFor(promptRow);
     const startImageUrl = input.startFrameRefId
       ? ((await publicUrlForReference(input.startFrameRefId, provider)) ?? undefined)
       : undefined;
@@ -478,14 +516,14 @@ export async function submitJobs(
       resolved.push({ elementName: r.elementName, name: r.name, media, elementId });
     }
     const ctx = { startImageUrl, resolved };
-    ctxCache.set(provider.name, ctx);
+    ctxCache.set(cacheKey, ctx);
     return ctx;
   }
 
   /**
    * Промпт + медиа-привязки под модель/провайдера:
-   *  - kling-mcp: токены 图片N (официальный синтаксис Kling Omni), все референсы
-   *    уходят как image_1..image_7 (start-frame занимает 图片1);
+   *  - kling-mcp: токены <<<image_N>>> (официальный синтаксис Kling 3.0 Omni),
+   *    все референсы уходят как image_1..image_7 (start-frame занимает <<<image_1>>>);
    *  - higgsfield: элементы <<<element_id>>>, фолбэк image_references+@imageN
    *    (только Seedance; kling3_0 без элементов референсы не принимает).
    */
@@ -493,17 +531,18 @@ export async function submitJobs(
     provider: GenerationProvider,
     ctx: ProviderCtx,
     modelId: string,
+    promptRow: (typeof allPrompts)[number],
   ): { text: string; refMedias: string[] } {
     const mapping: Array<{ elementName: string; name: string; token: string }> = [];
     const refMedias: string[] = [];
     if (provider.name === "kling-mcp") {
-      let slot = ctx.startImageUrl ? 2 : 1; // start-frame = 图片1
+      let slot = ctx.startImageUrl ? 2 : 1; // start-frame = <<<image_1>>>
       for (const r of ctx.resolved) {
-        mapping.push({ elementName: r.elementName, name: r.name, token: `图片${slot++}` });
+        mapping.push({ elementName: r.elementName, name: r.name, token: `<<<image_${slot++}>>>` });
         refMedias.push(r.media.url);
       }
-      let text = replaceMentions(prompt.text, mapping, false);
-      if (ctx.startImageUrl) text = text.replace(/@start(?![\w-])/gi, "图片1");
+      let text = replaceMentions(promptRow.text, mapping, false);
+      if (ctx.startImageUrl) text = text.replace(/@start(?![\w-])/gi, "<<<image_1>>>");
       return { text, refMedias };
     }
     const supportsImageRefs = !modelId.startsWith("kling");
@@ -516,14 +555,15 @@ export async function submitJobs(
         refMedias.push(r.media.id);
       }
     }
-    return { text: replaceMentions(prompt.text, mapping, Boolean(ctx.startImageUrl)), refMedias };
+    return { text: replaceMentions(promptRow.text, mapping, Boolean(ctx.startImageUrl)), refMedias };
   }
 
   const jobs: Array<{ model: string; jobId: string }> = [];
   for (const modelId of input.modelIds) {
     const model = catalog.find((m) => m.id === modelId);
     const provider = await providerForModel(modelId, catalog);
-    const ctx = await ctxFor(provider);
+    const promptRow = promptRowFor(modelId); // промпт семейства этой модели
+    const ctx = await ctxFor(provider, promptRow);
     const quality = effectiveQuality(modelId, input.quality, model?.qualities ?? []);
     const virtual = VIRTUAL_MODELS[modelId];
     const params = {
@@ -533,13 +573,13 @@ export async function submitJobs(
     // точная стоимость ДО запуска (get_cost) — в очередь и в учёт затрат идёт она,
     // формула — только фолбэк (у Kling preflight нет вовсе)
     const exactCost = provider.preflightCost
-      ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: prompt.text, ...params }).catch(() => null)
+      ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: promptRow.text, ...params }).catch(() => null)
       : null;
-    const { text: modelPrompt, refMedias } = promptForModel(provider, ctx, modelId);
+    const { text: modelPrompt, refMedias } = promptForModel(provider, ctx, modelId, promptRow);
     const sub = await provider.submit({
       model: virtual?.base ?? modelId,
       prompt: modelPrompt,
-      negativePrompt: prompt.negativePrompt ?? undefined,
+      negativePrompt: promptRow.negativePrompt ?? undefined,
       params,
       startImageUrl: ctx.startImageUrl,
       characterRefUrls: refMedias,
@@ -562,7 +602,7 @@ export async function submitJobs(
       shotId: input.shotId,
       episodeId: shot.episodeId,
       kind: "video",
-      promptId: input.promptId,
+      promptId: promptRow.id,
       provider: provider.name,
       model: modelId,
       paramsJson: JSON.stringify(paramsJson),

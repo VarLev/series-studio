@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import CopyPackSheet, { type CopyPackRef } from "./CopyPackSheet";
 import GenerateSheet, { type CatalogModel, type StartFrameOption } from "./GenerateSheet";
+import type { PromptFamily } from "@/lib/llm/models";
 import { useT } from "@/components/I18nProvider";
 
 /**
@@ -15,6 +16,7 @@ export default function ActionBar({
   promptText,
   promptVersion,
   promptId,
+  promptFamilies,
   copyPackRefs,
   hasPrompt,
   models,
@@ -29,6 +31,8 @@ export default function ActionBar({
   promptText: string;
   promptVersion: number;
   promptId: string;
+  /** какие промпт-треки существуют (гейтинг моделей в шторке генерации) */
+  promptFamilies: Record<PromptFamily, boolean>;
   copyPackRefs: CopyPackRef[];
   hasPrompt: boolean;
   models: CatalogModel[];
@@ -105,7 +109,7 @@ export default function ActionBar({
         open={generateOpen}
         onClose={() => setGenerateOpen(false)}
         shotId={shotId}
-        promptId={promptId}
+        promptFamilies={promptFamilies}
         models={models}
         defaultModelIds={defaultModelIds}
         startFrames={startFrames}

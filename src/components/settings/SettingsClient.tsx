@@ -48,7 +48,7 @@ function TemplateEditor({
   hint,
   initial,
 }: {
-  settingKey: "tpl_breakdown" | "tpl_storyboard" | "tpl_video";
+  settingKey: "tpl_breakdown" | "tpl_storyboard" | "tpl_video" | "tpl_video_kling";
   title: string;
   hint: string;
   initial: string;
@@ -278,6 +278,7 @@ export default function SettingsClient({
   breakdownTemplate,
   storyboardTemplate,
   videoTemplate,
+  klingVideoTemplate,
   techniques,
   uiLang,
   uiTheme,
@@ -288,6 +289,7 @@ export default function SettingsClient({
   breakdownTemplate: string;
   storyboardTemplate: string;
   videoTemplate: string;
+  klingVideoTemplate: string;
   techniques: TechniqueCard[];
   uiLang: string;
   uiTheme: string;
@@ -460,12 +462,21 @@ export default function SettingsClient({
       />
       <TemplateEditor
         settingKey="tpl_video"
-        title={t("Шаблон видео-промпта (системный для Claude)", "Video prompt template (Claude system prompt)")}
+        title={t("Шаблон видео-промпта · Seedance", "Video prompt template · Seedance")}
         hint={t(
-          "Инструкция, по которой промпт-фабрика пишет мультишот-промпты для Seedance/Kling. Кнопка «Сгенерировать промпт» на карточке шота.",
-          "The instruction the prompt factory follows to write multi-shot prompts for Seedance/Kling. The Generate prompt button on the shot card.",
+          "Инструкция промпт-фабрики для трека Seedance (референсы @Image1/@Start, без нативного звука). Кнопка «Сгенерировать промпт» на карточке шота.",
+          "Prompt-factory instruction for the Seedance track (@Image1/@Start references, no native audio). The Generate prompt button on the shot card.",
         )}
         initial={videoTemplate}
+      />
+      <TemplateEditor
+        settingKey="tpl_video_kling"
+        title={t("Шаблон видео-промпта · Kling", "Video prompt template · Kling")}
+        hint={t(
+          "Инструкция промпт-фабрики для трека Kling 3.0 Omni: референсы <<<image_N>>>, нативный звук (реплики в кавычках, эмбиент, SFX), структура «сцена → персонаж → камера → действие → реплика → аудио».",
+          "Prompt-factory instruction for the Kling 3.0 Omni track: <<<image_N>>> references, native audio (quoted dialogue, ambience, SFX), “scene → character → camera → action → dialogue → audio” structure.",
+        )}
+        initial={klingVideoTemplate}
       />
 
       <SectionLabel

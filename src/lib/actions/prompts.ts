@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, prompts, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmShotPrompt, llmRevisePrompt } from "@/lib/llm/factory";
+import { PROMPT_FAMILIES, type PromptFamily } from "@/lib/llm/models";
 import { collapseAt } from "@/lib/entityName";
 import type { ShotPrompt } from "@/lib/llm/contracts";
 
@@ -88,6 +89,31 @@ export async function generateShotPrompt(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
   }
+}
+
+/**
+ * Создание промптов по трекам (Seedance / Kling / оба): на каждое выбранное
+ * семейство фабрика пишет отдельный промпт по СВОЕМУ шаблону. Последовательно —
+ * чтобы не гонять два тяжёлых LLM-вызова параллельно через один аккаунт.
+ */
+export async function generateShotPromptsFor(
+  shotId: string,
+  families: PromptFamily[],
+  llmModel?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAuth();
+  for (const family of families) {
+    const meta = PROMPT_FAMILIES.find((f) => f.id === family);
+    if (!meta) return { ok: false, error: `Неизвестный трек: ${family}` };
+    const res = await generateShotPrompt(shotId, meta.targetModel, llmModel);
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `${meta.label}: ${res.error}`,
+      };
+    }
+  }
+  return { ok: true };
 }
 
 /** U4 — замечание → версия N+1 через промпт-фабрику. */

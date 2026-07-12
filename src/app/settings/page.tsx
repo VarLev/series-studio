@@ -40,6 +40,7 @@ export default async function SettingsPage() {
         breakdownTemplate={settings.tpl_breakdown}
         storyboardTemplate={settings.tpl_storyboard}
         videoTemplate={settings.tpl_video}
+        klingVideoTemplate={settings.tpl_video_kling}
         techniques={techniques.map((t) => ({
           id: t.id,
           title: t.title,

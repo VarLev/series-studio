@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
-import { generateShotPrompt, latestPromptVersion } from "@/lib/actions/prompts";
-import { LLM_MODELS } from "@/lib/llm/models";
+import { generateShotPromptsFor, latestPromptVersion } from "@/lib/actions/prompts";
+import { LLM_MODELS, PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { useT } from "@/components/I18nProvider";
 
@@ -36,24 +36,28 @@ export default function PromptBlock({
   episodeId,
   versions,
   tokens,
-  targetModels,
   llmModel,
-  usedTechniques = [],
+  usedTechniquesByFamily = { seedance: [], kling: [] },
 }: {
   shotId: string;
   episodeId: string;
   versions: PromptVersion[];
   tokens: string[];
-  targetModels: string[];
   llmModel: string;
-  usedTechniques?: UsedTechnique[];
+  /** приёмы 🎥 текущей версии каждого трека */
+  usedTechniquesByFamily?: Record<PromptFamily, UsedTechnique[]>;
 }) {
   const router = useRouter();
   const t = useT();
   const en = t("ru", "en") === "en";
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [model, setModel] = useState(targetModels[0] ?? "kling-3.0");
+  // активный трек: Seedance / Kling (у каждого свой промпт и своя история)
+  const [family, setFamily] = useState<PromptFamily>(() =>
+    versions[0] ? promptFamily(versions[0].targetModel) : "seedance",
+  );
+  // что создавать кнопкой: один трек или оба
+  const [createChoice, setCreateChoice] = useState<PromptFamily | "both">("seedance");
   // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт)
   const [factoryModel, setFactoryModel] = useState(llmModel);
   const [error, setError] = useState("");
@@ -65,12 +69,25 @@ export default function PromptBlock({
   const doneRef = useRef(false);
   const [copied, setCopied] = useState(false);
   const [technique, setTechnique] = useState<UsedTechnique | null>(null);
-  const current = versions[0] ?? null;
-  // фабрика: ~4К входных токенов (шаблон+библия+приёмы) + типовой вывод
-  const genUsd = estTextUsd(factoryModel, 4000, OUT_TOKENS.prompt);
+
+  const trackVersions = versions.filter((v) => promptFamily(v.targetModel) === family);
+  const current = trackVersions[0] ?? null;
+  const hasByFamily: Record<PromptFamily, boolean> = {
+    seedance: versions.some((v) => promptFamily(v.targetModel) === "seedance"),
+    kling: versions.some((v) => promptFamily(v.targetModel) === "kling"),
+  };
+  const usedTechniques = usedTechniquesByFamily[family] ?? [];
+  const createFamilies: PromptFamily[] =
+    createChoice === "both" ? ["seedance", "kling"] : [createChoice];
+  // фабрика: ~4К входных токенов (шаблон+библия+приёмы) + типовой вывод; ×2 для обоих треков
+  const genUsdOne = estTextUsd(factoryModel, 4000, OUT_TOKENS.prompt);
+  const genUsd = genUsdOne == null ? null : genUsdOne * createFamilies.length;
 
   function openEditor() {
-    router.push(`/episodes/${episodeId}/shots/${shotId}/editor`);
+    // редактор открываем на текущей версии активного трека
+    router.push(
+      `/episodes/${episodeId}/shots/${shotId}/editor${current ? `?v=${current.id}` : ""}`,
+    );
   }
 
   function cleanupTimers() {
@@ -101,8 +118,10 @@ export default function PromptBlock({
     setElapsed(0);
     setGenerating(true);
     doneRef.current = false;
-    // версия-ориентир: успех = на сервере появилась версия больше этой
-    const baseline = current?.version ?? 0;
+    const families = createFamilies;
+    // версия-ориентир: успех = появилось столько новых версий, сколько треков создаём
+    const baseline = versions[0]?.version ?? 0;
+    const target = baseline + families.length;
     const started = Date.now();
 
     // таймер: показываем, что фабрика жива; жёсткий потолок 240 с
@@ -120,11 +139,11 @@ export default function PromptBlock({
     }, 1000);
 
     // самовосстановление: даже если ответ основного запроса потерялся в туннеле,
-    // поллинг увидит сохранённую на сервере версию и подхватит результат
+    // поллинг увидит сохранённые на сервере версии и подхватит результат
     timers.current.poll = setInterval(async () => {
       try {
         const v = await latestPromptVersion(shotId);
-        if (v > baseline) finishOk();
+        if (v >= target) finishOk();
       } catch {
         // сеть моргнула — попробуем в следующий тик
       }
@@ -132,10 +151,12 @@ export default function PromptBlock({
 
     // основной запрос: ok → успех; понятная ошибка сервера → показать;
     // обрыв соединения → не падаем, ждём, пока поллинг подхватит результат
-    generateShotPrompt(shotId, model, factoryModel)
+    generateShotPromptsFor(shotId, families, factoryModel)
       .then((res) => {
-        if (res.ok) finishOk();
-        else finishErr(res.error);
+        if (res.ok) {
+          setFamily(families[0]); // показать созданный трек
+          finishOk();
+        } else finishErr(res.error);
       })
       .catch(() => {
         /* соединение потеряно — результат подхватит поллинг */
@@ -180,6 +201,39 @@ export default function PromptBlock({
             </button>
           </>
         )}
+      </div>
+
+      {/* треки промптов: у Seedance и Kling разная структура — промпты раздельные */}
+      <div className="flex gap-1 border-b border-[var(--border-subtle)] px-2 py-1.5">
+        {PROMPT_FAMILIES.map((f) => {
+          const active = family === f.id;
+          const exists = hasByFamily[f.id];
+          return (
+            <button
+              key={f.id}
+              onClick={() => {
+                setFamily(f.id);
+                setCreateChoice(f.id);
+                setExpanded(false);
+              }}
+              className="flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold"
+              style={{
+                borderColor: active ? "var(--border-strong)" : "transparent",
+                background: active ? "var(--ink-600)" : "none",
+                color: active ? "var(--text-100)" : "var(--text-400)",
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={f.icon} alt="" className="h-4 w-4 rounded-[3px]" />
+              {f.label}
+              {!exists && (
+                <span className="rounded bg-ink-800 px-1 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em] text-t400">
+                  {t("нет", "none")}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {current ? (
@@ -230,23 +284,22 @@ export default function PromptBlock({
           <div className="text-[12px] leading-relaxed text-t300">
             <span className="text-violet-600">✦</span>&nbsp;{" "}
             {t(
-              "Промпта ещё нет. Claude соберёт его из фрагмента сюжета, сущностей и базы знаний.",
-              "No prompt yet. Claude will build it from the story fragment, entities and knowledge base.",
+              `Промпта для ${family === "kling" ? "Kling" : "Seedance"} ещё нет. Claude соберёт его по шаблону этого трека из фрагмента сюжета, сущностей и базы знаний.`,
+              `No ${family === "kling" ? "Kling" : "Seedance"} prompt yet. Claude will build it from this track's template, the story fragment, entities and knowledge base.`,
             )}
           </div>
           <div className="flex w-full flex-col gap-2">
             <label className="flex items-center gap-2">
-              <span className="w-24 shrink-0 text-[10px] text-t400">{t("Видеомодель:", "Video model:")}</span>
+              <span className="w-24 shrink-0 text-[10px] text-t400">{t("Создать для:", "Create for:")}</span>
               <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none"
+                value={createChoice}
+                onChange={(e) => setCreateChoice(e.target.value as PromptFamily | "both")}
+                disabled={generating}
+                className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none disabled:opacity-60"
               >
-                {targetModels.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
+                <option value="seedance">Seedance</option>
+                <option value="kling">Kling</option>
+                <option value="both">Seedance & Kling ({t("2 промпта", "2 prompts")})</option>
               </select>
             </label>
             <label className="flex items-center gap-2">
@@ -334,7 +387,7 @@ export default function PromptBlock({
 
       <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title={t("История версий", "Version history")}>
         <div className="flex flex-col gap-2.5 pb-2">
-          {versions.map((v) => (
+          {trackVersions.map((v) => (
             <button
               key={v.id}
               onClick={() => router.push(`/episodes/${episodeId}/shots/${shotId}/editor?v=${v.id}`)}

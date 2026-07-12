@@ -62,6 +62,27 @@ export const SIMPLE_LLM_MODELS: Array<{
   },
 ];
 
+/**
+ * Семейства видеомоделей для промпт-треков: у Seedance и Kling разная
+ * рекомендованная структура промпта, поэтому промпты пишутся раздельно.
+ */
+export type PromptFamily = "seedance" | "kling";
+
+export function promptFamily(targetModel: string): PromptFamily {
+  return /kling/i.test(targetModel) ? "kling" : "seedance";
+}
+
+/** Метаданные треков: подпись, иконка (public/icons), канонический target_model. */
+export const PROMPT_FAMILIES: Array<{
+  id: PromptFamily;
+  label: string;
+  icon: string;
+  targetModel: string;
+}> = [
+  { id: "seedance", label: "Seedance", icon: "/icons/seedance.png", targetModel: "seedance-2.0" },
+  { id: "kling", label: "Kling", icon: "/icons/kling.png", targetModel: "kling-3.0" },
+];
+
 /** Модель для vision-задач: выбранная «простая», если умеет видеть, иначе Haiku. */
 export function visionModelFrom(simpleModel: string): string {
   const meta = SIMPLE_LLM_MODELS.find((m) => m.id === simpleModel);

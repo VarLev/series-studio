@@ -17,6 +17,7 @@ import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
 import { getTechniquesByIds } from "@/lib/director";
 import type { GroupShot } from "@/lib/llm/contracts";
+import { promptFamily } from "@/lib/llm/models";
 import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
@@ -174,6 +175,11 @@ export default async function ShotPage(ctx: {
     createdAt: v.createdAt.toISOString(),
   }));
   const promptVersionById = new Map(versionRows.map((v) => [v.id, v.version]));
+  // промпт-треки: текущая (последняя) версия каждого семейства
+  const currentByFamily = {
+    seedance: versionRows.find((v) => promptFamily(v.targetModel) === "seedance") ?? null,
+    kling: versionRows.find((v) => promptFamily(v.targetModel) === "kling") ?? null,
+  };
 
   const genRows = await db
     .select()
@@ -225,25 +231,36 @@ export default async function ShotPage(ctx: {
     ...seriesRefRows.map((r) => r.token).filter((t): t is string => Boolean(t)),
   ];
   const current = versions[0] ?? null;
-  const currentParams = versionRows[0]
-    ? (JSON.parse(versionRows[0].paramsJson || "{}") as {
-        aspect_ratio?: string;
-        duration?: number;
-        techniques?: string[];
-      })
-    : {};
-  // режиссёрские приёмы, использованные фабрикой в текущей версии (бейджи 🎥)
-  const usedTechniques = (await getTechniquesByIds(currentParams.techniques ?? [])).map((t) => ({
-    id: t.id,
-    title: t.title,
-    category: t.category,
-    camera: t.camera,
-    lens: t.lens,
-    lighting: t.lighting,
-    tags: t.tags,
-    prompt: t.prompt,
-    negative: t.negative,
-  }));
+  // аспект из параметров последней версии — дефолт для шторки генерации
+  let promptAspect = "16:9";
+  try {
+    promptAspect =
+      (JSON.parse(versionRows[0]?.paramsJson || "{}") as { aspect_ratio?: string }).aspect_ratio ??
+      "16:9";
+  } catch {}
+  // режиссёрские приёмы 🎥 текущей версии КАЖДОГО трека (Seedance/Kling)
+  async function techniquesOf(row: (typeof versionRows)[number] | null) {
+    if (!row) return [];
+    let ids: string[] = [];
+    try {
+      ids = (JSON.parse(row.paramsJson || "{}") as { techniques?: string[] }).techniques ?? [];
+    } catch {}
+    return (await getTechniquesByIds(ids)).map((t) => ({
+      id: t.id,
+      title: t.title,
+      category: t.category,
+      camera: t.camera,
+      lens: t.lens,
+      lighting: t.lighting,
+      tags: t.tags,
+      prompt: t.prompt,
+      negative: t.negative,
+    }));
+  }
+  const usedTechniquesByFamily = {
+    seedance: await techniquesOf(currentByFamily.seedance),
+    kling: await techniquesOf(currentByFamily.kling),
+  };
 
   // start-frame кандидаты: рефы шота (start_frame первым) + референсы серии
   const startFrames = [
@@ -410,9 +427,8 @@ export default async function ShotPage(ctx: {
             episodeId={episodeId}
             versions={versions}
             tokens={tokens}
-            targetModels={catalog.map((m) => m.id)}
             llmModel={settings.llm_model}
-            usedTechniques={usedTechniques}
+            usedTechniquesByFamily={usedTechniquesByFamily}
           />
 
           <div className="flex flex-col gap-1.5">
@@ -446,19 +462,24 @@ export default async function ShotPage(ctx: {
         </div>
       </div>
 
+      {/* копипак — ручная генерация на kling.ai, поэтому берёт Kling-промпт, если он есть */}
       <ActionBar
         episodeId={episodeId}
         shotId={shotId}
-        promptText={current?.text ?? ""}
-        promptVersion={current?.version ?? 0}
-        promptId={current?.id ?? ""}
+        promptText={(currentByFamily.kling ?? currentByFamily.seedance)?.text ?? ""}
+        promptVersion={(currentByFamily.kling ?? currentByFamily.seedance)?.version ?? 0}
+        promptId={(currentByFamily.kling ?? currentByFamily.seedance)?.id ?? ""}
+        promptFamilies={{
+          seedance: Boolean(currentByFamily.seedance),
+          kling: Boolean(currentByFamily.kling),
+        }}
         copyPackRefs={copyPackRefs}
         hasPrompt={Boolean(current)}
         models={catalog}
         defaultModelIds={defaultModelIds}
         startFrames={startFrames}
         groupDurationSec={shot.durationSec}
-        aspectRatio={currentParams.aspect_ratio ?? "16:9"}
+        aspectRatio={promptAspect}
         defaultStartFrameId={defaultStartFrame?.id ?? null}
       />
     </main>

@@ -239,7 +239,8 @@ export default function PromptEditor({
         <button
           onClick={() =>
             startTransition(async () => {
-              const res = await generateShotPrompt(shotId, "kling3_0");
+              // первая версия из редактора — трек Seedance (Kling создаётся на карточке шота)
+              const res = await generateShotPrompt(shotId, "seedance-2.0");
               if (!res.ok) setError(res.error);
               else router.refresh();
             })

@@ -77,7 +77,8 @@ export class KlingMcpProvider implements GenerationProvider {
       // ВАЖНО: дефолт Omni — 4k (дорого); всегда передаём выбранное качество
       { name: "resolution", value: q === "480p" ? "720p" : q },
       { name: "imageCount", value: "1" },
-      { name: "enable_audio", value: "false" },
+      // нативный звук Omni: реплики в кавычках (липсинк), эмбиент и SFX из промпта
+      { name: "enable_audio", value: "true" },
     ];
     const inputs = urls.slice(0, 7).map((url, i) => ({
       inputType: "URL",
