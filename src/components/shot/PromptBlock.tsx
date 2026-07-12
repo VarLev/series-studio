@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
-import { generateShotPrompt } from "@/lib/actions/prompts";
+import { generateShotPrompt, latestPromptVersion } from "@/lib/actions/prompts";
 import { LLM_MODELS } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { useT } from "@/components/I18nProvider";
@@ -57,7 +57,12 @@ export default function PromptBlock({
   // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт)
   const [factoryModel, setFactoryModel] = useState(llmModel);
   const [error, setError] = useState("");
-  const [pending, startTransition] = useTransition();
+  // своя машина состояний вместо useTransition: нужен таймер и поллинг-подхват
+  // результата, если ответ долгого запроса потеряется в туннеле
+  const [generating, setGenerating] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const timers = useRef<{ tick?: ReturnType<typeof setInterval>; poll?: ReturnType<typeof setInterval> }>({});
+  const doneRef = useRef(false);
   const [copied, setCopied] = useState(false);
   const [technique, setTechnique] = useState<UsedTechnique | null>(null);
   const current = versions[0] ?? null;
@@ -68,12 +73,73 @@ export default function PromptBlock({
     router.push(`/episodes/${episodeId}/shots/${shotId}/editor`);
   }
 
+  function cleanupTimers() {
+    if (timers.current.tick) clearInterval(timers.current.tick);
+    if (timers.current.poll) clearInterval(timers.current.poll);
+    timers.current = {};
+  }
+  // на размонтирование — гасим таймеры
+  useEffect(() => cleanupTimers, []);
+
+  function finishOk() {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    cleanupTimers();
+    setGenerating(false);
+    router.refresh(); // подтягиваем сохранённую версию промпта в дерево
+  }
+  function finishErr(msg: string) {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    cleanupTimers();
+    setGenerating(false);
+    setError(msg);
+  }
+
   function onGenerate() {
     setError("");
-    startTransition(async () => {
-      const res = await generateShotPrompt(shotId, model, factoryModel);
-      if (!res.ok) setError(res.error);
-    });
+    setElapsed(0);
+    setGenerating(true);
+    doneRef.current = false;
+    // версия-ориентир: успех = на сервере появилась версия больше этой
+    const baseline = current?.version ?? 0;
+    const started = Date.now();
+
+    // таймер: показываем, что фабрика жива; жёсткий потолок 240 с
+    timers.current.tick = setInterval(() => {
+      const sec = Math.floor((Date.now() - started) / 1000);
+      setElapsed(sec);
+      if (sec >= 240) {
+        finishErr(
+          t(
+            "Ответа нет дольше 4 минут. Промпт мог не создаться — попробуйте ещё раз или выберите более быструю модель (Haiku).",
+            "No response for over 4 minutes. The prompt may not have been created — try again or pick a faster model (Haiku).",
+          ),
+        );
+      }
+    }, 1000);
+
+    // самовосстановление: даже если ответ основного запроса потерялся в туннеле,
+    // поллинг увидит сохранённую на сервере версию и подхватит результат
+    timers.current.poll = setInterval(async () => {
+      try {
+        const v = await latestPromptVersion(shotId);
+        if (v > baseline) finishOk();
+      } catch {
+        // сеть моргнула — попробуем в следующий тик
+      }
+    }, 4000);
+
+    // основной запрос: ok → успех; понятная ошибка сервера → показать;
+    // обрыв соединения → не падаем, ждём, пока поллинг подхватит результат
+    generateShotPrompt(shotId, model, factoryModel)
+      .then((res) => {
+        if (res.ok) finishOk();
+        else finishErr(res.error);
+      })
+      .catch(() => {
+        /* соединение потеряно — результат подхватит поллинг */
+      });
   }
 
   async function copy() {
@@ -188,7 +254,8 @@ export default function PromptBlock({
               <select
                 value={factoryModel}
                 onChange={(e) => setFactoryModel(e.target.value)}
-                className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none"
+                disabled={generating}
+                className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none disabled:opacity-60"
               >
                 {LLM_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -200,20 +267,34 @@ export default function PromptBlock({
                 )}
               </select>
             </label>
+            <div className="text-[9.5px] leading-snug text-t400">
+              {t(
+                "Haiku — самый быстрый (~10–20 с), Opus — умнее, но думает дольше (до 1–2 мин).",
+                "Haiku is fastest (~10–20 s), Opus is smarter but slower (up to 1–2 min).",
+              )}
+            </div>
             <button
               onClick={onGenerate}
-              disabled={pending}
+              disabled={generating}
               className="min-h-11 w-full rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-60"
               style={{ boxShadow: "var(--glow-violet-sm)" }}
             >
-              {pending
-                ? t("Фабрика работает…", "Factory running…")
+              {generating
+                ? t(`Фабрика работает… ${elapsed}с`, `Factory running… ${elapsed}s`)
                 : t(
                     `Сгенерировать промпт · ~${fmtUsd(genUsd)}`,
                     `Generate prompt · ~${fmtUsd(genUsd)}`,
                   )}
             </button>
           </div>
+          {generating && (
+            <div className="text-[10px] leading-snug text-t400">
+              {t(
+                "Идёт генерация. Можно не ждать на экране — промпт сохранится даже при обрыве связи и подхватится сам.",
+                "Generating. You don't have to wait here — the prompt is saved even if the connection drops and will be picked up automatically.",
+              )}
+            </div>
+          )}
           {error && <div className="text-[11px] text-danger">{error}</div>}
         </div>
       )}

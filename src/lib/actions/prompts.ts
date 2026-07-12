@@ -57,6 +57,23 @@ async function insertVersion(
   return id;
 }
 
+/**
+ * Лёгкий опрос: номер последней версии промпта шота (0 — промпта нет). Клиент
+ * поллит его во время генерации, чтобы подхватить результат, даже если ответ
+ * долгого запроса потерялся в туннеле (самовосстановление UI). Без ревалидации.
+ */
+export async function latestPromptVersion(shotId: string): Promise<number> {
+  await requireAuth();
+  const db = await getDb();
+  const [row] = await db
+    .select({ version: prompts.version })
+    .from(prompts)
+    .where(eq(prompts.shotId, shotId))
+    .orderBy(desc(prompts.version))
+    .limit(1);
+  return row?.version ?? 0;
+}
+
 /** U2 — сгенерировать промпт шота (промпт-фабрика). llmModel — какая ИИ пишет промпт. */
 export async function generateShotPrompt(
   shotId: string,
