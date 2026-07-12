@@ -32,8 +32,20 @@ function parseSubmittedJobId(text: string): string | null {
   return all.length === 1 ? all[0] : null;
 }
 
-/** Заказчику нужны Seedance и Kling 3.0 (Omni) — сервисные модели MCP не показываем. */
-const VIDEO_WHITELIST = new Set(["seedance_2_0", "seedance_2_0_mini", "kling3_0"]);
+/**
+ * Заказчику нужны Seedance и Kling — сервисные модели MCP не показываем.
+ * kling_o3_image_reference = «Kling 3.0 Omni» из веб-UI Higgsfield (строгая
+ * идентичность по элементам): его job_set_type найден в raw payload, но
+ * generate_video через MCP его пока НЕ принимает (unknown model, 2026-07-12).
+ * Оставлен в whitelist: как только Higgsfield экспортирует его в MCP-каталог,
+ * модель появится в приложении после «обновить каталог».
+ */
+const VIDEO_WHITELIST = new Set([
+  "seedance_2_0",
+  "seedance_2_0_mini",
+  "kling3_0",
+  "kling_o3_image_reference",
+]);
 
 /**
  * Роли медиа-входов по модели (models_explore get, 2026-07-12). Seedance держит
@@ -44,6 +56,8 @@ const MEDIA_ROLES: Record<string, string[]> = {
   seedance_2_0: ["start_image", "end_image", "image_references", "video_references", "audio_references"],
   seedance_2_0_mini: ["start_image", "end_image", "image_references", "video_references", "audio_references"],
   kling3_0: ["start_image", "end_image"],
+  // роли O3 неизвестны (модели нет в MCP) — консервативно только старт-кадр
+  kling_o3_image_reference: ["start_image"],
 };
 
 /** Сколько референсов-идентичности максимум крепим к задаче (баланс качества/лимитов). */
@@ -56,8 +70,11 @@ const MAX_IDENTITY_REFS = 4;
  */
 export const MCP_CATALOG_SEED: ModelInfo[] = [
   {
+    // ВАЖНО: это НЕ «Kling 3.0 Omni» (тот = kling_o3_image_reference, в MCP пока
+    // недоступен). kling3_0 принимает элементы (сервер конвертит в
+    // kling_element_ids), но идентичность держит слабее O3-варианта.
     id: "kling3_0",
-    name: "Kling 3.0 Omni", // так модель называется в UI Higgsfield; референсы — через Elements
+    name: "Kling 3.0",
     kind: "video",
     params: {
       duration: "3-15",
