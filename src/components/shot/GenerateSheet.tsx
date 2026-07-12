@@ -240,15 +240,9 @@ export default function GenerateSheet({
         <span className="text-success">🎭</span>
         <span>
           {t(
-            "Персонажи библии прикрепляются автоматически (reference elements). Строже всех идентичность держит Seedance; Kling 3.0 — слабее. ",
-            "Bible characters are auto-attached (reference elements). Seedance locks identity best; Kling 3.0 is weaker. ",
+            "Персонажи библии прикрепляются автоматически. Идентичность держат Seedance (Higgsfield) и Kling 3.0 Omni (аккаунт Kling, до 7 референсов; цена — по тарифам Kling, оценки нет).",
+            "Bible characters are auto-attached. Identity is locked by Seedance (Higgsfield) and Kling 3.0 Omni (Kling account, up to 7 refs; billed at Kling rates, no preflight estimate).",
           )}
-          <span className="text-warning">
-            {t(
-              "«Kling 3.0 Omni» в API Higgsfield пока не отдаётся — только их веб-UI (используйте копи-пак).",
-              "“Kling 3.0 Omni” isn’t exposed via the Higgsfield API yet — web UI only (use the copy pack).",
-            )}
-          </span>
         </span>
       </div>
 

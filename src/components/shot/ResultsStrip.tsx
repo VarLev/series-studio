@@ -28,6 +28,8 @@ export interface ResultItem {
   pollError: string | null;
   /** сколько фото-образов персонажей прикреплено к задаче (image_references) */
   characterRefs: number;
+  /** провайдер задачи (higgsfield-mcp | kling-mcp | …) — для подписи на карточке */
+  provider: string;
 }
 
 function Elapsed({ since }: { since: string }) {
@@ -87,7 +89,8 @@ export default function ResultsStrip({
                 <span className="pulse-amber h-2.5 w-2.5 rounded-full bg-warning" />
                 <Elapsed since={g.createdAt} />
                 <span className="text-[9.5px] font-medium uppercase tracking-[0.12em] text-t400">
-                  Higgsfield · {g.status === "queued" ? t("в очереди", "queued") : t("в работе", "running")}
+                  {g.provider.startsWith("kling") ? "Kling" : "Higgsfield"} ·{" "}
+                  {g.status === "queued" ? t("в очереди", "queued") : t("в работе", "running")}
                 </span>
                 {/* доказательство приёма: job id, выданный Higgsfield при сабмите */}
                 {g.jobId && (

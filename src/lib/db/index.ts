@@ -140,6 +140,8 @@ ALTER TABLE generations ALTER COLUMN shot_id DROP NOT NULL;
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS timecode text NOT NULL DEFAULT '';
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS beats_json text NOT NULL DEFAULT '[]';
 ALTER TABLE generations ADD COLUMN IF NOT EXISTS winner boolean NOT NULL DEFAULT false;
+ALTER TABLE video_models ALTER COLUMN credits TYPE real;
+ALTER TABLE generations ALTER COLUMN credits_spent TYPE real;
 UPDATE generations SET winner = true WHERE id IN (SELECT winner_generation_id FROM shots WHERE winner_generation_id IS NOT NULL);
 UPDATE shots SET winner_generation_id = NULL WHERE winner_generation_id IS NOT NULL;
 `;

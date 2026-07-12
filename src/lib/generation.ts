@@ -17,9 +17,13 @@ import {
 } from "@/lib/db";
 import { stripAt } from "@/lib/entityName";
 import {
+  availableVideoProviders,
   getImageProvider,
   googleImageConfigured,
   pickVideoProvider,
+  videoProviderByName,
+  type GenerationProvider,
+  type ModelInfo,
 } from "@/lib/providers";
 import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
@@ -37,36 +41,45 @@ const VIRTUAL_MODELS: Record<string, { base: string; params: Record<string, stri
 };
 
 export async function refreshCatalog(): Promise<{ count: number; source: string }> {
-  const provider = await pickVideoProvider();
+  const providers = await availableVideoProviders();
+  const primary = providers[0];
   const imageProvider = getImageProvider();
-  const videoModelsList = (await provider.listModels()).filter((m) => m.kind === "video");
+  // видео-модели собираются со ВСЕХ подключённых провайдеров (Higgsfield + Kling MCP)
+  const videoList: Array<{ model: ModelInfo; provider: string }> = [];
+  for (const p of providers) {
+    for (const m of (await p.listModels()).filter((x) => x.kind === "video")) {
+      videoList.push({ model: m, provider: p.name });
+    }
+  }
   // виртуальные видео-строки (Seedance Fast) — из сида, если провайдер их не отдал
   for (const seed of CATALOG_SEED) {
-    if (VIRTUAL_MODELS[seed.id] && !videoModelsList.some((m) => m.id === seed.id)) {
-      videoModelsList.push({ ...seed });
+    if (VIRTUAL_MODELS[seed.id] && !videoList.some((v) => v.model.id === seed.id)) {
+      videoList.push({ model: { ...seed }, provider: primary.name });
     }
   }
   // image-модели берём у image-провайдера (Google при наличии ключа, иначе Higgsfield/мок)
   const imageModelsList =
-    imageProvider.name === provider.name
-      ? (await provider.listModels()).filter((m) => m.kind === "image")
+    imageProvider.name === primary.name
+      ? (await primary.listModels()).filter((m) => m.kind === "image")
       : (await imageProvider.listModels()).filter((m) => m.kind === "image");
-  const models = [...videoModelsList, ...imageModelsList];
-  const providerByKind = (kind: string) => (kind === "image" ? imageProvider.name : provider.name);
+  const all = [
+    ...videoList,
+    ...imageModelsList.map((m) => ({ model: m, provider: imageProvider.name })),
+  ];
 
   const db = await getDb();
   // полная пересборка: при смене провайдера (mock → MCP) старые строки каталога
   // (лишние Kling, чужие image-модели) не должны оставаться в выборе
   await db.delete(videoModels);
   let sort = 0;
-  for (const m of models) {
+  for (const { model: m, provider } of all) {
     await db
       .insert(videoModels)
       .values({
         id: m.id,
         name: m.name,
         kind: m.kind,
-        provider: providerByKind(m.kind),
+        provider,
         paramsJson: JSON.stringify(m.params ?? {}),
         credits: m.credits ?? null,
         sortIndex: sort++,
@@ -77,20 +90,24 @@ export async function refreshCatalog(): Promise<{ count: number; source: string 
         set: {
           name: m.name,
           kind: m.kind,
-          provider: providerByKind(m.kind),
+          provider,
           paramsJson: JSON.stringify(m.params ?? {}),
           credits: m.credits ?? null,
           fetchedAt: new Date(),
         },
       });
   }
-  return { count: models.length, source: `${provider.name}+${imageProvider.name}` };
+  return {
+    count: all.length,
+    source: [...new Set([...providers.map((p) => p.name), imageProvider.name])].join("+"),
+  };
 }
 
 export interface CatalogModel {
   id: string;
   name: string;
   kind: string;
+  provider: string;
   credits: number | null;
   qualities: string[];
 }
@@ -121,7 +138,10 @@ export async function getCatalog(kind?: "video" | "image"): Promise<CatalogModel
   const google = googleImageConfigured();
   const hasGoogleRows = rows.some((r) => r.id === "nano_banana_pro");
   const imageProviderChanged = google !== hasGoogleRows;
-  if (!rows.length || missingVirtual || imageProviderChanged) {
+  // подключили/отключили Kling MCP → его модели должны появиться/уйти из каталога
+  const { isConnected: klingConnected } = await import("@/lib/klingMcp");
+  const klingChanged = (await klingConnected()) !== rows.some((r) => r.provider === "kling-mcp");
+  if (!rows.length || missingVirtual || imageProviderChanged || klingChanged) {
     await refreshCatalog();
     rows = await db
       .select()
@@ -135,9 +155,20 @@ export async function getCatalog(kind?: "video" | "image"): Promise<CatalogModel
       id: r.id,
       name: r.name,
       kind: r.kind,
+      provider: r.provider,
       credits: r.credits,
       qualities: r.kind === "video" ? qualitiesFor(r.id, r.paramsJson) : [],
     }));
+}
+
+/** Провайдер для конкретной модели каталога (fallback — основной видео-провайдер). */
+async function providerForModel(modelId: string, catalog: CatalogModel[]): Promise<GenerationProvider> {
+  const row = catalog.find((m) => m.id === modelId);
+  if (row?.provider) {
+    const p = await videoProviderByName(row.provider);
+    if (p) return p;
+  }
+  return pickVideoProvider();
 }
 
 /** Доступные image-модели для пикеров (клиент-безопасные метаданные). */
@@ -188,11 +219,11 @@ interface UrlBundle {
  */
 async function mediaForReference(
   refId: string,
+  provider: GenerationProvider,
 ): Promise<{ id: string; url: string } | null> {
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
   if (!ref) return null;
-  const provider = await pickVideoProvider();
   if (!provider.uploadMedia) return null;
   const cacheKey = `hf_media2_${provider.name}_${refId}`;
   const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
@@ -211,20 +242,23 @@ async function mediaForReference(
   return media;
 }
 
-async function publicUrlForReference(refId: string): Promise<string | null> {
+async function publicUrlForReference(
+  refId: string,
+  provider?: GenerationProvider,
+): Promise<string | null> {
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
   if (!ref) return null;
-  const provider = await pickVideoProvider();
+  const p = provider ?? (await pickVideoProvider());
   // Локальный диск недоступен провайдеру извне — передаём байты через его upload API
   // (Cloud API → files/generate-upload-url; MCP → media_upload+confirm → media_id).
-  if (!process.env.SUPABASE_URL && provider.uploadMedia) {
-    return (await mediaForReference(refId))?.id ?? null;
+  if (!process.env.SUPABASE_URL && p.uploadMedia) {
+    return (await mediaForReference(refId, p))?.id ?? null;
   }
-  if (!process.env.SUPABASE_URL && provider.uploadFile) {
+  if (!process.env.SUPABASE_URL && p.uploadFile) {
     const data = await readFile(ref.storagePath);
     const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
-    return provider.uploadFile(data, contentType);
+    return p.uploadFile(data, contentType);
   }
   return getFileUrl(ref.storagePath);
 }
@@ -238,9 +272,9 @@ async function ensureEntityElement(
   entityId: string,
   name: string,
   media: { id: string; url: string },
+  provider: GenerationProvider,
 ): Promise<string | null> {
   const db = await getDb();
-  const provider = await pickVideoProvider();
   if (!provider.createElement) return null;
   const cacheKey = `hf_element_${entityId}`;
   const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
@@ -357,7 +391,8 @@ function shapeVideoParams(
     aspect_ratio: aspectRatio,
     duration: durationSec,
   };
-  if (modelId.startsWith("kling")) {
+  // kling3_0 (Higgsfield) принимает mode std/pro; kling-video-* (Kling MCP) — resolution
+  if (modelId.startsWith("kling") && !modelId.startsWith("kling-video")) {
     params.mode = quality === "1080p" ? "pro" : "std";
   } else {
     params.resolution = quality;
@@ -385,8 +420,9 @@ export async function preflightJobCost(
   aspectRatio: string,
   quality: string,
 ): Promise<number | null> {
-  const provider = await pickVideoProvider();
-  if (!provider.preflightCost) return null;
+  const catalog = await getCatalog("video");
+  const provider = await providerForModel(modelId, catalog);
+  if (!provider.preflightCost) return null; // у Kling MCP get_cost нет
   const virtual = VIRTUAL_MODELS[modelId];
   const params = {
     ...shapeVideoParams(modelId, durationSec, aspectRatio, quality),
@@ -395,58 +431,99 @@ export async function preflightJobCost(
   return provider.preflightCost({ model: virtual?.base ?? modelId, prompt: "cost preflight", ...params });
 }
 
+/** Резолв референсов персонажей и start-frame под КОНКРЕТНОГО провайдера. */
+interface ProviderCtx {
+  startImageUrl?: string;
+  resolved: Array<{
+    elementName: string;
+    name: string;
+    media: { id: string; url: string };
+    elementId: string | null;
+  }>;
+}
+
 export async function submitJobs(
   input: SubmitInput,
 ): Promise<{ submitted: number; jobs: Array<{ model: string; jobId: string }> }> {
   const db = await getDb();
-  const provider = await pickVideoProvider();
   const [prompt] = await db.select().from(prompts).where(eq(prompts.id, input.promptId));
   if (!prompt) throw new Error("Промпт не найден");
   const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
   if (!shot) throw new Error("Шот не найден");
   const catalog = await getCatalog("video");
 
-  const startImageUrl = input.startFrameRefId
-    ? ((await publicUrlForReference(input.startFrameRefId)) ?? undefined)
-    : undefined;
-
-  // Персонажи библии → reference elements Higgsfield (именованные, многоразовые,
-  // работают и с Seedance, и с Kling 3.0 Omni). Фолбэк при сбое создания
-  // элемента — image_references+@imageN (только Seedance).
   const promptParams = JSON.parse(prompt.paramsJson || "{}") as { reference_element_names?: string[] };
   const refsRaw = await identityRefs(input.shotId, promptParams.reference_element_names ?? []);
-  const resolved: Array<{
-    elementName: string;
-    name: string;
-    media: { id: string; url: string };
-    elementId: string | null;
-  }> = [];
-  for (const r of refsRaw) {
-    const media = await mediaForReference(r.refId).catch(() => null);
-    if (!media) continue;
-    const elementId = await ensureEntityElement(r.entityId, stripAt(r.elementName) || r.name, media);
-    resolved.push({ elementName: r.elementName, name: r.name, media, elementId });
+
+  // медиа/элементы загружаются в хранилище КАЖДОГО задействованного провайдера
+  // (Higgsfield и Kling — разные аккаунты); результат кэшируется по провайдеру
+  const ctxCache = new Map<string, ProviderCtx>();
+  async function ctxFor(provider: GenerationProvider): Promise<ProviderCtx> {
+    const cached = ctxCache.get(provider.name);
+    if (cached) return cached;
+    const startImageUrl = input.startFrameRefId
+      ? ((await publicUrlForReference(input.startFrameRefId, provider)) ?? undefined)
+      : undefined;
+    const resolved: ProviderCtx["resolved"] = [];
+    for (const r of refsRaw) {
+      const media = await mediaForReference(r.refId, provider).catch(() => null);
+      if (!media) continue;
+      // именованные элементы есть только у Higgsfield; у Kling — image_1..7
+      const elementId = await ensureEntityElement(
+        r.entityId,
+        stripAt(r.elementName) || r.name,
+        media,
+        provider,
+      );
+      resolved.push({ elementName: r.elementName, name: r.name, media, elementId });
+    }
+    const ctx = { startImageUrl, resolved };
+    ctxCache.set(provider.name, ctx);
+    return ctx;
   }
 
-  /** Промпт и фолбэк-медиа для конкретной модели. */
-  function promptForModel(supportsImageRefs: boolean): { text: string; extraMedias: string[] } {
+  /**
+   * Промпт + медиа-привязки под модель/провайдера:
+   *  - kling-mcp: токены 图片N (официальный синтаксис Kling Omni), все референсы
+   *    уходят как image_1..image_7 (start-frame занимает 图片1);
+   *  - higgsfield: элементы <<<element_id>>>, фолбэк image_references+@imageN
+   *    (только Seedance; kling3_0 без элементов референсы не принимает).
+   */
+  function promptForModel(
+    provider: GenerationProvider,
+    ctx: ProviderCtx,
+    modelId: string,
+  ): { text: string; refMedias: string[] } {
     const mapping: Array<{ elementName: string; name: string; token: string }> = [];
-    const extraMedias: string[] = [];
-    let ordinal = startImageUrl ? 2 : 1; // start-frame занимает @image1
-    for (const r of resolved) {
+    const refMedias: string[] = [];
+    if (provider.name === "kling-mcp") {
+      let slot = ctx.startImageUrl ? 2 : 1; // start-frame = 图片1
+      for (const r of ctx.resolved) {
+        mapping.push({ elementName: r.elementName, name: r.name, token: `图片${slot++}` });
+        refMedias.push(r.media.url);
+      }
+      let text = replaceMentions(prompt.text, mapping, false);
+      if (ctx.startImageUrl) text = text.replace(/@start(?![\w-])/gi, "图片1");
+      return { text, refMedias };
+    }
+    const supportsImageRefs = !modelId.startsWith("kling");
+    let ordinal = ctx.startImageUrl ? 2 : 1; // start-frame занимает @image1
+    for (const r of ctx.resolved) {
       if (r.elementId) {
         mapping.push({ elementName: r.elementName, name: r.name, token: `<<<${r.elementId}>>>` });
       } else if (supportsImageRefs) {
         mapping.push({ elementName: r.elementName, name: r.name, token: `@image${ordinal++}` });
-        extraMedias.push(r.media.id);
+        refMedias.push(r.media.id);
       }
     }
-    return { text: replaceMentions(prompt.text, mapping, Boolean(startImageUrl)), extraMedias };
+    return { text: replaceMentions(prompt.text, mapping, Boolean(ctx.startImageUrl)), refMedias };
   }
 
   const jobs: Array<{ model: string; jobId: string }> = [];
   for (const modelId of input.modelIds) {
     const model = catalog.find((m) => m.id === modelId);
+    const provider = await providerForModel(modelId, catalog);
+    const ctx = await ctxFor(provider);
     const quality = effectiveQuality(modelId, input.quality, model?.qualities ?? []);
     const virtual = VIRTUAL_MODELS[modelId];
     const params = {
@@ -454,27 +531,28 @@ export async function submitJobs(
       ...(virtual?.params ?? {}),
     };
     // точная стоимость ДО запуска (get_cost) — в очередь и в учёт затрат идёт она,
-    // формула — только фолбэк при сетевом сбое
+    // формула — только фолбэк (у Kling preflight нет вовсе)
     const exactCost = provider.preflightCost
       ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: prompt.text, ...params }).catch(() => null)
       : null;
-    // image_references (фолбэк без элемента) принимает только Seedance
-    const supportsImageRefs = !modelId.startsWith("kling");
-    const { text: modelPrompt, extraMedias } = promptForModel(supportsImageRefs);
+    const { text: modelPrompt, refMedias } = promptForModel(provider, ctx, modelId);
     const sub = await provider.submit({
       model: virtual?.base ?? modelId,
       prompt: modelPrompt,
       negativePrompt: prompt.negativePrompt ?? undefined,
       params,
-      startImageUrl,
-      characterRefUrls: extraMedias,
+      startImageUrl: ctx.startImageUrl,
+      characterRefUrls: refMedias,
     });
     const paramsJson: UrlBundle = {
       ...params,
       quality,
       start_frame_ref: input.startFrameRefId ?? null,
-      // сколько образов персонажей привязано к задаче (элементы + фолбэк-медиа)
-      character_refs: resolved.filter((r) => r.elementId).length + extraMedias.length,
+      // сколько образов персонажей привязано к задаче (элементы + медиа)
+      character_refs:
+        provider.name === "kling-mcp"
+          ? refMedias.length
+          : ctx.resolved.filter((r) => r.elementId).length + refMedias.length,
       estimate: exactCost ?? estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
       estimate_exact: exactCost != null,
       _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
@@ -699,8 +777,12 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
 
   let updated = 0;
   for (const gen of rows) {
-    // image-задачи опрашивает image-провайдер (Google/Higgsfield), видео — видео-провайдер
-    const provider = gen.kind === "reference" ? imageProvider : videoProvider;
+    // image-задачи опрашивает image-провайдер; видео — провайдер задачи
+    // (маршрутизация по generations.provider: higgsfield-mcp / kling-mcp / …)
+    const provider =
+      gen.kind === "reference"
+        ? imageProvider
+        : ((await videoProviderByName(gen.provider)) ?? videoProvider);
     if (!gen.providerJobId || gen.provider !== provider.name) continue;
     const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
     try {

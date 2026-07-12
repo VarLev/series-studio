@@ -1,6 +1,7 @@
 import type { GenerationProvider } from "./types";
 import { HiggsfieldProvider } from "./higgsfield";
 import { HiggsfieldMcpProvider } from "./higgsfieldMcp";
+import { KlingMcpProvider } from "./klingMcp";
 import { MockProvider } from "./mock";
 import { GoogleImageProvider } from "./google";
 
@@ -22,6 +23,24 @@ export async function pickVideoProvider(): Promise<GenerationProvider> {
   const { isConnected } = await import("@/lib/higgsfieldMcp");
   if (await isConnected()) return new HiggsfieldMcpProvider();
   return getProvider();
+}
+
+/**
+ * ВСЕ доступные видео-провайдеры (моделей теперь несколько источников:
+ * Higgsfield MCP + Kling MCP). Каталог собирается со всех, задача при
+ * запуске/поллинге маршрутизируется по generations.provider / video_models.provider.
+ */
+export async function availableVideoProviders(): Promise<GenerationProvider[]> {
+  const out: GenerationProvider[] = [await pickVideoProvider()];
+  const { isConnected: klingConnected } = await import("@/lib/klingMcp");
+  if (await klingConnected()) out.push(new KlingMcpProvider());
+  return out;
+}
+
+/** Провайдер по имени (строка из БД); null — неизвестный/отключённый. */
+export async function videoProviderByName(name: string): Promise<GenerationProvider | null> {
+  const providers = await availableVideoProviders();
+  return providers.find((p) => p.name === name) ?? null;
 }
 
 /** Google для Nano Banana дешевле и бережёт кредиты Higgsfield под видео.

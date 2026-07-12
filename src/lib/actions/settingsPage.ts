@@ -120,6 +120,31 @@ export async function klingWhoAmI(): Promise<
   }
 }
 
+/** Баланс кредитов подписки Kling (query_membership_and_credits). */
+export async function klingBalance(): Promise<
+  { ok: true; credits: number | null; plan: string } | { ok: false; error: string }
+> {
+  await requireAuth();
+  try {
+    const { isConnected, callKlingTool } = await import("@/lib/klingMcp");
+    if (!(await isConnected())) return { ok: false, error: "not_connected" };
+    const res = await callKlingTool("query_membership_and_credits", {}, { retry: true });
+    const parsed = (res.structured ??
+      JSON.parse(res.text || "{}")) as {
+      availableRemainCredits?: number;
+      membershipTypeDescription?: string;
+      membershipType?: string;
+    };
+    return {
+      ok: true,
+      credits: parsed.availableRemainCredits ?? null,
+      plan: parsed.membershipTypeDescription ?? parsed.membershipType ?? "",
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
+
 /** Текущий баланс кредитов подписки Higgsfield (MCP balance). */
 export async function hfBalance(): Promise<
   { ok: true; credits: number | null; plan: string; usd: number | null } | { ok: false; error: string }

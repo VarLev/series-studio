@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   integer,
+  real,
   boolean,
   timestamp,
   primaryKey,
@@ -103,7 +104,8 @@ export const generations = pgTable("generations", {
   winner: boolean("winner").notNull().default(false),
   providerJobId: text("provider_job_id"),
   resultStoragePath: text("result_storage_path"),
-  creditsSpent: integer("credits_spent"),
+  // кредиты бывают дробными (Seedance 22.5) — real, не integer
+  creditsSpent: real("credits_spent"),
   error: text("error"),
   source: text("source").notNull().default("api"), // api | kling-web | manual
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -128,7 +130,7 @@ export const videoModels = pgTable("video_models", {
   kind: text("kind").notNull().default("video"), // video | image
   provider: text("provider").notNull().default("higgsfield"),
   paramsJson: text("params_json").notNull().default("{}"), // allowed params/enums
-  credits: integer("credits"), // estimate per job, if known
+  credits: real("credits"), // база оценки за задачу (бывает дробной: Seedance 22.5)
   active: boolean("active").notNull().default(true),
   sortIndex: integer("sort_index").notNull().default(0),
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),

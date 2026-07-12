@@ -203,6 +203,7 @@ export default async function ShotPage(ctx: {
         jobId: g.providerJobId,
         pollError,
         characterRefs,
+        provider: g.provider,
       };
     }),
   );
