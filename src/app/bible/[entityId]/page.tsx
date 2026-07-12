@@ -32,6 +32,7 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
         url: await getFileUrl(r.storagePath),
         caption: r.caption,
         source: r.source,
+        faceOnly: r.role === "face",
       })),
   );
 
@@ -71,9 +72,11 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
             name: entity.name,
             elementName: entity.elementName,
             description: entity.description,
+            wardrobe: entity.wardrobe,
             soulId: entity.soulId ?? "",
             archived: entity.archived,
           }}
+          mainRefId={galleryRefs[0]?.id ?? null}
         />
 
         <div className="flex flex-col gap-2">

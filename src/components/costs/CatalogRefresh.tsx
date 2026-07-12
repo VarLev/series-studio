@@ -1,12 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { refreshModelCatalog } from "@/lib/actions/generate";
 import { useT } from "@/components/I18nProvider";
 
 export default function CatalogRefresh() {
-  const router = useRouter();
   const t = useT();
   const [message, setMessage] = useState("");
   const [pending, startTransition] = useTransition();
@@ -18,7 +16,6 @@ export default function CatalogRefresh() {
           startTransition(async () => {
             const res = await refreshModelCatalog();
             setMessage(res.message);
-            router.refresh();
           })
         }
         disabled={pending}

@@ -107,7 +107,14 @@ export async function deleteEntity(id: string): Promise<void> {
 
 export async function updateEntity(
   id: string,
-  patch: { name?: string; elementName?: string; description?: string; type?: EntityType; soulId?: string },
+  patch: {
+    name?: string;
+    elementName?: string;
+    description?: string;
+    wardrobe?: string;
+    type?: EntityType;
+    soulId?: string;
+  },
 ): Promise<void> {
   await requireAuth();
   const db = await getDb();
@@ -132,6 +139,63 @@ export async function updateReferenceCaption(id: string, caption: string): Promi
   await requireAuth();
   const db = await getDb();
   await db.update(references).set({ caption }).where(eq(references.id, id));
+}
+
+/** Пометка «только лицо»: одежду с этого референса не якорить (роль face). */
+export async function setReferenceFace(id: string, face: boolean): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [ref] = await db.select().from(references).where(eq(references.id, id));
+  if (!ref) return;
+  // роль переключаем только между face и null — start_frame и др. не трогаем
+  if (!face && ref.role !== "face") return;
+  await db.update(references).set({ role: face ? "face" : null }).where(eq(references.id, id));
+  if (ref.entityId) revalidatePath(`/bible/${ref.entityId}`);
+}
+
+/**
+ * Кнопка «Анализ» (библия): vision-модель заполняет описание, гардероб и
+ * пометку «только лицо» по референсу. Возвращает результат — форма обновляет
+ * поля без перезагрузки.
+ */
+export async function analyzeEntityReference(
+  refId: string,
+): Promise<
+  | { ok: true; description: string; wardrobe: string; faceOnly: boolean; caption: string }
+  | { ok: false; error: string }
+> {
+  await requireAuth();
+  try {
+    const db = await getDb();
+    const [ref] = await db.select().from(references).where(eq(references.id, refId));
+    if (!ref?.entityId) return { ok: false, error: "Референс не привязан к сущности" };
+    const { llmAnalyzeCharacterRef } = await import("@/lib/llm/factory");
+    const res = await llmAnalyzeCharacterRef(refId);
+
+    const patch: Record<string, string> = {};
+    if (res.description.trim()) patch.description = res.description.trim();
+    if (res.wardrobe.trim()) patch.wardrobe = res.wardrobe.trim();
+    if (Object.keys(patch).length) {
+      await db.update(entities).set(patch).where(eq(entities.id, ref.entityId));
+    }
+    const refPatch: Record<string, string | null> = {};
+    if (res.caption.trim() && !ref.caption) refPatch.caption = res.caption.trim();
+    if (res.face_only && ref.role !== "start_frame") refPatch.role = "face";
+    if (Object.keys(refPatch).length) {
+      await db.update(references).set(refPatch).where(eq(references.id, refId));
+    }
+    revalidatePath(`/bible/${ref.entityId}`);
+    revalidatePath("/bible");
+    return {
+      ok: true,
+      description: res.description.trim(),
+      wardrobe: res.wardrobe.trim(),
+      faceOnly: res.face_only,
+      caption: res.caption.trim(),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Не удалось проанализировать" };
+  }
 }
 
 export async function deleteReference(id: string): Promise<void> {

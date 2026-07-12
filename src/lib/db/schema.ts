@@ -14,6 +14,8 @@ export const entities = pgTable("entities", {
   name: text("name").notNull(),
   elementName: text("element_name").notNull(),
   description: text("description").notNull().default(""),
+  // базовый гардероб персонажа (EN, для промптов) — наследуется группами шотов
+  wardrobe: text("wardrobe").notNull().default(""),
   soulId: text("soul_id"),
   archived: boolean("archived").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -72,6 +74,8 @@ export const shotEntities = pgTable(
     shotId: text("shot_id").notNull(),
     entityId: text("entity_id").notNull(),
     auto: boolean("auto").notNull().default(false), // determined by Claude vs added manually
+    // якорь одежды: наряд персонажа в ЭТОЙ группе (EN); пусто → entities.wardrobe
+    outfit: text("outfit").notNull().default(""),
   },
   (t) => [primaryKey({ columns: [t.shotId, t.entityId] })],
 );

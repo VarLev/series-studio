@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
-import { updateReferenceCaption, deleteReference } from "@/lib/actions/entities";
+import { updateReferenceCaption, deleteReference, setReferenceFace } from "@/lib/actions/entities";
 import { useT } from "@/components/I18nProvider";
 
 interface GalleryRef {
@@ -10,12 +10,15 @@ interface GalleryRef {
   url: string;
   caption: string;
   source: string;
+  /** «только лицо»: одежду с этого референса не якорить */
+  faceOnly?: boolean;
 }
 
 export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
   const t = useT();
   const [selected, setSelected] = useState<GalleryRef | null>(null);
   const [caption, setCaption] = useState("");
+  const [faceOnly, setFaceOnly] = useState(false);
   const [, startTransition] = useTransition();
 
   if (!refs.length) {
@@ -39,11 +42,17 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
             onClick={() => {
               setSelected(r);
               setCaption(r.caption);
+              setFaceOnly(Boolean(r.faceOnly));
             }}
-            className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
+            className="relative overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={r.url} alt={r.caption} className="aspect-[9/16] w-full object-cover" />
+            <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
+            {r.faceOnly && (
+              <span className="absolute right-1 top-1 rounded bg-[rgba(6,5,9,.8)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.08em] text-warning">
+                {t("лицо", "face")}
+              </span>
+            )}
             {r.caption && (
               <div className="truncate px-1.5 py-1 text-[9px] text-t300">{r.caption}</div>
             )}
@@ -78,6 +87,22 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
                 {t("Сохранить", "Save")}
               </button>
             </div>
+            {/* «только лицо»: с этого референса нельзя зафиксировать одежду —
+                промпт-фабрика добавит "face/identity only" для персонажа */}
+            <label className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-[var(--border-subtle)] px-3">
+              <input
+                type="checkbox"
+                checked={faceOnly}
+                onChange={(e) => {
+                  setFaceOnly(e.target.checked);
+                  startTransition(() => setReferenceFace(selected.id, e.target.checked));
+                }}
+                className="h-4 w-4 accent-[var(--violet-400)]"
+              />
+              <span className="text-[12px] text-t200">
+                {t("Только лицо (одежду не якорить)", "Face only (don't anchor clothing)")}
+              </span>
+            </label>
             <button
               onClick={() => {
                 startTransition(() => deleteReference(selected.id));

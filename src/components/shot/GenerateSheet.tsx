@@ -6,7 +6,6 @@
  * Стоимость — ТОЧНАЯ от Higgsfield (get_cost, debounce), формула — фолбэк «≈».
  */
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { preflightVideoCredits, startGeneration } from "@/lib/actions/generate";
@@ -64,7 +63,6 @@ export default function GenerateSheet({
   aspectRatio: string;
   defaultStartFrameId: string | null;
 }) {
-  const router = useRouter();
   const t = useT();
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(defaultModelIds.filter((id) => models.some((m) => m.id === id))),
@@ -175,7 +173,6 @@ export default function GenerateSheet({
         setConfirmInfo(null);
         setConfirmStep(0);
         onClose();
-        router.refresh();
       } else if ("needsConfirm" in res && res.needsConfirm) {
         setConfirmInfo({ estimate: res.estimate, limit: res.limit });
         setConfirmStep(1);
@@ -321,6 +318,8 @@ export default function GenerateSheet({
           <img
             src={chosenFrame.url}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="aspect-[9/16] w-9 rounded-md border border-[var(--border-subtle)] object-cover"
           />
           <span className="min-w-0 flex-1">
@@ -369,7 +368,7 @@ export default function GenerateSheet({
                 }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.url} alt="" className="h-full w-full object-cover" />
+                <img src={f.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
               </span>
               <span className="mt-0.5 block truncate text-center font-mono text-[8px] text-t400">
                 {f.label}

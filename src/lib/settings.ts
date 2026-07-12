@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { eq } from "drizzle-orm";
 import { getDb, settings } from "./db";
 import {
@@ -8,6 +9,8 @@ import {
 
 export const DEFAULT_SETTINGS = {
   llm_model: "claude-sonnet-4-6",
+  // модель для простых запросов: правка групп, подбор приёмов, анализ референсов
+  llm_simple_model: "claude-haiku-4-5",
   series_title: "The Edge of Stigma",
   series_rules:
     "Жанр: тёмная романтика / психологический триллер (Boys Love). " +
@@ -37,7 +40,8 @@ export async function getSetting(key: SettingKey): Promise<string> {
   return rows[0]?.value ?? DEFAULT_SETTINGS[key];
 }
 
-export async function getAllSettings(): Promise<Record<SettingKey, string>> {
+// cache(): layout и страница читают настройки в одном запросе — БД дёргается один раз
+export const getAllSettings = cache(async (): Promise<Record<SettingKey, string>> => {
   const db = await getDb();
   const rows = await db.select().from(settings);
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
@@ -46,7 +50,7 @@ export async function getAllSettings(): Promise<Record<SettingKey, string>> {
     if (map[key] !== undefined) result[key] = map[key];
   }
   return result;
-}
+});
 
 export async function setSetting(key: string, value: string): Promise<void> {
   const db = await getDb();

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
@@ -25,7 +24,6 @@ export default function ConfirmButton({
   className?: string;
   armedClassName?: string;
 }) {
-  const router = useRouter();
   const t = useT();
   const confirmText = confirmLabel ?? t("Точно удалить?", "Really delete?");
   const [armed, setArmed] = useState(false);
@@ -47,10 +45,11 @@ export default function ConfirmButton({
     }
     if (timer.current) clearTimeout(timer.current);
     setArmed(false);
+    // action обязан сам ревалидировать текущую страницу (revalidatePath) —
+    // обновлённый экран приезжает в том же ответе, без второго круга по сети
     startTransition(async () => {
       await action();
       if (doneToast) toast(doneToast);
-      router.refresh();
     });
   }
 

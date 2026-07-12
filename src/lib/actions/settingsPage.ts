@@ -69,6 +69,13 @@ export async function saveUiPref(key: "ui_lang" | "ui_theme", value: string): Pr
   revalidatePath("/", "layout");
 }
 
+/** Модель для простых запросов: правка групп, подбор приёмов, анализ референсов. */
+export async function saveSimpleModel(value: string): Promise<void> {
+  await requireAuth();
+  await setSetting("llm_simple_model", value);
+  revalidatePath("/settings");
+}
+
 // ---------- Higgsfield MCP (видео на кредитах подписки) ----------
 
 export async function hfMcpDisconnect(): Promise<void> {

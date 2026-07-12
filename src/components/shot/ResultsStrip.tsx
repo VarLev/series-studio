@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
 import { cancelGeneration, probeGeneration, retryGeneration } from "@/lib/actions/generate";
 import { toggleWinner } from "@/lib/actions/generations";
 import { deleteGeneration } from "@/lib/actions/deletes";
@@ -57,13 +56,17 @@ export default function ResultsStrip({
   shotId: string;
   results: ResultItem[];
 }) {
-  const router = useRouter();
   const t = useT();
   const [pending, startTransition] = useTransition();
+  // звезда «победителя» переключается мгновенно, сервер догоняет в фоне
+  const [optimisticWinners, flipWinner] = useOptimistic(
+    results,
+    (state, id: string) => state.map((r) => (r.id === id ? { ...r, isWinner: !r.isWinner } : r)),
+  );
 
   return (
     <div className="flex snap-x gap-2.5 overflow-x-auto pb-2">
-      {results.map((g) => {
+      {optimisticWinners.map((g) => {
         const active = g.status === "queued" || g.status === "running";
         const failed = g.status === "failed" || g.status === "nsfw";
         return (
@@ -124,7 +127,7 @@ export default function ResultsStrip({
                   <video src={g.url} preload="metadata" muted className="h-full w-full object-cover" />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={g.url} alt="" className="h-full w-full object-cover" />
+                  <img src={g.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                 )}
                 <span
                   className="absolute left-1/2 top-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-[rgba(212,198,232,.5)]"
@@ -181,7 +184,6 @@ export default function ResultsStrip({
                                 )
                               : t(`Higgsfield: ${res.status}`, `Higgsfield: ${res.status}`),
                           );
-                          router.refresh();
                         })
                       }
                       className="rounded-md px-1.5 py-1 text-[11px] text-t400 hover:bg-ink-500 hover:text-violet-200 disabled:opacity-50"
@@ -193,7 +195,6 @@ export default function ResultsStrip({
                       onClick={() =>
                         startTransition(async () => {
                           await cancelGeneration(g.id);
-                          router.refresh();
                         })
                       }
                       className="rounded-md px-2 py-1 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
@@ -207,12 +208,11 @@ export default function ResultsStrip({
                       <>
                         {/* тумблер победителя: их может быть несколько, все идут в галерею */}
                         <button
-                          disabled={pending}
                           title={g.isWinner ? t("Снять победителя", "Unmark winner") : t("Пометить победителем", "Mark as winner")}
                           onClick={() =>
                             startTransition(async () => {
+                              flipWinner(g.id);
                               await toggleWinner(g.id);
-                              router.refresh();
                             })
                           }
                           className="rounded px-1 text-[13px] disabled:opacity-50"
@@ -255,7 +255,6 @@ export default function ResultsStrip({
                   onClick={() =>
                     startTransition(async () => {
                       await retryGeneration(g.id);
-                      router.refresh();
                     })
                   }
                   className="rounded-md px-2.5 py-2 text-[10px] font-semibold text-t300 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"

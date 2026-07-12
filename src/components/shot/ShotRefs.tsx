@@ -76,7 +76,7 @@ export default function ShotRefs({
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.url} alt={r.caption} className="h-full w-full object-cover" />
+              <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="h-full w-full object-cover" />
               <button
                 onClick={() => setRoleFor(r)}
                 className="absolute left-0.5 top-0.5 rounded-[3px] border px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em]"
@@ -183,7 +183,7 @@ export default function ShotRefs({
                   className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.url} alt="" className="aspect-[9/16] w-full object-cover" />
+                  <img src={r.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
                   <div className="truncate px-1.5 py-1 font-mono text-[9px] text-violet-200">
                     {r.label}
                   </div>
@@ -203,7 +203,7 @@ export default function ShotRefs({
                   className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.url} alt="" className="aspect-[9/16] w-full object-cover" />
+                  <img src={r.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
                   <div className="truncate px-1.5 py-1 text-[9px] text-t300">{r.label}</div>
                 </button>
               ))}

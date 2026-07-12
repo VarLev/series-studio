@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireAuth } from "@/lib/auth";
-import { listEpisodes, createEpisode } from "@/lib/actions/episodes";
+import { listEpisodes } from "@/lib/actions/episodes";
 import { deleteEpisode, deleteAllEpisodes } from "@/lib/actions/deletes";
 import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
@@ -103,14 +103,13 @@ export default async function EpisodesPage() {
           </div>
         )}
 
-        <form action={createEpisode}>
-          <button
-            type="submit"
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border-[1.5px] border-dashed border-[var(--border-default)] px-4 py-4 text-[12px] font-medium text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
-          >
-            {t("+ Новая серия — начните с сюжета", "+ New episode — start with the story")}
-          </button>
-        </form>
+        {/* серия НЕ создаётся по клику — только когда в черновике появится текст */}
+        <Link
+          href="/episodes/new"
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border-[1.5px] border-dashed border-[var(--border-default)] px-4 py-4 text-[12px] font-medium text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
+        >
+          {t("+ Новая серия — начните с сюжета", "+ New episode — start with the story")}
+        </Link>
 
         {episodes.length > 1 && (
           <ConfirmButton

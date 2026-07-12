@@ -21,6 +21,8 @@ export function EntityAvatar({
         alt=""
         width={size}
         height={size}
+        loading="lazy"
+        decoding="async"
         className="shrink-0 rounded-full border border-[var(--border-default)] object-cover"
         style={{ width: size, height: size }}
       />

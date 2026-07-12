@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   updateEpisode,
   breakdownEpisode,
@@ -69,7 +68,6 @@ export default function SynopsisEditor({
   breakdownModel: string;
   onBreakdownModelChange: (m: string) => void;
 }) {
-  const router = useRouter();
   const t = useT();
   const draftKey = `ss-draft:${episodeId}`;
   // раскадровка стоит реальных денег — предпросмотр переживает переключение
@@ -199,7 +197,6 @@ export default function SynopsisEditor({
   async function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace") {
     await saveBreakdown(episodeId, confirmed, mode);
     stashPreview(null);
-    router.refresh();
   }
 
   const saveLabel =

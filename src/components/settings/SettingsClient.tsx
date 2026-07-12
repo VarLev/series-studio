@@ -16,12 +16,15 @@ import {
   deleteTechnique,
   deleteAllTechniques,
   saveUiPref,
+  saveSimpleModel,
   hfMcpDisconnect,
   hfMcpListTools,
   klingMcpDisconnect,
   klingWhoAmI,
 } from "@/lib/actions/settingsPage";
 import { SectionLabel } from "@/components/ui";
+import FullscreenCard from "@/components/settings/FullscreenCard";
+import { SIMPLE_LLM_MODELS } from "@/lib/llm/models";
 import { useT } from "@/components/I18nProvider";
 
 export interface TechniqueCard {
@@ -50,7 +53,6 @@ function TemplateEditor({
   hint: string;
   initial: string;
 }) {
-  const router = useRouter();
   const t = useT();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(initial);
@@ -88,7 +90,6 @@ function TemplateEditor({
                       ? t("Шаблон сохранён", "Template saved")
                       : ("error" in res && res.error) || t("Ошибка", "Error"),
                   );
-                  router.refresh();
                 })
               }
               disabled={pending || !dirty}
@@ -118,7 +119,6 @@ function TemplateEditor({
 }
 
 function HiggsfieldConnect({ connected }: { connected: boolean }) {
-  const router = useRouter();
   const t = useT();
   const [tools, setTools] = useState<Array<{ name: string; description: string }> | null>(null);
   const [checking, setChecking] = useState(false);
@@ -165,7 +165,6 @@ function HiggsfieldConnect({ connected }: { connected: boolean }) {
             <ConfirmButton
               action={async () => {
                 await hfMcpDisconnect();
-                router.refresh();
               }}
               label={t("Отключить", "Disconnect")}
               confirmLabel={t("Отключить аккаунт?", "Disconnect account?")}
@@ -202,7 +201,6 @@ function HiggsfieldConnect({ connected }: { connected: boolean }) {
 }
 
 function KlingConnect({ connected }: { connected: boolean }) {
-  const router = useRouter();
   const t = useT();
   const [info, setInfo] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -249,7 +247,6 @@ function KlingConnect({ connected }: { connected: boolean }) {
             <ConfirmButton
               action={async () => {
                 await klingMcpDisconnect();
-                router.refresh();
               }}
               label={t("Отключить", "Disconnect")}
               confirmLabel={t("Отключить аккаунт?", "Disconnect account?")}
@@ -284,6 +281,7 @@ export default function SettingsClient({
   techniques,
   uiLang,
   uiTheme,
+  simpleModel,
   hfConnected,
   klingConnected,
 }: {
@@ -293,6 +291,7 @@ export default function SettingsClient({
   techniques: TechniqueCard[];
   uiLang: string;
   uiTheme: string;
+  simpleModel: string;
   hfConnected: boolean;
   klingConnected: boolean;
 }) {
@@ -360,7 +359,6 @@ export default function SettingsClient({
         toast(draft.id ? t("Приём обновлён", "Technique updated") : t("Приём добавлен", "Technique added"));
         setEditing(false);
         setDraft(null);
-        router.refresh();
       } else toast(("error" in res && res.error) || t("Ошибка", "Error"));
     });
   }
@@ -401,6 +399,38 @@ export default function SettingsClient({
             <option value="vault">{t("Vault — графит и янтарь", "Vault — graphite & amber")}</option>
           </select>
         </label>
+      </div>
+      <FullscreenCard />
+
+      <SectionLabel>{t("Модели", "Models")}</SectionLabel>
+      <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5">
+        <label className="flex flex-col gap-1">
+          <span className="section-label">
+            {t("Модель для простых запросов", "Model for simple tasks")}
+          </span>
+          <select
+            value={simpleModel}
+            onChange={(e) =>
+              startTransition(async () => {
+                await saveSimpleModel(e.target.value);
+                toast(t("Модель сохранена", "Model saved"));
+              })
+            }
+            className="min-h-10 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
+          >
+            {SIMPLE_LLM_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {t(m.hint, m.hintEn)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-[11px] leading-relaxed text-t400">
+          {t(
+            "Используется для корректировки шотов (переделка группы по замечанию), подбора режиссёрских приёмов и анализа референсов в библии. DeepSeek требует DEEPSEEK_API_KEY в .env.local и не видит изображения — анализ картинок в этом случае автоматически идёт через Haiku 4.5. Gemini использует GEMINI_API_KEY (бесплатный тир Google).",
+            "Used for shot group rework, director technique picking and bible reference analysis. DeepSeek needs DEEPSEEK_API_KEY in .env.local and has no vision — image analysis falls back to Haiku 4.5. Gemini uses GEMINI_API_KEY (Google free tier).",
+          )}
+        </p>
       </div>
 
       <SectionLabel>{t("Генерация видео (Higgsfield)", "Video generation (Higgsfield)")}</SectionLabel>

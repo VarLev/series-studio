@@ -47,7 +47,7 @@ export default function FilmStrip({
             >
               {s.thumbUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={s.thumbUrl} alt="" className="h-full w-full object-cover" />
+                <img src={s.thumbUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
               ) : (
                 <span className="flex h-full w-full items-center justify-center text-[9px] text-t400">
                   ✦

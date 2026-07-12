@@ -109,7 +109,7 @@ export default function CopyPackSheet({
               className="relative aspect-[9/16] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 hover:border-[var(--border-strong)]"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.url} alt={r.name} className="h-full w-full object-cover" />
+              <img src={r.url} alt={r.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
               <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(6,5,9,.9)] px-1.5 pb-1 pt-3 text-left text-[8.5px] font-semibold text-t100">
                 {r.name}
               </span>

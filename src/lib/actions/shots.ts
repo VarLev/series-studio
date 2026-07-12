@@ -6,7 +6,7 @@ import { getDb, episodes, shots, shotEntities, references } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
 import { llmReviseGroup } from "@/lib/llm/factory";
-import { CHEAPEST_LLM } from "@/lib/llm/models";
+import { getSetting } from "@/lib/settings";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
 
@@ -90,8 +90,8 @@ export async function reviseGroup(
       durationSec: shot.durationSec,
       beats: currentBeats,
       feedback,
-      // переделка по замечанию — всегда самой дешёвой моделью (замечание заказчика)
-      model: CHEAPEST_LLM,
+      // корректировка шотов — «моделью для простых запросов» из настроек
+      model: await getSetting("llm_simple_model"),
     });
     const { beats, durationSec } = normalizeBeats(patch.shots, patch.duration_sec);
     await db
@@ -110,6 +110,22 @@ export async function reviseGroup(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
   }
+}
+
+/** Якорь одежды: наряд персонажа в этой группе (EN); пусто → базовый гардероб из библии. */
+export async function setShotEntityOutfit(
+  shotId: string,
+  entityId: string,
+  outfit: string,
+): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  await db
+    .update(shotEntities)
+    .set({ outfit: outfit.trim() })
+    .where(and(eq(shotEntities.shotId, shotId), eq(shotEntities.entityId, entityId)));
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (shot) revalidatePath(shotPath(shot.episodeId, shotId));
 }
 
 export async function addShotEntity(shotId: string, entityId: string): Promise<void> {

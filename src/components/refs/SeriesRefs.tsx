@@ -106,7 +106,6 @@ export default function SeriesRefs({
       );
       if (res.ok) {
         setSelected(null);
-        router.refresh();
       }
     });
   }
@@ -129,7 +128,6 @@ export default function SeriesRefs({
         setSelected(null);
         setEditPrompt("");
         setExtraRefs([]);
-        router.refresh();
       }
     });
   }
@@ -192,7 +190,7 @@ export default function SeriesRefs({
           >
             <span className="relative block aspect-[9/16] bg-black">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.url} alt={r.token} className="h-full w-full object-cover" />
+              <img src={r.url} alt={r.token} loading="lazy" decoding="async" className="h-full w-full object-cover" />
               <span className="absolute right-1 top-1 rounded bg-[rgba(6,5,9,.75)] px-1 py-0.5 font-mono text-[8px] text-t100">
                 {aspectLabel(r.width, r.height)}
               </span>
@@ -338,7 +336,7 @@ export default function SeriesRefs({
                       style={{ borderColor: on ? "var(--violet-400)" : "var(--border-subtle)" }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r.url} alt="" className="h-full w-full object-cover" />
+                      <img src={r.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                     </span>
                     <span className="mt-0.5 block truncate text-center font-mono text-[8px] text-t400">
                       {r.token}

@@ -34,6 +34,7 @@ export default async function SettingsPage() {
       <SettingsClient
         uiLang={settings.ui_lang}
         uiTheme={settings.ui_theme}
+        simpleModel={settings.llm_simple_model}
         hfConnected={hfConnected}
         klingConnected={klingConnected}
         breakdownTemplate={settings.tpl_breakdown}

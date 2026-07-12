@@ -52,11 +52,16 @@ export async function getFileUrl(storagePath: string): Promise<string> {
   return `/api/files/${safeKey}`;
 }
 
-export async function readLocalFile(storagePath: string): Promise<Buffer> {
+/** Абсолютный путь файла в локальном хранилище (с защитой от выхода за корень). */
+export function resolveLocalPath(storagePath: string): string {
   const filePath = path.join(LOCAL_ROOT(), sanitizeKey(storagePath));
   const resolved = path.resolve(filePath);
   if (!resolved.startsWith(path.resolve(LOCAL_ROOT()))) throw new Error("Invalid path");
-  return fs.readFile(resolved);
+  return resolved;
+}
+
+export async function readLocalFile(storagePath: string): Promise<Buffer> {
+  return fs.readFile(resolveLocalPath(storagePath));
 }
 
 /** Читает байты файла из хранилища (для zip-экспорта и передачи референсов провайдеру). */

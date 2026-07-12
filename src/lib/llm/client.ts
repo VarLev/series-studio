@@ -5,6 +5,8 @@ import { getDb, llmUsage } from "@/lib/db";
 
 let client: Anthropic | null = null;
 let openaiClient: OpenAI | null = null;
+let deepseekClient: OpenAI | null = null;
+let geminiClient: OpenAI | null = null;
 
 function getClient(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -29,21 +31,71 @@ function getOpenAI(): OpenAI {
   return openaiClient;
 }
 
-/** Модели OpenAI (gpt-*, o-серия) идут через OpenAI SDK, остальные — Anthropic. */
-function isOpenAiModel(model: string): boolean {
-  return /^(gpt|o\d|chatgpt)/i.test(model);
+/** DeepSeek: OpenAI-совместимый API (api.deepseek.com), ключ DEEPSEEK_API_KEY. */
+function getDeepSeek(): OpenAI {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    throw new Error(
+      "DEEPSEEK_API_KEY не задан — для моделей DeepSeek добавьте ключ в .env.local " +
+        "(https://platform.deepseek.com) или выберите другую модель в настройках.",
+    );
+  }
+  if (!deepseekClient) {
+    deepseekClient = new OpenAI({
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseURL: "https://api.deepseek.com",
+      maxRetries: 1,
+    });
+  }
+  return deepseekClient;
+}
+
+/** Gemini-текст: OpenAI-совместимый эндпоинт Google, тот же GEMINI_API_KEY, что и Nano Banana. */
+function getGemini(): OpenAI {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error(
+      "GEMINI_API_KEY не задан — для моделей Gemini добавьте ключ Google AI Studio в .env.local " +
+        "или выберите другую модель в настройках.",
+    );
+  }
+  if (!geminiClient) {
+    geminiClient = new OpenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      maxRetries: 1,
+    });
+  }
+  return geminiClient;
+}
+
+type Provider = "anthropic" | "openai" | "deepseek" | "gemini";
+
+/** Маршрутизация по id: gpt/o-серия → OpenAI, deepseek → DeepSeek, gemini → Google, остальное — Anthropic. */
+function providerOf(model: string): Provider {
+  if (/^(gpt|o\d|chatgpt)/i.test(model)) return "openai";
+  if (/^deepseek/i.test(model)) return "deepseek";
+  if (/^gemini/i.test(model)) return "gemini";
+  return "anthropic";
+}
+
+function openAiCompatClient(provider: Provider): OpenAI {
+  if (provider === "deepseek") return getDeepSeek();
+  if (provider === "gemini") return getGemini();
+  return getOpenAI();
 }
 
 /** Жёсткий потолок ожидания ответа модели (мс). Переопределяется LLM_TIMEOUT_MS. */
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 180_000;
 
 export interface LlmCall {
-  kind: "synopsis" | "breakdown" | "prompt" | "revision";
+  kind: "synopsis" | "breakdown" | "prompt" | "revision" | "analysis";
   model: string;
   system: string;
   user: string;
   maxTokens?: number;
   episodeId?: string;
+  /** vision: изображение для анализа (base64 без префикса data:) */
+  imageBase64?: string;
+  imageMediaType?: string;
 }
 
 async function recordUsage(
@@ -66,18 +118,42 @@ async function recordUsage(
 }
 
 export async function runText(call: LlmCall): Promise<string> {
-  return isOpenAiModel(call.model) ? runOpenAiText(call) : runAnthropicText(call);
+  const provider = providerOf(call.model);
+  if (provider === "anthropic") return runAnthropicText(call);
+  if (call.imageBase64 && provider === "deepseek") {
+    throw new Error(
+      `Модель «${call.model}» не принимает изображения — выберите в настройках vision-модель (Haiku/Gemini).`,
+    );
+  }
+  return runOpenAiText(call, provider);
 }
 
 async function runAnthropicText(call: LlmCall): Promise<string> {
   const anthropic = getClient();
   try {
+    const content: Anthropic.ContentBlockParam[] = call.imageBase64
+      ? [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: (call.imageMediaType ?? "image/png") as
+                | "image/png"
+                | "image/jpeg"
+                | "image/webp"
+                | "image/gif",
+              data: call.imageBase64,
+            },
+          },
+          { type: "text", text: call.user },
+        ]
+      : [{ type: "text", text: call.user }];
     const stream = anthropic.messages.stream(
       {
         model: call.model,
         max_tokens: call.maxTokens ?? 8192,
         system: call.system,
-        messages: [{ role: "user", content: call.user }],
+        messages: [{ role: "user", content }],
       },
       // жёсткий потолок: подвисший стрим не держит кнопку «Claude пишет…» бесконечно
       { signal: AbortSignal.timeout(LLM_TIMEOUT_MS) },
@@ -98,18 +174,34 @@ async function runAnthropicText(call: LlmCall): Promise<string> {
   }
 }
 
-async function runOpenAiText(call: LlmCall): Promise<string> {
-  const openai = getOpenAI();
+async function runOpenAiText(call: LlmCall, provider: Provider): Promise<string> {
+  const openai = openAiCompatClient(provider);
   try {
-    // GPT-5.x: max_completion_tokens (max_tokens отклоняется), temperature — дефолт;
-    // system как отдельная роль, include_usage — чтобы получить токены из стрима
+    // vision через OpenAI-совместимый формат: картинка как data-URI (Gemini/GPT)
+    const userContent: OpenAI.Chat.ChatCompletionUserMessageParam["content"] = call.imageBase64
+      ? [
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${call.imageMediaType ?? "image/png"};base64,${call.imageBase64}`,
+            },
+          },
+          { type: "text", text: call.user },
+        ]
+      : call.user;
+    // GPT-5.x требует max_completion_tokens (max_tokens отклоняется);
+    // DeepSeek/Gemini принимают классический max_tokens
+    const tokenParam =
+      provider === "openai"
+        ? { max_completion_tokens: call.maxTokens ?? 8192 }
+        : { max_tokens: call.maxTokens ?? 8192 };
     const stream = await openai.chat.completions.create(
       {
         model: call.model,
-        max_completion_tokens: call.maxTokens ?? 8192,
+        ...tokenParam,
         messages: [
           { role: "system", content: call.system },
-          { role: "user", content: call.user },
+          { role: "user", content: userContent },
         ],
         stream: true,
         stream_options: { include_usage: true },
@@ -130,16 +222,18 @@ async function runOpenAiText(call: LlmCall): Promise<string> {
     if (usage) await recordUsage(call, usage);
     return text;
   } catch (e) {
+    const providerName =
+      provider === "deepseek" ? "DeepSeek" : provider === "gemini" ? "Gemini" : "GPT";
     if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
       throw new Error(
-        `GPT не ответил за ${Math.round(LLM_TIMEOUT_MS / 1000)} с — попробуйте ещё раз или выберите другую модель.`,
+        `${providerName} не ответил за ${Math.round(LLM_TIMEOUT_MS / 1000)} с — попробуйте ещё раз или выберите другую модель.`,
       );
     }
     // модель недоступна на аккаунте (напр. новейшая ещё не открыта) — понятная подсказка
     if (e instanceof OpenAI.APIError && (e.status === 404 || e.status === 400)) {
       throw new Error(
-        `Модель «${call.model}» недоступна в вашем OpenAI API (${e.status}). ` +
-          "Проверьте доступ к модели или выберите предыдущую/другую модель.",
+        `Модель «${call.model}» недоступна в API ${providerName} (${e.status}). ` +
+          "Проверьте доступ к модели или выберите другую модель в настройках.",
       );
     }
     throw e;

@@ -109,6 +109,9 @@ export default async function ShotPage(ctx: {
     avatarUrl: avatarByEntity.get(e.id) ?? null,
     linked: linkedIds.has(e.id),
     auto: links.find((l) => l.entityId === e.id)?.auto ?? false,
+    // якорь одежды: наряд в этой группе + базовый гардероб из библии (фолбэк)
+    outfit: links.find((l) => l.entityId === e.id)?.outfit ?? "",
+    wardrobe: e.wardrobe,
   }));
   const styleChips = chipData
     .filter((c) => c.type === "style")
@@ -343,7 +346,11 @@ export default async function ShotPage(ctx: {
               >
                 {t("Шоты группы", "Group shots")}
               </SectionLabel>
-              <GroupShotsEditor shotId={shotId} initialBeats={beats} />
+              <GroupShotsEditor
+                shotId={shotId}
+                initialBeats={beats}
+                simpleModel={settings.llm_simple_model}
+              />
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">

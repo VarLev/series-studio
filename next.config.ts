@@ -11,6 +11,13 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "10mb",
     },
+    // Клиентский кэш роутера: повторный переход на недавно открытый экран
+    // рисуется мгновенно из кэша (критично через туннель). Данные освежают
+    // revalidatePath в actions и GenPoller, поэтому 30 с безопасны.
+    staleTimes: {
+      dynamic: 30,
+      static: 300,
+    },
   },
 };
 

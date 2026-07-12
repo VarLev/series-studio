@@ -13,8 +13,59 @@ export const LLM_MODELS: Array<{ id: string; label: string; hint: string; hintEn
 ];
 
 /**
- * Самая дешёвая модель (по LLM_PRICES: Haiku $1/$5 за 1М — минимальный выход).
- * Используется автоматически для механических правок — переделка группы
- * по замечанию (требование заказчика: реворк всегда дешёвой моделью).
+ * Самая дешёвая модель Anthropic (Haiku $1/$5 за 1М). Фолбэк для
+ * «простых запросов» и единственная гарантированная vision-модель.
  */
 export const CHEAPEST_LLM = "claude-haiku-4-5";
+
+/**
+ * Модели на выбор для «простых запросов» (настройки → Модели): правка групп
+ * шотов по замечанию, подбор режиссёрских приёмов, анализ референсов в библии.
+ * vision=false (DeepSeek) → анализ изображений автоматически падает на CHEAPEST_LLM.
+ * Цены июль-2026: Haiku $1/$5 · Gemini 3.5 Flash бесплатный тир (1500 зап/день) ·
+ * DeepSeek V4 Flash $0.14/$0.28 · V4 Pro $0.435/$0.87 за 1М токенов.
+ */
+export const SIMPLE_LLM_MODELS: Array<{
+  id: string;
+  label: string;
+  hint: string;
+  hintEn: string;
+  vision: boolean;
+}> = [
+  {
+    id: "claude-haiku-4-5",
+    label: "Haiku 4.5",
+    hint: "Anthropic, видит картинки (по умолчанию)",
+    hintEn: "Anthropic, vision (default)",
+    vision: true,
+  },
+  {
+    id: "gemini-3.5-flash",
+    label: "Gemini 3.5 Flash",
+    hint: "Google, бесплатный тир, видит картинки",
+    hintEn: "Google, free tier, vision",
+    vision: true,
+  },
+  {
+    id: "deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    hint: "флагман DeepSeek, дёшево, БЕЗ картинок",
+    hintEn: "DeepSeek flagship, cheap, NO vision",
+    vision: false,
+  },
+  {
+    id: "deepseek-v4-flash",
+    label: "DeepSeek V4 Flash",
+    hint: "сверхдёшево, БЕЗ картинок",
+    hintEn: "ultra-cheap, NO vision",
+    vision: false,
+  },
+];
+
+/** Модель для vision-задач: выбранная «простая», если умеет видеть, иначе Haiku. */
+export function visionModelFrom(simpleModel: string): string {
+  const meta = SIMPLE_LLM_MODELS.find((m) => m.id === simpleModel);
+  if (meta) return meta.vision ? simpleModel : CHEAPEST_LLM;
+  // незнакомый id: claude/gemini умеют vision, остальные — фолбэк
+  return /^(claude|gemini)/i.test(simpleModel) ? simpleModel : CHEAPEST_LLM;
+}

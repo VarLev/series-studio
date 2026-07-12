@@ -160,6 +160,10 @@ html[data-theme="vault"] .eyebrow {
 html {
   background: var(--ink-800);
   color-scheme: dark;
+  /* мобайл: убираем задержку двойного тапа и серую вспышку WebKit —
+     отклик на касание рисуем сами через :active ниже */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -285,6 +289,50 @@ body {
   .sheet-up,
   .fade-in,
   .pulse-amber {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   Мгновенный отклик на касание: нажатый элемент видно сразу,
+   ещё до ответа сервера (критично при работе через туннель).
+   ============================================================ */
+a:active,
+button:not(:disabled):active,
+[role="button"]:active,
+label:active,
+summary:active {
+  transform: scale(0.97);
+  filter: brightness(1.35);
+  transition: transform 0.05s linear, filter 0.05s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  a:active,
+  button:not(:disabled):active,
+  [role="button"]:active,
+  label:active,
+  summary:active {
+    transform: none;
+  }
+}
+
+/* Скелетоны loading.tsx: мерцающие болванки на время серверного рендера */
+@keyframes skeleton-shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.skeleton {
+  background: var(--ink-600);
+  border-radius: 8px;
+  animation: skeleton-shimmer 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
     animation: none;
   }
 }

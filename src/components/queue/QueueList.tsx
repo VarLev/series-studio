@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { cancelGeneration } from "@/lib/actions/generate";
 import { useT } from "@/components/I18nProvider";
 
@@ -49,7 +48,6 @@ export default function QueueList({
   items: QueueItem[];
   cancellable?: boolean;
 }) {
-  const router = useRouter();
   const t = useT();
   const [pending, startTransition] = useTransition();
 
@@ -102,7 +100,6 @@ export default function QueueList({
                 onClick={() =>
                   startTransition(async () => {
                     await cancelGeneration(item.id);
-                    router.refresh();
                   })
                 }
                 className="flex h-8 w-8 items-center justify-center rounded-md text-t400 hover:bg-ink-500 hover:text-danger disabled:opacity-50"

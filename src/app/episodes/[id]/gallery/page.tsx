@@ -83,7 +83,7 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
                   <video src={url} controls preload="metadata" className="aspect-[9/16] w-full bg-black object-cover" />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={url} alt="" className="aspect-[9/16] w-full object-cover" />
+                  <img src={url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
                 ))}
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <span className="chrome-text font-display text-[14px] font-bold">

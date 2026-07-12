@@ -259,7 +259,6 @@ export default function StoryboardTab({
             `Storyboard queued · ${cost} — the sheet will appear here and in references`,
           ),
         );
-        router.refresh();
       } else setError(res.error);
     });
   }
@@ -276,7 +275,6 @@ export default function StoryboardTab({
             `Sheet sliced into ${res.created} frames — each got a REF token`,
           ),
         );
-        router.refresh();
       } else toast(res.error);
     });
   }
@@ -485,7 +483,7 @@ export default function StoryboardTab({
                       style={{ borderColor: on ? "var(--violet-400)" : "var(--border-subtle)" }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r.url} alt="" className="h-full w-full object-cover" />
+                      <img src={r.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                       {on && (
                         <span className="absolute left-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-violet-500 font-mono text-[9px] font-bold text-white">
                           {order + 1}
@@ -605,7 +603,11 @@ export default function StoryboardTab({
               {t("✎ Править", "✎ Edit")}
             </button>
             <ConfirmButton
-              action={async () => deleteReference(sheet.id)}
+              action={async () => {
+                // deleteReference ревалидирует /bible, а не страницу серии
+                await deleteReference(sheet.id);
+                router.refresh();
+              }}
               label={t("Удалить", "Delete")}
               confirmLabel={t("Точно удалить лист?", "Really delete the sheet?")}
               doneToast={t("Лист удалён (кадры остаются)", "Sheet deleted (frames remain)")}
@@ -622,7 +624,7 @@ export default function StoryboardTab({
                   className="w-[58px] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={f.url} alt="" className="aspect-[9/16] w-full object-cover" />
+                  <img src={f.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
                   <span className="block truncate px-1 py-0.5 text-center font-mono text-[7.5px] text-violet-200">
                     {f.token}
                   </span>
@@ -646,7 +648,7 @@ export default function StoryboardTab({
                 className="w-[58px] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.url} alt="" className="aspect-[9/16] w-full object-cover" />
+                <img src={f.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
                 <span className="block truncate px-1 py-0.5 text-center font-mono text-[7.5px] text-violet-200">
                   {f.token}
                 </span>
@@ -694,8 +696,10 @@ export default function StoryboardTab({
             </div>
             <ConfirmButton
               action={async () => {
+                // deleteReference ревалидирует /bible, а не страницу серии
                 await deleteReference(detail.id);
                 setDetail(null);
+                router.refresh();
               }}
               label={t("Удалить", "Delete")}
               confirmLabel={t("Точно удалить?", "Really delete?")}

@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { updateGroupBeats, reviseGroup } from "@/lib/actions/shots";
 import type { GroupShot } from "@/lib/llm/contracts";
 import { CHEAPEST_LLM } from "@/lib/llm/models";
-import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
+import { estTextUsd, LLM_PRICES, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
@@ -21,15 +21,18 @@ const fieldCls =
 export default function GroupShotsEditor({
   shotId,
   initialBeats,
+  simpleModel = CHEAPEST_LLM,
 }: {
   shotId: string;
   initialBeats: GroupShot[];
+  /** «модель для простых запросов» из настроек — ей идёт переделка группы */
+  simpleModel?: string;
 }) {
   const router = useRouter();
   const t = useT();
-  // переделка по замечанию всегда идёт самой дешёвой моделью (reviseGroup →
-  // CHEAPEST_LLM): ~1.5К входных (группа+сюжет+библия) + типовой вывод
-  const reviseUsd = fmtUsd(estTextUsd(CHEAPEST_LLM, 1500, OUT_TOKENS.revise));
+  // ~1.5К входных (группа+сюжет+библия) + типовой вывод; незнакомый тариф → без цены
+  const estModel = LLM_PRICES[simpleModel] ? simpleModel : CHEAPEST_LLM;
+  const reviseUsd = fmtUsd(estTextUsd(estModel, 1500, OUT_TOKENS.revise));
   const [beats, setBeats] = useState<GroupShot[]>(initialBeats);
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [dirty, setDirty] = useState(false);
@@ -77,7 +80,6 @@ export default function GroupShotsEditor({
       setDirty(false);
       setEditing(new Set());
       toast(t("Шоты сохранены", "Shots saved"));
-      router.refresh();
     });
   }
 
@@ -91,7 +93,6 @@ export default function GroupShotsEditor({
       setFeedback("");
       setDirty(false);
       toast(t("Группа переработана", "Group reworked"));
-      router.refresh();
     } else setError(res.error);
   }
 

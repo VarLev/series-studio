@@ -144,6 +144,8 @@ ALTER TABLE video_models ALTER COLUMN credits TYPE real;
 ALTER TABLE generations ALTER COLUMN credits_spent TYPE real;
 UPDATE generations SET winner = true WHERE id IN (SELECT winner_generation_id FROM shots WHERE winner_generation_id IS NOT NULL);
 UPDATE shots SET winner_generation_id = NULL WHERE winner_generation_id IS NOT NULL;
+ALTER TABLE entities ADD COLUMN IF NOT EXISTS wardrobe text NOT NULL DEFAULT '';
+ALTER TABLE shot_entities ADD COLUMN IF NOT EXISTS outfit text NOT NULL DEFAULT '';
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

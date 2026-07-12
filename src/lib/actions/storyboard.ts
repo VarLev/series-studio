@@ -1,8 +1,8 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, references, shots } from "@/lib/db";
+import { getDb, entities, references, shots, shotEntities } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { getCatalog, nextRefToken, submitReferenceJob } from "@/lib/generation";
 import { putFile, readFile } from "@/lib/storage";
@@ -42,6 +42,7 @@ export async function generateStoryboard(input: {
     const credits = meta?.unit === "usd" ? null : value;
 
     let caption = `Раскадровка ${input.frames === 9 ? "3×3" : "2×2"} · вся серия`;
+    let prompt = input.prompt.trim();
     if (input.shotId) {
       const db = await getDb();
       const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
@@ -49,12 +50,30 @@ export async function generateStoryboard(input: {
         return { ok: false, error: "Шот не найден в этой серии" };
       }
       caption = `Раскадровка ${input.frames === 9 ? "3×3" : "2×2"} · группа ${String(shot.orderIndex).padStart(2, "0")}`;
+      // якорь одежды группы: кадры листа должны рисоваться в закреплённой одежде
+      const links = await db
+        .select()
+        .from(shotEntities)
+        .where(eq(shotEntities.shotId, input.shotId));
+      const chars = links.length
+        ? await db.select().from(entities).where(inArray(entities.id, links.map((l) => l.entityId)))
+        : [];
+      const outfitBy = new Map(links.map((l) => [l.entityId, l.outfit]));
+      const outfits = chars
+        .filter((e) => e.type === "character")
+        .map((e) => ({ name: e.elementName, outfit: (outfitBy.get(e.id) || e.wardrobe).trim() }))
+        .filter((x) => x.outfit);
+      if (outfits.length) {
+        prompt +=
+          "\n\nWardrobe lock — keep each character's clothing identical in every panel:\n" +
+          outfits.map((x) => `- ${x.name}: ${x.outfit}`).join("\n");
+      }
     }
 
     await submitReferenceJob({
       episodeId: input.episodeId,
       model: model.id,
-      prompt: input.prompt.trim(),
+      prompt,
       aspectRatio: "9:16",
       resolution: input.resolution,
       sourceRefIds: input.refIds.length ? input.refIds : undefined,

@@ -26,6 +26,10 @@ export const breakdownSchema = z.object({
       duration_sec: z.number().int().min(1).max(60).default(15),
       location: z.string().default(""),
       characters: z.array(z.string()).default([]),
+      // якорь одежды: наряд каждого персонажа в этой группе (outfit — на английском)
+      wardrobe: z
+        .array(z.object({ name: z.string(), outfit: z.string().default("") }))
+        .default([]),
       shots: z.array(groupShotSchema).default([]),
     }),
   ),
@@ -56,7 +60,16 @@ export const shotPromptSchema = z.object({
 });
 export type ShotPrompt = z.infer<typeof shotPromptSchema>;
 
-/** Этап подбора приёмов: Haiku выбирает кандидатов из индекса библиотеки. */
+/** Этап подбора приёмов: дешёвая модель выбирает кандидатов из индекса библиотеки. */
 export const techniquePickSchema = z.object({
   ids: z.array(z.string()).default([]),
 });
+
+/** Анализ референса персонажа (кнопка «Анализ» в библии, vision-модель). */
+export const imageAnalysisSchema = z.object({
+  description: z.string().default(""), // короткий визуальный якорь на русском (без одежды)
+  wardrobe: z.string().default(""), // одежда на английском — уходит в промпты как есть
+  face_only: z.boolean().default(false), // в кадре только лицо/портрет
+  caption: z.string().default(""), // короткая подпись референса
+});
+export type ImageAnalysis = z.infer<typeof imageAnalysisSchema>;

@@ -2,7 +2,6 @@
 
 /** Шторка Nano Banana (spec §3.2): произвольный промпт, соотношение, разрешение → референс серии. */
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { toast } from "@/components/Toaster";
 import { startNanoBanana } from "@/lib/actions/generate";
@@ -29,7 +28,6 @@ export default function NanoBananaSheet({
   prefillPrompt?: string;
   models?: ImageModelMeta[];
 }) {
-  const router = useRouter();
   const t = useT();
   const en = t("ru", "en") === "en";
   const [prompt, setPrompt] = useState(prefillPrompt);
@@ -66,7 +64,6 @@ export default function NanoBananaSheet({
           ),
         );
         onClose();
-        router.refresh();
       } else if ("error" in res) setError(res.error);
     });
   }

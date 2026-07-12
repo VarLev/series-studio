@@ -1,8 +1,7 @@
 "use server";
 
-import { asc, desc, eq, sql as dsql } from "drizzle-orm";
+import { and, asc, desc, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getDb, episodes, shots, shotEntities, entities, prompts } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmBreakdown } from "@/lib/llm/factory";
@@ -15,13 +14,29 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export async function createEpisode(): Promise<void> {
+/**
+ * Эпизод создаётся ТОЛЬКО когда в черновике появился текст (замечание заказчика:
+ * пустая кнопка «Новая серия» плодила пустые эпизоды). Экран /episodes/new
+ * держит черновик локально и зовёт это действие при первом непустом вводе.
+ */
+export async function createEpisodeFromDraft(input: {
+  title?: string;
+  logline?: string;
+  synopsisMd?: string;
+}): Promise<string> {
   await requireAuth();
   const db = await getDb();
   const [last] = await db.select().from(episodes).orderBy(desc(episodes.number)).limit(1);
   const id = crypto.randomUUID();
-  await db.insert(episodes).values({ id, number: (last?.number ?? 0) + 1 });
-  redirect(`/episodes/${id}`);
+  await db.insert(episodes).values({
+    id,
+    number: (last?.number ?? 0) + 1,
+    title: input.title ?? "",
+    logline: input.logline ?? "",
+    synopsisMd: input.synopsisMd ?? "",
+  });
+  revalidatePath("/episodes");
+  return id;
 }
 
 export async function updateEpisode(
@@ -137,6 +152,15 @@ export async function saveBreakdown(
         .insert(shotEntities)
         .values({ shotId, entityId, auto: true })
         .onConflictDoNothing();
+    }
+    // якорь одежды: наряды персонажей этой группы из разбивки → связка шот×персонаж
+    for (const w of group.wardrobe ?? []) {
+      const entityId = byName.get(stripAt(w.name));
+      if (!entityId || !w.outfit.trim()) continue;
+      await db
+        .update(shotEntities)
+        .set({ outfit: w.outfit.trim() })
+        .where(and(eq(shotEntities.shotId, shotId), eq(shotEntities.entityId, entityId)));
     }
   }
   await recomputeEpisodeTimecodes(episodeId);

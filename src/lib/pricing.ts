@@ -12,6 +12,10 @@ export const LLM_PRICES: Record<string, { in: number; out: number }> = {
   "gpt-5.6-sol": { in: 5, out: 30 },
   "gpt-5.6-terra": { in: 2.5, out: 15 },
   "gpt-5.6-luna": { in: 1, out: 6 },
+  // DeepSeek V4 (июль 2026, cache-miss вход); Gemini 3.5 Flash — бесплатный тир
+  "deepseek-v4-pro": { in: 0.435, out: 0.87 },
+  "deepseek-v4-flash": { in: 0.14, out: 0.28 },
+  "gemini-3.5-flash": { in: 0, out: 0 },
 };
 
 /** Типовой объём вывода по задаче (для предварительной оценки $ до запуска). */

@@ -73,7 +73,6 @@ export default function PromptBlock({
     startTransition(async () => {
       const res = await generateShotPrompt(shotId, model, factoryModel);
       if (!res.ok) setError(res.error);
-      else router.refresh();
     });
   }
 
