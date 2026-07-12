@@ -26,7 +26,7 @@ start "Series Studio server" /D "%~dp0" cmd /k npm run prod
 echo [3/4] Waiting for the server to respond (keep the server window open)...
 :wait
 timeout /t 3 /nobreak >nul
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:3000/login' -UseBasicParsing -TimeoutSec 4 ^| Out-Null; exit 0 } catch { if ($_.Exception.Response.StatusCode.value__ -ge 200) { exit 0 } else { exit 1 } }"
+powershell -NoProfile -Command "if ((Test-NetConnection -ComputerName 127.0.0.1 -Port 3000 -InformationLevel Quiet)) { exit 0 } else { exit 1 }"
 if errorlevel 1 goto wait
 
 echo [4/4] Server is up. Starting the tunnel - the phone address is below
