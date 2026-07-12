@@ -132,6 +132,7 @@ export async function saveBreakdown(
       actionMd: composeActionMd(beats, group.title),
       cameraHint: "",
       status: "draft",
+      sceneStart: group.scene_start,
     });
     const linked = new Set<string>();
     // 1) явный список персонажей/локаций группы от модели

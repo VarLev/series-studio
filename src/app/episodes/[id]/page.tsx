@@ -66,6 +66,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
       durationSec: s.durationSec,
       timecode: s.timecode,
       status: s.status,
+      sceneStart: s.sceneStart,
       entityNames: links
         .filter((l) => l.shotId === s.id)
         .map((l) => entityById.get(l.entityId)?.name ?? "")

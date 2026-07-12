@@ -17,6 +17,8 @@ export interface ShotListItem {
   durationSec: number;
   timecode: string;
   status: string;
+  /** начало новой сюжетной сцены (первая группа считается началом всегда) */
+  sceneStart: boolean;
   entityNames: string[];
   /** чистые визуальные описания шотов группы (без «Шот N (время):») — для промпта листа */
   beats: string[];
@@ -45,11 +47,28 @@ export default function ShotsList({
     );
   }
 
+  // номера сцен: первая группа — всегда начало сцены, дальше по флагу sceneStart
+  let sceneNo = 0;
+
   return (
     <div className="flex flex-col gap-2.5 p-4 pb-10">
-      {shots.map((shot, i) => (
+      {shots.map((shot, i) => {
+        const isSceneStart = i === 0 || shot.sceneStart;
+        if (isSceneStart) sceneNo += 1;
+        const scene = sceneNo;
+        return (
+        <div key={shot.id} className="flex flex-col gap-2.5">
+          {/* разделитель сюжетных сцен: с этой группы связность с предыдущей не тянется */}
+          {isSceneStart && (
+            <div className="mt-1 flex items-center gap-2 first:mt-0">
+              <span className="text-[12px] leading-none">🎬</span>
+              <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.14em] text-violet-300">
+                {t("Сцена", "Scene")} {scene}
+              </span>
+              <span className="h-px flex-1 bg-[var(--border-default)]" />
+            </div>
+          )}
         <LongPressMenu
-          key={shot.id}
           title={`${t("Группа", "Group")} ${String(shot.orderIndex).padStart(2, "0")} · ${shot.title || t("Без названия", "Untitled")}`}
           deleteLabel={t("Удалить шот", "Delete shot")}
           confirmLabel={t(
@@ -108,7 +127,9 @@ export default function ShotsList({
             </button>
           </div>
         </LongPressMenu>
-      ))}
+        </div>
+        );
+      })}
 
       <div className="pt-1 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-t400">
         {t("долгое зажатие по шоту — удаление", "long-press a shot to delete")}

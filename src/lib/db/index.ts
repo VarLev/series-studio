@@ -146,6 +146,7 @@ UPDATE generations SET winner = true WHERE id IN (SELECT winner_generation_id FR
 UPDATE shots SET winner_generation_id = NULL WHERE winner_generation_id IS NOT NULL;
 ALTER TABLE entities ADD COLUMN IF NOT EXISTS wardrobe text NOT NULL DEFAULT '';
 ALTER TABLE shot_entities ADD COLUMN IF NOT EXISTS outfit text NOT NULL DEFAULT '';
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS scene_start boolean NOT NULL DEFAULT false;
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

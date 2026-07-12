@@ -64,6 +64,9 @@ export const shots = pgTable("shots", {
   actionMd: text("action_md").notNull().default(""),
   cameraHint: text("camera_hint").notNull().default(""),
   status: text("status").notNull().default("draft"), // draft | prompted | generating | review | approved
+  // начало новой сюжетной сцены: жёсткой связности с предыдущей группой нет,
+  // общие якоря — только персонажи/локации библии (первая группа — всегда сцена)
+  sceneStart: boolean("scene_start").notNull().default(false),
   winnerGenerationId: text("winner_generation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

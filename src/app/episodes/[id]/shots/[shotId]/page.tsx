@@ -28,6 +28,7 @@ import PromptBlock from "@/components/shot/PromptBlock";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
 import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
+import SceneToggle from "@/components/shot/SceneToggle";
 import ResultsStrip from "@/components/shot/ResultsStrip";
 import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
@@ -70,11 +71,12 @@ export default async function ShotPage(ctx: {
       thumbByShot.set(ref.shotId, await getFileUrl(ref.storagePath));
     }
   }
-  const stripShots = allShots.map((s) => ({
+  const stripShots = allShots.map((s, i) => ({
     id: s.id,
     orderIndex: s.orderIndex,
     status: s.status,
     thumbUrl: thumbByShot.get(s.id) ?? null,
+    sceneStart: i === 0 || s.sceneStart,
   }));
   const shotIdx = allShots.findIndex((s) => s.id === shotId);
   const prevShot = allShots[shotIdx - 1] ?? null;
@@ -304,6 +306,11 @@ export default async function ShotPage(ctx: {
                   <span className="chrome-text font-display text-[13px] font-bold">
                     {String(s.orderIndex).padStart(2, "0")}
                   </span>
+                  {(s.sceneStart || allShots[0]?.id === s.id) && (
+                    <span className="text-[10px] leading-none" title={t("Начало сцены", "Scene start")}>
+                      🎬
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1 truncate text-[11.5px] text-t200">
                     {s.title || s.actionMd.slice(0, 30)}
                   </span>
@@ -338,6 +345,14 @@ export default async function ShotPage(ctx: {
               </div>
             </div>
           </div>
+
+          {/* граница сюжетной сцены: тумблер «новая сцена / продолжение» */}
+          <SceneToggle
+            shotId={shotId}
+            sceneStart={shot.sceneStart}
+            isFirst={shotIdx === 0}
+            prevGroupNo={prevShot ? String(prevShot.orderIndex).padStart(2, "0") : null}
+          />
 
           {beats.length > 0 ? (
             <div className="flex flex-col gap-1.5">

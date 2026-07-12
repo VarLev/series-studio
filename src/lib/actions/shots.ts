@@ -112,6 +112,17 @@ export async function reviseGroup(
   }
 }
 
+/** Начало новой сюжетной сцены: связности с предыдущей группой нет (кроме библии). */
+export async function setSceneStart(shotId: string, value: boolean): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  await db.update(shots).set({ sceneStart: value }).where(eq(shots.id, shotId));
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
 /** Якорь одежды: наряд персонажа в этой группе (EN); пусто → базовый гардероб из библии. */
 export async function setShotEntityOutfit(
   shotId: string,

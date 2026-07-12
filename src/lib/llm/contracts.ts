@@ -25,6 +25,8 @@ export const breakdownSchema = z.object({
       time: z.string().default(""), // «00:00–00:14»
       duration_sec: z.number().int().min(1).max(60).default(15),
       location: z.string().default(""),
+      // начало новой сюжетной сцены (смена места/времени/непрерывности действия)
+      scene_start: z.boolean().default(false),
       characters: z.array(z.string()).default([]),
       // якорь одежды: наряд каждого персонажа в этой группе (outfit — на английском)
       wardrobe: z

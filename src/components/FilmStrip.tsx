@@ -9,6 +9,8 @@ export interface StripShot {
   orderIndex: number;
   status: string;
   thumbUrl: string | null;
+  /** начало новой сюжетной сцены — маркер 🎬 на миниатюре */
+  sceneStart?: boolean;
 }
 
 /**
@@ -55,6 +57,14 @@ export default function FilmStrip({
               )}
               {s.status === "generating" && (
                 <span className="pulse-amber absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-warning" />
+              )}
+              {s.sceneStart && (
+                <span
+                  className="absolute left-0 top-0 rounded-br bg-[rgba(6,5,9,.8)] px-0.5 text-[8px] leading-tight"
+                  title={t("Начало сцены", "Scene start")}
+                >
+                  🎬
+                </span>
               )}
             </span>
             <span

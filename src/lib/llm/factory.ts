@@ -2,7 +2,7 @@
  * Промпт-фабрика (M3) и LLM-вызовы M2 — системные промпты собираются из:
  * правил проекта (settings) + релевантных выдержек базы знаний + библии сущностей.
  */
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import {
   getDb,
   entities,
@@ -138,15 +138,20 @@ export async function llmBreakdown(
         "а ТОЛЬКО одним JSON-объектом без пояснений:\n" +
         '{"summary":"краткий сюжет эпизода","characters":["персонажи"],"locations":["локации"],' +
         '"groups":[{"order":1,"title":"название группы","time":"00:00–00:14","duration_sec":14,' +
-        '"location":"локация группы","characters":["персонажи группы"],' +
+        '"location":"локация группы","scene_start":true,"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"его полный наряд в этой группе, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
+        "СЦЕНЫ (границы сюжетных сцен): scene_start: true — если группа начинает НОВУЮ сюжетную " +
+        "сцену: смена локации, скачок во времени или разрыв непрерывности действия. Если группа — " +
+        "прямое продолжение предыдущей (та же обстановка, действие течёт без разрыва) — scene_start: false. " +
+        "Первая группа эпизода — всегда scene_start: true.\n" +
         "ГАРДЕРОБ (якорь одежды): для каждой группы заполни wardrobe — конкретный наряд каждого " +
         "персонажа группы (outfit ТОЛЬКО на английском, годный для видеопромпта, например " +
-        '"charcoal wool coat over white shirt, black jeans"). Одежда едина внутри группы. Между ' +
-        "группами одежда меняется ТОЛЬКО при смене времени действия или обстоятельств по сюжету — " +
-        "иначе повторяй наряд из предыдущей группы ДОСЛОВНО.\n" +
+        '"charcoal wool coat over white shirt, black jeans"). Одежда едина внутри группы. ' +
+        "Внутри одной сцены (scene_start: false) повторяй наряд предыдущей группы ДОСЛОВНО — " +
+        "менять одежду можно только на границе сцены (scene_start: true), и только если это " +
+        "оправдано временем действия или обстоятельствами сюжета.\n" +
         "Соответствие формату задания: группа = «# ГРУППА NN» (не длиннее 15 секунд, пригодна для " +
         "отдельной AI-видеогенерации), shots = «### Шот N» внутри группы, duration_sec — длительность " +
         "группы в секундах. Время шотов (shots[].time) отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот " +
@@ -308,6 +313,36 @@ export async function llmShotPrompt(
   const faceOnly = characterRows.filter(
     (c) => charRefs.find((r) => r.entityId === c.id)?.role === "face",
   );
+  // ---------- сюжетная сцена: непрерывность или чистый лист ----------
+  // первая группа эпизода — всегда начало сцены; иначе смотрим флаг scene_start
+  const [prevGroup] = await db
+    .select()
+    .from(shots)
+    .where(and(eq(shots.episodeId, shot.episodeId), lt(shots.orderIndex, shot.orderIndex)))
+    .orderBy(desc(shots.orderIndex))
+    .limit(1);
+  let sceneBlock = "";
+  if (!prevGroup || shot.sceneStart) {
+    sceneBlock =
+      "НОВАЯ СЦЕНА: эта группа начинает новую сюжетную сцену. НЕ привязывайся к обстановке, " +
+      "свету, времени суток или действию предыдущих групп — постоянные якоря только персонажи " +
+      "и локации из библии (и их референсы).";
+  } else {
+    // краткое содержание предыдущей группы: шоты из раскадровки либо actionMd
+    let prevDigest = "";
+    try {
+      const parsed = JSON.parse(prevGroup.beatsJson || "[]") as Array<{ action?: string }>;
+      if (Array.isArray(parsed)) {
+        prevDigest = parsed.map((b) => b.action || "").filter(Boolean).join(" ");
+      }
+    } catch {}
+    if (!prevDigest) prevDigest = prevGroup.actionMd;
+    sceneBlock =
+      `ПРОДОЛЖЕНИЕ СЦЕНЫ: эта группа — прямое продолжение группы «${prevGroup.title}» ` +
+      `(её содержание: ${prevDigest.slice(0, 400)}). Сохрани ту же локацию, время суток, свет, ` +
+      "погоду и одежду персонажей; действие продолжается без разрыва.";
+  }
+
   const wardrobeBlock =
     outfits.length || faceOnly.length
       ? "ГАРДЕРОБ ГРУППЫ (жёсткий якорь одежды):\n" +
@@ -372,7 +407,7 @@ export async function llmShotPrompt(
       maxTokens: 8000,
       // шаблон видео-промпта заказчика (настройки) — основа системной инструкции
       system:
-        `${settings.tpl_video}\n\n${rules}\n\n${bible}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n` +
+        `${settings.tpl_video}\n\n${rules}\n\n${bible}\n\n${sceneBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
