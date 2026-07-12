@@ -1,0 +1,4 @@
+# Windows-скрипты обязаны иметь CRLF, иначе cmd.exe ломается на метках/goto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
