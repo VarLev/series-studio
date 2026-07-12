@@ -22,6 +22,9 @@ export interface ShotListItem {
   entityNames: string[];
   /** чистые визуальные описания шотов группы (без «Шот N (время):») — для промпта листа */
   beats: string[];
+  /** миниатюра группы: кадр лучшего результата (★ последний, иначе первый готовый) */
+  thumbUrl?: string | null;
+  thumbIsVideo?: boolean;
 }
 
 export default function ShotsList({
@@ -47,15 +50,19 @@ export default function ShotsList({
     );
   }
 
-  // номера сцен: первая группа — всегда начало сцены, дальше по флагу sceneStart
-  let sceneNo = 0;
+  // номера сцен: первая группа — всегда начало сцены, дальше по флагу sceneStart.
+  // Считаем заранее, без мутации во время рендера (react-hooks/immutability).
+  const sceneNoByIndex = shots.reduce<number[]>((acc, shot, i) => {
+    const isSceneStart = i === 0 || shot.sceneStart;
+    acc.push((i === 0 ? 0 : acc[i - 1]) + (isSceneStart ? 1 : 0));
+    return acc;
+  }, []);
 
   return (
     <div className="flex flex-col gap-2.5 p-4 pb-10">
       {shots.map((shot, i) => {
         const isSceneStart = i === 0 || shot.sceneStart;
-        if (isSceneStart) sceneNo += 1;
-        const scene = sceneNo;
+        const scene = sceneNoByIndex[i];
         return (
         <div key={shot.id} className="flex flex-col gap-2.5">
           {/* разделитель сюжетных сцен: с этой группы связность с предыдущей не тянется */}
@@ -84,9 +91,37 @@ export default function ShotsList({
             className="flex min-w-0 flex-1 items-center gap-3"
           >
             <div className="relative flex aspect-[9/16] w-[42px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600">
-              <span className="chrome-text font-display text-[16px] font-bold">
-                {String(shot.orderIndex).padStart(2, "0")}
-              </span>
+              {shot.thumbUrl ? (
+                shot.thumbIsVideo ? (
+                  <video
+                    // #t=0.1 — браузер показывает стоп-кадр вместо пустого плеера
+                    src={`${shot.thumbUrl}#t=0.1`}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={shot.thumbUrl}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                )
+              ) : (
+                <span className="chrome-text font-display text-[16px] font-bold">
+                  {String(shot.orderIndex).padStart(2, "0")}
+                </span>
+              )}
+              {/* когда есть кадр — номер группы маленьким бейджем в углу */}
+              {shot.thumbUrl && (
+                <span className="absolute left-0 top-0 rounded-br-md bg-[rgba(6,5,9,.82)] px-1 py-0.5 font-mono text-[8px] font-semibold text-t100">
+                  {String(shot.orderIndex).padStart(2, "0")}
+                </span>
+              )}
               <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(6,5,9,.85)] px-1 pb-0.5 pt-2 text-center font-mono text-[8.5px] font-semibold text-t200">
                 {shot.durationSec}s
               </span>

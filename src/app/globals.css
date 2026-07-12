@@ -316,6 +316,19 @@ summary:active {
   }
 }
 
+/* Источник перетаскивания (карточки шотов в Rework): долгое нажатие не должно
+   выделять текст и вызывать callout iOS. Поля ввода внутри — исключение. */
+.drag-src {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.drag-src input,
+.drag-src textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Скелетоны loading.tsx: мерцающие болванки на время серверного рендера */
 @keyframes skeleton-shimmer {
   0%,

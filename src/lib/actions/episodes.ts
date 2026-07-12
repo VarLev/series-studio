@@ -2,7 +2,7 @@
 
 import { and, asc, desc, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, episodes, shots, shotEntities, entities, prompts } from "@/lib/db";
+import { getDb, episodes, shots, shotEntities, entities } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
@@ -108,11 +108,10 @@ export async function saveBreakdown(
 
   const oldShots = await db.select().from(shots).where(eq(shots.episodeId, episodeId));
   if (mode === "replace") {
-    for (const s of oldShots) {
-      await db.delete(shotEntities).where(eq(shotEntities.shotId, s.id));
-      await db.delete(prompts).where(eq(prompts.shotId, s.id));
-    }
-    await db.delete(shots).where(eq(shots.episodeId, episodeId));
+    // глубокий каскад: раньше generations (видео) и референсы старых шотов
+    // оставались сиротами с мёртвыми ссылками на удалённые шоты
+    const { deleteShotDeep } = await import("@/lib/cascade");
+    for (const s of oldShots) await deleteShotDeep(s.id);
   }
 
   let index =
@@ -154,13 +153,15 @@ export async function saveBreakdown(
         .values({ shotId, entityId, auto: true })
         .onConflictDoNothing();
     }
-    // якорь одежды: наряды персонажей этой группы из разбивки → связка шот×персонаж
+    // якорь одежды: наряд пишем ТОЛЬКО когда сюжет описал его для сцены (иначе по
+    // умолчанию берётся базовый гардероб из библии). Помечаем источник "generated",
+    // чтобы этот сценарный наряд ушёл в промпт вместо библейского.
     for (const w of group.wardrobe ?? []) {
       const entityId = byName.get(stripAt(w.name));
       if (!entityId || !w.outfit.trim()) continue;
       await db
         .update(shotEntities)
-        .set({ outfit: w.outfit.trim() })
+        .set({ outfit: w.outfit.trim(), outfitSource: "generated" })
         .where(and(eq(shotEntities.shotId, shotId), eq(shotEntities.entityId, entityId)));
     }
   }

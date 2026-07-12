@@ -8,28 +8,15 @@ import {
   episodes,
   generations,
   knowledgeDocs,
-  prompts,
   references,
   shots,
   shotEntities,
   entities,
 } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { deleteFile } from "@/lib/storage";
+import { deleteShotDeep, invalidateProviderCaches, maybeDeleteBlob } from "@/lib/cascade";
 import { recomputeEpisodeTimecodes } from "@/lib/beats";
 import type { EntityType } from "./entities";
-
-/** Удалить файл в хранилище, только если на него не ссылается другая запись references/generations. */
-async function maybeDeleteBlob(storagePath: string | null): Promise<void> {
-  if (!storagePath) return;
-  const db = await getDb();
-  const refUses = await db.select().from(references).where(eq(references.storagePath, storagePath));
-  const genUses = await db
-    .select()
-    .from(generations)
-    .where(eq(generations.resultStoragePath, storagePath));
-  if (refUses.length === 0 && genUses.length === 0) await deleteFile(storagePath).catch(() => {});
-}
 
 async function deleteGenerationRow(genId: string): Promise<string | null> {
   const db = await getDb();
@@ -38,23 +25,6 @@ async function deleteGenerationRow(genId: string): Promise<string | null> {
   await db.delete(generations).where(eq(generations.id, genId));
   await maybeDeleteBlob(gen.resultStoragePath);
   return gen.shotId;
-}
-
-async function deleteShotDeep(shotId: string): Promise<void> {
-  const db = await getDb();
-  const gens = await db.select().from(generations).where(eq(generations.shotId, shotId));
-  for (const g of gens) {
-    await db.delete(generations).where(eq(generations.id, g.id));
-    await maybeDeleteBlob(g.resultStoragePath);
-  }
-  const shotRefs = await db.select().from(references).where(eq(references.shotId, shotId));
-  for (const r of shotRefs) {
-    await db.delete(references).where(eq(references.id, r.id));
-    await maybeDeleteBlob(r.storagePath);
-  }
-  await db.delete(prompts).where(eq(prompts.shotId, shotId));
-  await db.delete(shotEntities).where(eq(shotEntities.shotId, shotId));
-  await db.delete(shots).where(eq(shots.id, shotId));
 }
 
 // ---------- Генерации ----------
@@ -116,6 +86,7 @@ async function deleteEpisodeDeep(episodeId: string): Promise<void> {
     await db.delete(references).where(eq(references.id, r.id));
     await maybeDeleteBlob(r.storagePath);
   }
+  await invalidateProviderCaches({ refIds: serieRefs.map((r) => r.id) });
   const refGens = await db.select().from(generations).where(eq(generations.episodeId, episodeId));
   for (const g of refGens) {
     await db.delete(generations).where(eq(generations.id, g.id));
@@ -154,6 +125,7 @@ export async function deleteAllSeriesRefs(episodeId: string): Promise<void> {
     await db.delete(references).where(eq(references.id, r.id));
     await maybeDeleteBlob(r.storagePath);
   }
+  await invalidateProviderCaches({ refIds: rows.map((r) => r.id) });
   revalidatePath(`/episodes/${episodeId}/refs`);
 }
 
@@ -167,10 +139,12 @@ export async function deleteAllEntities(type: EntityType): Promise<void> {
   if (ids.length) {
     await db.delete(shotEntities).where(inArray(shotEntities.entityId, ids));
     const refs = await db.select().from(references).where(inArray(references.entityId, ids));
-    for (const r of refs.filter((x) => !x.shotId)) {
+    const deletedRefs = refs.filter((x) => !x.shotId);
+    for (const r of deletedRefs) {
       await db.delete(references).where(eq(references.id, r.id));
       await maybeDeleteBlob(r.storagePath);
     }
+    await invalidateProviderCaches({ refIds: deletedRefs.map((r) => r.id), entityIds: ids });
     await db.delete(entities).where(inArray(entities.id, ids));
   }
   revalidatePath("/bible");

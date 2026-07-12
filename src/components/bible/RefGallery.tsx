@@ -12,6 +12,13 @@ interface GalleryRef {
   source: string;
   /** «только лицо»: одежду с этого референса не якорить */
   faceOnly?: boolean;
+  /** фактические размеры (для соотношения сторон миниатюры) */
+  width?: number | null;
+  height?: number | null;
+}
+
+function aspectStyle(r: GalleryRef): React.CSSProperties | undefined {
+  return r.width && r.height ? { aspectRatio: `${r.width} / ${r.height}` } : undefined;
 }
 
 export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
@@ -19,6 +26,8 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
   const [selected, setSelected] = useState<GalleryRef | null>(null);
   const [caption, setCaption] = useState("");
   const [faceOnly, setFaceOnly] = useState(false);
+  // полноэкранный просмотр (кнопка «full»)
+  const [full, setFull] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   if (!refs.length) {
@@ -35,7 +44,8 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
 
   return (
     <>
-      <div className="grid grid-cols-3 gap-2">
+      {/* масонри: миниатюры в фактическом соотношении сторон, без обрезки под 9:16 */}
+      <div className="columns-3 gap-2">
         {refs.map((r) => (
           <button
             key={r.id}
@@ -44,10 +54,17 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
               setCaption(r.caption);
               setFaceOnly(Boolean(r.faceOnly));
             }}
-            className="relative overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
+            className="relative mb-2 block w-full break-inside-avoid overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
+            <img
+              src={r.url}
+              alt={r.caption}
+              loading="lazy"
+              decoding="async"
+              className="w-full object-cover"
+              style={aspectStyle(r)}
+            />
             {r.faceOnly && (
               <span className="absolute right-1 top-1 rounded bg-[rgba(6,5,9,.8)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.08em] text-warning">
                 {t("лицо", "face")}
@@ -63,13 +80,23 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
       <Sheet open={Boolean(selected)} onClose={() => setSelected(null)} title={t("Референс", "Reference")}>
         {selected && (
           <div className="flex flex-col gap-3 pb-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={selected.url}
-              alt=""
-              className="max-h-[50dvh] w-full rounded-lg border border-[var(--border-subtle)] object-contain"
-              style={{ background: "#000" }}
-            />
+            {/* превью в фактическом соотношении + кнопка «full» */}
+            <div className="relative flex justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={selected.url}
+                alt=""
+                className="max-h-[60dvh] w-auto max-w-full rounded-lg border border-[var(--border-subtle)] object-contain"
+              />
+              <button
+                onClick={() => setFull(selected.url)}
+                title={t("Полный размер", "Full size")}
+                aria-label={t("Полный размер", "Full size")}
+                className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-md bg-[rgba(6,5,9,.72)] text-[15px] text-t100 hover:bg-[rgba(6,5,9,.92)]"
+              >
+                ⛶
+              </button>
+            </div>
             <div className="flex gap-2">
               <input
                 value={caption}
@@ -115,6 +142,29 @@ export default function RefGallery({ refs }: { refs: GalleryRef[] }) {
           </div>
         )}
       </Sheet>
+
+      {/* полноэкранный просмотр — изображение целиком, тап закрывает */}
+      {full && (
+        <div
+          onClick={() => setFull(null)}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(0,0,0,.93)] p-2"
+          style={{
+            paddingTop: "max(8px, env(safe-area-inset-top))",
+            paddingBottom: "max(8px, env(safe-area-inset-bottom))",
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={full} alt="" className="max-h-full max-w-full object-contain" />
+          <button
+            onClick={() => setFull(null)}
+            aria-label={t("Закрыть", "Close")}
+            className="absolute right-3 flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(20,16,28,.85)] text-[18px] text-t100"
+            style={{ top: "max(12px, env(safe-area-inset-top))" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </>
   );
 }

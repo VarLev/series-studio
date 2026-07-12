@@ -6,6 +6,7 @@ import { isConnected } from "@/lib/higgsfieldMcp";
 import { isConnected as isKlingConnected } from "@/lib/klingMcp";
 import SettingsClient from "@/components/settings/SettingsClient";
 import SettingsTabs from "@/components/settings/SettingsTabs";
+import SettingsHeader from "@/components/settings/SettingsHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -20,18 +21,13 @@ export default async function SettingsPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <div className="px-4 pb-3 pt-6" style={{ paddingTop: "max(24px, env(safe-area-inset-top))" }}>
-        <div className="eyebrow mb-1.5">Series Studio</div>
-        <h1 className="chrome-text font-display text-[22px] font-bold uppercase leading-tight tracking-[0.06em]">
-          {t("Настройки", "Settings")}
-        </h1>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-t400">
-          {t(
-            "Язык и стиль, шаблоны промптов, библиотека режиссёрских приёмов.",
-            "Language & style, prompt templates, director technique library.",
-          )}
-        </p>
-      </div>
+      <SettingsHeader
+        title={t("Настройки", "Settings")}
+        subtitle={t(
+          "Язык и стиль, шаблоны промптов, библиотека режиссёрских приёмов.",
+          "Language & style, prompt templates, director technique library.",
+        )}
+      />
       <SettingsTabs />
       <SettingsClient
         uiLang={settings.ui_lang}

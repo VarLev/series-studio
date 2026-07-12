@@ -1,11 +1,11 @@
 "use server";
 
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, prompts, shots } from "@/lib/db";
+import { getDb, generations, prompts, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmShotPrompt, llmRevisePrompt } from "@/lib/llm/factory";
-import { PROMPT_FAMILIES, type PromptFamily } from "@/lib/llm/models";
+import { PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
 import { collapseAt } from "@/lib/entityName";
 import type { ShotPrompt } from "@/lib/llm/contracts";
 
@@ -112,6 +112,34 @@ export async function generateShotPromptsFor(
         error: `${meta.label}: ${res.error}`,
       };
     }
+  }
+  return { ok: true };
+}
+
+/**
+ * Удалить промпт трека (Seedance/Kling) целиком — все его версии — чтобы можно
+ * было сгенерировать заново «с чистого листа». Ссылки не оставляем сиротами:
+ * генерации, созданные этими промптами, теряют promptId (видео сохраняются).
+ */
+export async function deleteTrackPrompts(
+  shotId: string,
+  family: PromptFamily,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAuth();
+  const db = await getDb();
+  const rows = await db.select().from(prompts).where(eq(prompts.shotId, shotId));
+  const ids = rows.filter((p) => promptFamily(p.targetModel) === family).map((p) => p.id);
+  if (!ids.length) return { ok: true };
+  // не оставляем мёртвых ссылок: генерации этого промпта отвязываем (видео живут)
+  await db.update(generations).set({ promptId: null }).where(inArray(generations.promptId, ids));
+  await db.delete(prompts).where(inArray(prompts.id, ids));
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (shot) {
+    // статус вернётся к draft, если промптов и результатов больше нет
+    const { recalcShotStatus } = await import("@/lib/generation");
+    await recalcShotStatus(shotId);
+    revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
+    revalidatePath(`/episodes/${shot.episodeId}`);
   }
   return { ok: true };
 }

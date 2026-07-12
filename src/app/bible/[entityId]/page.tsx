@@ -33,6 +33,8 @@ export default async function EntityPage(ctx: { params: Promise<{ entityId: stri
         caption: r.caption,
         source: r.source,
         faceOnly: r.role === "face",
+        width: r.width,
+        height: r.height,
       })),
   );
 

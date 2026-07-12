@@ -16,6 +16,7 @@ import { getAllSettings } from "@/lib/settings";
 import { readFile } from "@/lib/storage";
 import { TIMING_RULES, LANGUAGE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
+import { effectiveOutfit } from "@/lib/wardrobe";
 import { promptFamily, visionModelFrom } from "./models";
 import { runJson } from "./client";
 import {
@@ -139,19 +140,22 @@ export async function llmBreakdown(
         '{"summary":"краткий сюжет эпизода","characters":["персонажи"],"locations":["локации"],' +
         '"groups":[{"order":1,"title":"название группы","time":"00:00–00:14","duration_sec":14,' +
         '"location":"локация группы","scene_start":true,"characters":["персонажи группы"],' +
-        '"wardrobe":[{"name":"персонаж","outfit":"его полный наряд в этой группе, НА АНГЛИЙСКОМ"}],' +
+        '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если сюжет его описал для этой сцены, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
         "СЦЕНЫ (границы сюжетных сцен): scene_start: true — если группа начинает НОВУЮ сюжетную " +
         "сцену: смена локации, скачок во времени или разрыв непрерывности действия. Если группа — " +
         "прямое продолжение предыдущей (та же обстановка, действие течёт без разрыва) — scene_start: false. " +
         "Первая группа эпизода — всегда scene_start: true.\n" +
-        "ГАРДЕРОБ (якорь одежды): для каждой группы заполни wardrobe — конкретный наряд каждого " +
-        "персонажа группы (outfit ТОЛЬКО на английском, годный для видеопромпта, например " +
-        '"charcoal wool coat over white shirt, black jeans"). Одежда едина внутри группы. ' +
-        "Внутри одной сцены (scene_start: false) повторяй наряд предыдущей группы ДОСЛОВНО — " +
-        "менять одежду можно только на границе сцены (scene_start: true), и только если это " +
-        "оправдано временем действия или обстоятельствами сюжета.\n" +
+        "ГАРДЕРОБ (якорь одежды): НЕ придумывай одежду. По умолчанию у каждого персонажа " +
+        "есть базовый гардероб в библии — приложение подставит его само, поэтому в обычном " +
+        "случае outfit оставляй ПУСТОЙ СТРОКОЙ. Заполняй outfit (на английском, годный для " +
+        'видеопромпта, например "charcoal wool coat over white shirt, black jeans") ТОЛЬКО ' +
+        "если сам сюжет явно описывает, во что персонаж одет в этой сцене или что он " +
+        "переоделся (например «надела красное платье», «теперь в строгом костюме»). Если " +
+        "сюжет одежду не упоминает — outfit пустой. Когда сцена (scene_start: false) " +
+        "продолжается, а сюжет ранее задал наряд — повтори тот же наряд ДОСЛОВНО во всех " +
+        "группах этой сцены; на границе сцены обновляй, только если сюжет описал переодевание.\n" +
         "Соответствие формату задания: группа = «# ГРУППА NN» (не длиннее 15 секунд, пригодна для " +
         "отдельной AI-видеогенерации), shots = «### Шот N» внутри группы, duration_sec — длительность " +
         "группы в секундах. Время шотов (shots[].time) отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот " +
@@ -169,16 +173,20 @@ export async function llmBreakdown(
 
 /**
  * Переделать одну группу шотов по замечанию пользователя: модель получает
- * текущие шоты группы, фрагмент сюжета для контекста и замечание — возвращает
- * обновлённую группу тем же JSON-форматом (время шотов от 00:00).
+ * ТОЛЬКО шоты этой группы + краткий контекст соседних групп (не весь сюжет!) и
+ * замечание — возвращает обновлённую группу тем же JSON-форматом (время от 00:00).
+ * targetOrders — если задан, переделывать разрешено ТОЛЬКО эти шоты (остальные
+ * вернуть дословно); если пуст — модель сама решает, каких шотов касается замечание.
  */
 export async function llmReviseGroup(input: {
   episodeId: string;
-  synopsis: string;
+  /** краткий контекст: что в соседних группах (НЕ весь сюжет эпизода) */
+  contextFragment: string;
   groupTitle: string;
   durationSec: number;
   beats: GroupShot[];
   feedback: string;
+  targetOrders?: number[];
   model?: string;
 }): Promise<GroupPatch> {
   const { rules, model } = await seriesSystemBase();
@@ -192,6 +200,12 @@ export async function llmReviseGroup(input: {
           `Действие: ${b.action}.${b.dialogue ? ` Реплика: «${b.dialogue}»` : ""}`,
       )
       .join("\n");
+  const scope = input.targetOrders?.length
+    ? `ОБЛАСТЬ ПРАВКИ: переделай ТОЛЬКО шоты с номерами [${input.targetOrders.join(", ")}] по замечанию. ` +
+      "Все остальные шоты верни в ответе БЕЗ ИЗМЕНЕНИЙ — дословно (те же order, framing, camera, action, dialogue). " +
+      "Не добавляй и не удаляй шоты, сохрани их количество и порядок.\n"
+    : "ОБЛАСТЬ ПРАВКИ: сам определи, каких шотов касается замечание, и меняй только их; шоты, " +
+      "которых замечание не касается, верни без изменений. Количество шотов меняй только если этого прямо требует замечание.\n";
   return runJson(
     {
       kind: "breakdown",
@@ -201,17 +215,19 @@ export async function llmReviseGroup(input: {
       system:
         `${rules}\n\n${bible}\n\n` +
         "Ты правишь ОДНУ группу шотов раскадровки вертикального сериала (группа = отдельное " +
-        "AI-видео не длиннее 15 секунд). Перепиши группу с учётом замечания пользователя, " +
-        "сохранив рабочие части и не выходя за события сюжета.\n" +
+        "AI-видео не длиннее 15 секунд). Перепиши её с учётом замечания, сохранив рабочие части.\n" +
+        scope +
         `${TIMING_RULES}\n${LANGUAGE_RULES}\n` +
-        "Верни ТОЛЬКО JSON без пояснений:\n" +
+        "Верни ТОЛЬКО JSON без пояснений (ВСЕ шоты группы, включая неизменённые):\n" +
         '{"title":"название группы","duration_sec":14,' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}\n' +
         "Время шотов отсчитывается от начала группы (первый шот с 00:00).",
       user:
-        `Фрагмент сюжета эпизода (контекст):\n${input.synopsis}\n\n` +
-        `Текущая группа:\n${current}\n\n` +
+        (input.contextFragment.trim()
+          ? `Контекст соседних групп (НЕ переписывай их, только для связности):\n${input.contextFragment}\n\n`
+          : "") +
+        `Текущая группа (правишь только её):\n${current}\n\n` +
         `Замечание пользователя: ${input.feedback}`,
     },
     groupPatchSchema,
@@ -301,9 +317,11 @@ export async function llmShotPrompt(
     ? await db.select().from(entities).where(inArray(entities.id, links.map((l) => l.entityId)))
     : [];
   const characterRows = linkedEntities.filter((e) => e.type === "character");
-  const outfitByEntity = new Map(links.map((l) => [l.entityId, l.outfit]));
+  // одежда для промпта: по умолчанию базовый гардероб из библии; сценарный наряд
+  // (outfit) — только если он помечен источником "generated" (см. effectiveOutfit)
+  const linkByEntity = new Map(links.map((l) => [l.entityId, l]));
   const outfits = characterRows
-    .map((e) => ({ e, outfit: (outfitByEntity.get(e.id) || e.wardrobe).trim() }))
+    .map((e) => ({ e, outfit: effectiveOutfit(linkByEntity.get(e.id), e.wardrobe) }))
     .filter((x) => x.outfit);
   // референсы «только лицо»: основной (первый) реф персонажа помечен role=face
   const charRefs = characterRows.length
@@ -316,6 +334,19 @@ export async function llmShotPrompt(
   const faceOnly = characterRows.filter(
     (c) => charRefs.find((r) => r.entityId === c.id)?.role === "face",
   );
+
+  // ---------- стартовый кадр: упоминается в промпте ТОЛЬКО если реально прикреплён ----------
+  // (инцидент: шаблон показывает строку "Use @Image1 …" в примере структуры, и модель
+  // писала её даже без прикреплённого кадра)
+  const shotRefs = await db.select().from(references).where(eq(references.shotId, shotId));
+  const hasStartFrame = shotRefs.some((r) => r.role === "start_frame");
+  const startAnchor = isKling ? "@Start" : "@Image1";
+  const startFrameBlock = hasStartFrame
+    ? `СТАРТОВЫЙ КАДР: к группе прикреплён стартовый кадр — сошлись на него ровно одной строкой ` +
+      `"Use ${startAnchor} as the locked starting frame." в начале промпта и больше его не упоминай.`
+    : `СТАРТОВЫЙ КАДР: к этой группе стартовый кадр НЕ прикреплён — НЕ упоминай ${startAnchor}, ` +
+      `@Start, @Image1 или "starting frame" вообще, даже если шаблон выше показывает такую строку в примере.`;
+
   // ---------- сюжетная сцена: непрерывность или чистый лист ----------
   // первая группа эпизода — всегда начало сцены; иначе смотрим флаг scene_start
   const [prevGroup] = await db
@@ -353,13 +384,13 @@ export async function llmShotPrompt(
           ...outfits.map((x) => `- ${x.e.name} (${x.e.elementName}): ${x.outfit}`),
           ...faceOnly.map(
             (c) =>
-              `- Референс ${c.elementName} — ТОЛЬКО ЛИЦО: в промпте явно укажи ` +
-              `"Use ${c.elementName} reference for face and identity only; clothing per wardrobe lock".`,
+              `- ${c.elementName}: референс — ТОЛЬКО ЛИЦО; его ЕДИНСТВЕННАЯ identity-строка: ` +
+              `"Use ${c.elementName} for face and identity only; clothing per WARDROBE LOCK."`,
           ),
         ].join("\n") +
-        "\nПравила гардероба: включи в текст промпта блок WARDROBE LOCK с этой одеждой " +
+        "\nПравила гардероба: включи в промпт блок WARDROBE LOCK с этой одеждой " +
         "(дословно, на английском) и правилом «clothing must remain identical in every shot»; " +
-        "не выдумывай и не меняй предметы одежды ни в одном шоте группы."
+        "не выдумывай и не меняй предметы одежды; в SHOT-блоках одежду не пересказывай."
       : "";
 
   // структура шотов группы из раскадровки v2: тайминг/план/камера/действие/реплика
@@ -402,6 +433,22 @@ export async function llmShotPrompt(
       "и оставь used_technique_ids пустым."
     : "";
 
+  // Компактность: рекомендация Seedance — до 3500 символов; лишние повторы и
+  // «декоративные» запреты только съедают внимание модели. Программный блок —
+  // не зависит от правок шаблона пользователем.
+  const compactBlock =
+    "КОМПАКТНОСТЬ ПРОМПТА (обязательно):\n" +
+    "- Весь промпт — не длиннее 3500 символов. Плотно, без воды.\n" +
+    '- На персонажа ровно ОДНА identity-строка: "Use @Name as the locked identity reference." ' +
+    "(или face-only вариант из блока гардероба). Никаких тавтологий вида " +
+    '"Use @X as the locked identity for @X" и никаких повторных строк про тот же референс.\n' +
+    "- Локация, время суток, свет, атмосфера и одежда фиксируются ОДИН раз в GLOBAL CONTINUITY — " +
+    "в SHOT-блоках пиши только то, что меняется (ракурс, действие, реплика); поля Location/Lighting " +
+    "в шоте опускай, если они не изменились.\n" +
+    "- Каждый запрет — один раз. Strict rules: не более 5 строк, только специфичное для этой сцены; " +
+    "не повторяй то, что уже зафиксировано в GLOBAL CONTINUITY, WARDROBE LOCK, DIALOGUE LOCK или Framing.\n" +
+    "- Не добавляй декларации без визуального смысла и дублирующиеся эпитеты атмосферы в каждом блоке.";
+
   return runJson(
     {
       kind: "prompt",
@@ -410,7 +457,7 @@ export async function llmShotPrompt(
       maxTokens: 8000,
       // шаблон видео-промпта заказчика (настройки, свой на семейство) — основа системной инструкции
       system:
-        `${videoTemplate}\n\n${rules}\n\n${bible}\n\n${sceneBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n` +
+        `${videoTemplate}\n\n${rules}\n\n${bible}\n\n${sceneBlock}\n\n${startFrameBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
@@ -457,8 +504,16 @@ export async function llmRevisePrompt(
   const { rules, model } = await seriesSystemBase();
   const knowledge = await knowledgeContext(prev.targetModel);
   // ревизия наследует шаблон семейства исходной версии (Seedance или Kling)
-  const reviseTemplate =
-    promptFamily(prev.targetModel) === "kling" ? settings.tpl_video_kling : settings.tpl_video;
+  const isKlingRev = promptFamily(prev.targetModel) === "kling";
+  const reviseTemplate = isKlingRev ? settings.tpl_video_kling : settings.tpl_video;
+  // стартовый кадр: как и в llmShotPrompt — упоминать только если реально прикреплён
+  const reviseShotRefs = shot
+    ? await db.select().from(references).where(eq(references.shotId, shot.id))
+    : [];
+  const reviseAnchor = isKlingRev ? "@Start" : "@Image1";
+  const reviseStartBlock = reviseShotRefs.some((r) => r.role === "start_frame")
+    ? `СТАРТОВЫЙ КАДР: прикреплён — ссылка на него ровно одной строкой "Use ${reviseAnchor} as the locked starting frame.".`
+    : `СТАРТОВЫЙ КАДР: НЕ прикреплён — убери/не добавляй упоминания ${reviseAnchor}, @Start, @Image1 и "starting frame".`;
   return runJson(
     {
       kind: "revision",
@@ -466,9 +521,10 @@ export async function llmRevisePrompt(
       episodeId: shot?.episodeId,
       maxTokens: 8000,
       system:
-        `${reviseTemplate}\n\n${rules}\n\n${knowledge}\n\n` +
+        `${reviseTemplate}\n\n${rules}\n\n${reviseStartBlock}\n\n${knowledge}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
-        "сохранив работающие части. Промпт на английском.\n" +
+        "сохранив работающие части. Промпт на английском, не длиннее 3500 символов, без " +
+        "дублирующихся правил и тавтологичных identity-строк (одна на персонажа).\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
         '"used_technique_ids":[],"params":{"aspect_ratio":"9:16","duration":15}}',
       user:
@@ -482,15 +538,21 @@ export async function llmRevisePrompt(
 }
 
 /**
- * Кнопка «Анализ» в библии: vision-модель описывает референс персонажа — весь
- * результат ТОЛЬКО на английском (description, wardrobe, caption). Уже введённые
- * пользователем поля (на любом языке) передаются модели — она переводит их на
- * английский и сливает с тем, что видит на картинке. Крупные фото ужимаются на
+ * Кнопка «Анализ» в библии: vision-модель описывает референс персонажа. Весь
+ * результат ТОЛЬКО на английском и переводит ВСЕ текстовые поля сущности — имя,
+ * описание, гардероб и подписи всех референсов (на любом языке) сливаются с тем,
+ * что видно на картинке, и приводятся к английскому. Крупные фото ужимаются на
  * лету (см. toVisionImageData), чтобы не упереться в лимит vision-модели.
  * Модель — «для простых запросов» из настроек; если она не видит картинки
  * (DeepSeek) — самая дешёвая vision-модель (Haiku 4.5).
+ *
+ * captions в ответе — переводы существующих подписей референсов в том же порядке,
+ * что и captionInputs (заполняет вызывающий код через второй аргумент).
  */
-export async function llmAnalyzeCharacterRef(refId: string): Promise<ImageAnalysis> {
+export async function llmAnalyzeCharacterRef(
+  refId: string,
+  captionInputs: string[] = [],
+): Promise<ImageAnalysis> {
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
   if (!ref) throw new Error("Референс не найден");
@@ -503,17 +565,29 @@ export async function llmAnalyzeCharacterRef(refId: string): Promise<ImageAnalys
   const settings = await getAllSettings();
   const model = visionModelFrom(settings.llm_simple_model);
 
-  // уже заполненные поля (могут быть на любом языке) — модель переведёт и учтёт
+  // уже заполненные текстовые поля (на любом языке) — модель переведёт и учтёт
+  const existingName = entity?.name?.trim() ?? "";
   const existingDescription = entity?.description?.trim() ?? "";
   const existingWardrobe = entity?.wardrobe?.trim() ?? "";
-  const existingBlock =
-    existingDescription || existingWardrobe
-      ? "The user already filled these fields (they may be in ANY language). Translate them into " +
-        "English and MERGE with what you see — keep the user's facts, route clothing wording into " +
-        "wardrobe and appearance wording into description:\n" +
-        (existingDescription ? `- current description: ${existingDescription}\n` : "") +
-        (existingWardrobe ? `- current wardrobe: ${existingWardrobe}\n` : "")
-      : "";
+  const existingLines = [
+    existingName ? `- current name: ${existingName}` : "",
+    existingDescription ? `- current description: ${existingDescription}` : "",
+    existingWardrobe ? `- current wardrobe: ${existingWardrobe}` : "",
+  ].filter(Boolean);
+  const existingBlock = existingLines.length
+    ? "The user already filled these fields (they may be in ANY language). Translate them into " +
+      "English and MERGE with what you see — keep the user's facts, route clothing wording into " +
+      "wardrobe and appearance wording into description:\n" +
+      existingLines.join("\n") +
+      "\n"
+    : "";
+  // подписи всех референсов на перевод (по порядку) — вернутся в captions[]
+  const captionsBlock = captionInputs.length
+    ? "Also translate these existing reference captions into English. Return them in the SAME order " +
+      'in the "captions" array (same length), keeping each short (2–5 words):\n' +
+      captionInputs.map((c, i) => `${i + 1}. ${c}`).join("\n") +
+      "\n"
+    : "";
 
   return runJson(
     {
@@ -523,8 +597,12 @@ export async function llmAnalyzeCharacterRef(refId: string): Promise<ImageAnalys
       system:
         "You are the character-bible assistant of an AI film series. Analyze the character reference " +
         "image and return ONLY one JSON object, no explanations. EVERYTHING you output MUST be in " +
-        "ENGLISH, regardless of the language of the image or of any provided text:\n" +
-        '{"description":"...","wardrobe":"...","face_only":true,"caption":"..."}\n' +
+        "ENGLISH, regardless of the language of the image or of any provided text. Never leave any " +
+        "provided field in its original language:\n" +
+        '{"name":"...","description":"...","wardrobe":"...","face_only":true,"caption":"...","captions":["..."]}\n' +
+        "- name: the character's name in English/Latin — transliterate personal names (Иван→Ivan), " +
+        "translate descriptive names (Старый рыбак→Old Fisherman). Keep it short. If no name was " +
+        "provided and none is obvious, return an empty string.\n" +
         "- description: a SHORT visual anchor in ENGLISH — one phrase: gender, approximate age and " +
         "2–3 most characteristic traits (hair type/color, build, a distinctive feature). NOT a " +
         "paragraph — the reference itself carries the fine detail. Do NOT put clothing here.\n" +
@@ -535,10 +613,13 @@ export async function llmAnalyzeCharacterRef(refId: string): Promise<ImageAnalys
         "- face_only: true if the frame shows only the face/portrait to the shoulders and the " +
         "character's clothing cannot be anchored from this reference.\n" +
         '- caption: a short reference caption in ENGLISH, 2–5 words (e.g. "front view, dark jacket").\n' +
+        '- captions: English translations of the provided reference captions, same order and length ' +
+        "as given; empty array if none were provided.\n" +
         "If provided text conflicts with the image, trust the provided text for identity/clothing intent.",
       user:
         (existingBlock ? existingBlock + "\n" : "") +
-        "Analyze this character reference and fill the fields in English.",
+        (captionsBlock ? captionsBlock + "\n" : "") +
+        "Analyze this character reference and fill every field in English.",
       imageBase64: base64,
       imageMediaType: mediaType,
       refIds: [refId],

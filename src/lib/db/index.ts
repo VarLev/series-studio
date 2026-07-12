@@ -164,6 +164,9 @@ UPDATE generations SET winner = true WHERE id IN (SELECT winner_generation_id FR
 UPDATE shots SET winner_generation_id = NULL WHERE winner_generation_id IS NOT NULL;
 ALTER TABLE entities ADD COLUMN IF NOT EXISTS wardrobe text NOT NULL DEFAULT '';
 ALTER TABLE shot_entities ADD COLUMN IF NOT EXISTS outfit text NOT NULL DEFAULT '';
+ALTER TABLE shot_entities ADD COLUMN IF NOT EXISTS outfit_source text NOT NULL DEFAULT '';
+DELETE FROM settings WHERE key LIKE 'hf_element_%' OR key LIKE 'hf_media2_%';
+UPDATE settings SET value = 'kling3_0,seedance_2_0_fast' WHERE key = 'target_models' AND value = 'kling3_0,seedance_2_0';
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS scene_start boolean NOT NULL DEFAULT false;
 `;
 

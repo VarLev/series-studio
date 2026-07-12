@@ -53,7 +53,7 @@ async function estimateTotal(input: SubmitInput): Promise<number> {
 /** U3/A-B: запуск задач по чекбоксам моделей; предохранитель по кредитам (M4). */
 export async function startGeneration(
   input: SubmitInput & { confirmed?: boolean },
-): Promise<Result<{ jobs: Array<{ model: string; jobId: string }> }>> {
+): Promise<Result<{ queued: number }>> {
   await requireAuth();
   try {
     if (!input.modelIds.length) return { ok: false, error: "Выберите хотя бы одну модель" };
@@ -62,15 +62,15 @@ export async function startGeneration(
     if (!input.confirmed && limit > 0 && estimate > limit) {
       return { ok: false, needsConfirm: true, estimate, limit };
     }
-    // submitJobs подтверждает приём каждой задачи (job id + контрольный job_status);
-    // любая неподтверждённая задача — это ошибка с текстом ответа провайдера
-    const { jobs } = await submitJobs(input);
+    // Быстрая постановка: submitJobs мгновенно создаёт карточки задач ("queued") и
+    // уносит отправку провайдеру в фон — экран не висит. Статус меняется в карточках.
+    const { queued } = await submitJobs(input);
     const [shot] = await (await getDb()).select().from(shots).where(eq(shots.id, input.shotId));
     if (shot) {
       revalidatePath(`/episodes/${shot.episodeId}/shots/${input.shotId}`);
       revalidatePath("/queue");
     }
-    return { ok: true, data: { jobs } };
+    return { ok: true, data: { queued } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Не удалось поставить задачу" };
   }
@@ -278,7 +278,7 @@ export async function cancelGeneration(generationId: string): Promise<void> {
 /** Повторить неудавшуюся задачу тем же промптом и моделью. */
 export async function retryGeneration(
   generationId: string,
-): Promise<Result<{ jobs: Array<{ model: string; jobId: string }> }>> {
+): Promise<Result<{ queued: number }>> {
   await requireAuth();
   const db = await getDb();
   const [gen] = await db.select().from(generations).where(eq(generations.id, generationId));

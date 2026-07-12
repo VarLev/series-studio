@@ -84,6 +84,7 @@ export default async function ReviewPage(ctx: {
       nextShot={next ? { id: next.id, label: String(next.orderIndex).padStart(2, "0") } : null}
       latestPromptId={latest?.id ?? null}
       latestVersion={latest?.version ?? 0}
+      shotDurationSec={shot.durationSec}
       regenParams={{
         durationSec: latestParams.duration ?? shot.durationSec,
         aspectRatio: latestParams.aspect_ratio ?? "16:9",

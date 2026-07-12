@@ -75,7 +75,8 @@ export default function GenerateSheet({
       ),
   );
   const [duration, setDuration] = useState(Math.min(15, Math.max(4, groupDurationSec)));
-  const [quality, setQuality] = useState<string>("720p");
+  // дефолт качества — 480p (Kling его не умеет → авто-720, см. klingFallback)
+  const [quality, setQuality] = useState<string>("480p");
   const [aspect, setAspect] = useState<string>(
     (ASPECTS as readonly string[]).includes(aspectRatio) ? aspectRatio : "16:9",
   );
@@ -167,14 +168,13 @@ export default function GenerateSheet({
         confirmed: confirmStep >= 2,
       });
       if (res.ok) {
-        // подтверждение приёма: сервер вернул job id каждой задачи, проверенный
-        // контрольным job_status — Higgsfield точно принял генерацию
-        const jobs = res.data?.jobs ?? [];
-        const ids = jobs.map((j) => j.jobId.slice(0, 8)).join(", ");
+        // карточки задач появляются сразу ("в очереди"); отправка провайдеру и
+        // подтверждение приёма идут в фоне — статус меняется прямо в карточке
+        const n = res.data?.queued ?? selected.size;
         toast(
           t(
-            `Higgsfield подтвердил приём: ${jobs.length} задач(и) ✓${ids ? ` · ${ids}` : ""}`,
-            `Higgsfield confirmed: ${jobs.length} job(s) accepted ✓${ids ? ` · ${ids}` : ""}`,
+            `Поставлено ${n} задач(и) в очередь · статус в карточках`,
+            `${n} job(s) queued · status shown on the cards`,
           ),
         );
         setConfirmInfo(null);

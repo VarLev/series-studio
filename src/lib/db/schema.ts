@@ -79,6 +79,9 @@ export const shotEntities = pgTable(
     auto: boolean("auto").notNull().default(false), // determined by Claude vs added manually
     // якорь одежды: наряд персонажа в ЭТОЙ группе (EN); пусто → entities.wardrobe
     outfit: text("outfit").notNull().default(""),
+    // источник одежды для промпта: "" | "bible" → базовый гардероб библии,
+    // "generated" → сценарный наряд (outfit) из разбивки/ручной правки
+    outfitSource: text("outfit_source").notNull().default(""),
   },
   (t) => [primaryKey({ columns: [t.shotId, t.entityId] })],
 );

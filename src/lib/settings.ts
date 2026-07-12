@@ -19,7 +19,8 @@ export const DEFAULT_SETTINGS = {
     "Сеттинг: университет Эшфорд. " +
     "Запреты: без явной эротики, без романтизации насилия.",
   credit_confirm_limit: "50",
-  target_models: "kling3_0,seedance_2_0",
+  // по умолчанию для Seedance берём Fast-вариант (дешевле/быстрее)
+  target_models: "kling3_0,seedance_2_0_fast",
   llm_price_in: "3", // $ за 1М входных токенов (конфигурируемый тариф, TZ M7)
   llm_price_out: "15", // $ за 1М выходных токенов
   // шаблоны промптов (редактируются в «Настройках»)

@@ -7,6 +7,7 @@ import { requireAuth } from "@/lib/auth";
 import { getCatalog, nextRefToken, submitReferenceJob } from "@/lib/generation";
 import { putFile, readFile } from "@/lib/storage";
 import { imageModelMeta } from "@/lib/imageModels";
+import { effectiveOutfit } from "@/lib/wardrobe";
 
 type Result = { ok: true } | { ok: false; error: string };
 
@@ -58,10 +59,10 @@ export async function generateStoryboard(input: {
       const chars = links.length
         ? await db.select().from(entities).where(inArray(entities.id, links.map((l) => l.entityId)))
         : [];
-      const outfitBy = new Map(links.map((l) => [l.entityId, l.outfit]));
+      const linkBy = new Map(links.map((l) => [l.entityId, l]));
       const outfits = chars
         .filter((e) => e.type === "character")
-        .map((e) => ({ name: e.elementName, outfit: (outfitBy.get(e.id) || e.wardrobe).trim() }))
+        .map((e) => ({ name: e.elementName, outfit: effectiveOutfit(linkBy.get(e.id), e.wardrobe) }))
         .filter((x) => x.outfit);
       if (outfits.length) {
         prompt +=

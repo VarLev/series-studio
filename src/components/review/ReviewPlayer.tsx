@@ -49,6 +49,7 @@ export default function ReviewPlayer({
   nextShot,
   latestPromptId,
   latestVersion,
+  shotDurationSec,
   regenParams,
 }: {
   episodeId: string;
@@ -62,6 +63,8 @@ export default function ReviewPlayer({
   nextShot: { id: string; label: string } | null;
   latestPromptId: string | null;
   latestVersion: number;
+  /** длительность группы — запасная шкала бегунка, если сам файл её не сообщает */
+  shotDurationSec: number;
   regenParams: { durationSec: number; aspectRatio: string; quality: string };
 }) {
   const router = useRouter();
@@ -98,11 +101,30 @@ export default function ReviewPlayer({
     setPrevIdx(idx);
     setPlaying(false);
     setTime(0);
+    setDuration(0);
   }
 
   const eachVideo = useCallback((fn: (v: HTMLVideoElement) => void) => {
     if (videoRef.current) fn(videoRef.current);
     if (videoBRef.current) fn(videoBRef.current);
+  }, []);
+
+  const handleTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    setTime(v.currentTime);
+    // Подстраховка: событие loadedmetadata иногда пропускается при монтировании,
+    // и duration-стейт остаётся 0 → max бегунка 0 и ползунок «заморожен». Дособерём
+    // длину прямо из элемента (setState с тем же значением React отбрасывает).
+    if (Number.isFinite(v.duration) && v.duration > 0) setDuration(v.duration);
+  }, []);
+
+  // Длительность фрагментированных MP4 (Kling/Higgsfield) сначала приходит как
+  // Infinity и «добивается» по мере буферизации — ловим её и на loadedmetadata,
+  // и на durationchange. Автоплей ниже ускоряет досчёт, поэтому бегунок оживает
+  // сразу при открытии, без перезагрузки страницы.
+  const handleDuration = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const d = e.currentTarget.duration;
+    if (Number.isFinite(d) && d > 0) setDuration(d);
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -351,9 +373,13 @@ export default function ReviewPlayer({
               src={current.url}
               crossOrigin="anonymous"
               playsInline
+              autoPlay
               onClick={togglePlay}
-              onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onTimeUpdate={handleTimeUpdate}
+              onLoadedMetadata={handleDuration}
+              onDurationChange={handleDuration}
               onEnded={() => setPlaying(false)}
               className="max-h-full w-full object-contain"
             />
@@ -380,8 +406,12 @@ export default function ReviewPlayer({
                 crossOrigin="anonymous"
                 playsInline
                 muted
-                onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                autoPlay
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleDuration}
+                onDurationChange={handleDuration}
                 className="absolute inset-0 h-full w-full object-contain"
               />
               <video
@@ -391,6 +421,7 @@ export default function ReviewPlayer({
                 crossOrigin="anonymous"
                 playsInline
                 muted
+                autoPlay
                 className="absolute inset-0 h-full w-full object-contain"
                 style={{ clipPath: `inset(0 0 0 ${split}%)` }}
               />
@@ -426,11 +457,13 @@ export default function ReviewPlayer({
                     src={c.url}
                     crossOrigin="anonymous"
                     playsInline
+                    autoPlay
                     muted={i === 1}
-                    onTimeUpdate={i === 0 ? (e) => setTime(e.currentTarget.currentTime) : undefined}
-                    onLoadedMetadata={
-                      i === 0 ? (e) => setDuration(e.currentTarget.duration) : undefined
-                    }
+                    onPlay={i === 0 ? () => setPlaying(true) : undefined}
+                    onPause={i === 0 ? () => setPlaying(false) : undefined}
+                    onTimeUpdate={i === 0 ? handleTimeUpdate : undefined}
+                    onLoadedMetadata={i === 0 ? handleDuration : undefined}
+                    onDurationChange={i === 0 ? handleDuration : undefined}
                     className="max-h-full w-full object-contain"
                   />
                   <span className="absolute left-2 top-2 rounded bg-[#0b0b0bcc] px-1.5 py-1 font-mono text-[9px] text-[#e6e6e6]">
@@ -488,10 +521,13 @@ export default function ReviewPlayer({
           >
             ›
           </button>
+          {/* шкала бегунка: реальная длина файла, если известна; иначе длительность
+              группы — некоторые MP4 (Kling/Higgsfield) не сообщают duration, и без
+              запасной шкалы max=0 «замораживает» ползунок */}
           <input
             type="range"
             min={0}
-            max={duration || 0}
+            max={(duration > 0 ? duration : shotDurationSec) || 0}
             step={FRAME}
             value={time}
             onChange={(e) => {
@@ -502,7 +538,8 @@ export default function ReviewPlayer({
             className="min-w-0 flex-1 accent-[#e6e6e6]"
           />
           <span className="font-mono text-[10px] text-[#8a8a8a]">
-            {timecode(time)} · {duration ? `${duration.toFixed(0)}${t("с", "s")}` : "—"}
+            {timecode(time)} · {(duration > 0 ? duration : shotDurationSec).toFixed(0)}
+            {t("с", "s")}
           </span>
         </div>
       )}

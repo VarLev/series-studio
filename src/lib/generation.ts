@@ -227,7 +227,9 @@ async function mediaForReference(
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
   if (!ref) return null;
   if (!provider.uploadMedia) return null;
-  const cacheKey = `hf_media2_${provider.name}_${refId}`;
+  // v3: поколение ключей сменено 2026-07-12 — старые кэши могли пережить удаление
+  // референса (мёртвые ссылки на удалённые изображения), при старте они зачищаются
+  const cacheKey = `hf_media3_${provider.name}_${refId}`;
   const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
   if (cached?.value) {
     try {
@@ -278,7 +280,8 @@ async function ensureEntityElement(
 ): Promise<string | null> {
   const db = await getDb();
   if (!provider.createElement) return null;
-  const cacheKey = `hf_element_${entityId}`;
+  // v2: см. комментарий у hf_media3 — смена поколения после инцидента с кэшем
+  const cacheKey = `hf_elem2_${entityId}`;
   const [cached] = await db.select().from(settings).where(eq(settings.key, cacheKey));
   if (cached?.value) return cached.value;
   try {
@@ -445,9 +448,7 @@ interface ProviderCtx {
   }>;
 }
 
-export async function submitJobs(
-  input: SubmitInput,
-): Promise<{ submitted: number; jobs: Array<{ model: string; jobId: string }> }> {
+export async function submitJobs(input: SubmitInput): Promise<{ queued: number }> {
   const db = await getDb();
   const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
   if (!shot) throw new Error("Шот не найден");
@@ -559,105 +560,151 @@ export async function submitJobs(
     return { text: replaceMentions(promptRow.text, mapping, Boolean(ctx.startImageUrl)), refMedias };
   }
 
-  const jobs: Array<{ model: string; jobId: string }> = [];
-  for (const modelId of input.modelIds) {
+  // ---------- Фаза 1 (быстро): вставляем "queued"-плейсхолдеры ----------
+  // Тяжёлая сеть (загрузка медиа референсов провайдеру, создание element, get_cost,
+  // submit) уходит в фон — карточка задачи появляется мгновенно, а её статус
+  // меняется в этой же строке по мере отправки и последующего поллинга.
+  interface Pending {
+    genId: string;
+    modelId: string;
+    promptRow: (typeof allPrompts)[number];
+    provider: GenerationProvider;
+    quality: string;
+    model: CatalogModel | undefined;
+  }
+  // сперва резолвим промпты всех моделей: нет промпта → ошибка ДО любых вставок
+  const plan = input.modelIds.map((modelId) => ({ modelId, promptRow: promptRowFor(modelId) }));
+  const pending: Pending[] = [];
+  for (const { modelId, promptRow } of plan) {
     const model = catalog.find((m) => m.id === modelId);
     const provider = await providerForModel(modelId, catalog);
-    const promptRow = promptRowFor(modelId); // промпт семейства этой модели
-    const ctx = await ctxFor(provider, promptRow);
     const quality = effectiveQuality(modelId, input.quality, model?.qualities ?? []);
-    const virtual = VIRTUAL_MODELS[modelId];
-    const params = {
-      ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
-      ...(virtual?.params ?? {}),
-    };
-    // точная стоимость ДО запуска (get_cost) — в очередь и в учёт затрат идёт она,
-    // формула — только фолбэк (у Kling preflight нет вовсе)
-    const exactCost = provider.preflightCost
-      ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: promptRow.text, ...params }).catch(() => null)
-      : null;
-    const { text: modelPrompt, refMedias } = promptForModel(provider, ctx, modelId, promptRow);
-    // журнал «Console»: что уходит в видео-модель и какие референсы приложены
-    const logRefs = [
-      ...(input.startFrameRefId ? [{ id: input.startFrameRefId, role: "start_frame" }] : []),
-      ...(await refsFor(promptRow)).map((r) => ({ id: r.refId, caption: r.name, role: "character" })),
-    ];
-    const logRequest = {
-      prompt: modelPrompt,
-      negativePrompt: promptRow.negativePrompt ?? "",
-      params,
-      startFrame: Boolean(ctx.startImageUrl),
-      attachedRefs: logRefs.length,
-    };
-    const submitStarted = Date.now();
-    const sub = await provider
-      .submit({
-        model: virtual?.base ?? modelId,
-        prompt: modelPrompt,
-        negativePrompt: promptRow.negativePrompt ?? undefined,
-        params,
-        startImageUrl: ctx.startImageUrl,
-        characterRefUrls: refMedias,
-      })
-      .catch(async (e: unknown) => {
-        await logModelCall({
-          channel: "video",
-          kind: "video",
-          provider: provider.name,
-          model: modelId,
-          status: "error",
-          request: logRequest,
-          response: { error: e instanceof Error ? e.message : String(e) },
-          refs: logRefs,
-          durationMs: Date.now() - submitStarted,
-          episodeId: shot.episodeId,
-          shotId: input.shotId,
-        });
-        throw e;
-      });
-    await logModelCall({
-      channel: "video",
-      kind: "video",
-      provider: provider.name,
-      model: modelId,
-      status: "ok",
-      request: logRequest,
-      response: { jobId: sub.jobId, statusUrl: sub.statusUrl ?? null },
-      refs: logRefs,
-      durationMs: Date.now() - submitStarted,
-      episodeId: shot.episodeId,
-      shotId: input.shotId,
-    });
-    const paramsJson: UrlBundle = {
-      ...params,
-      quality,
-      start_frame_ref: input.startFrameRefId ?? null,
-      // сколько образов персонажей привязано к задаче (элементы + медиа)
-      character_refs:
-        provider.name === "kling-mcp"
-          ? refMedias.length
-          : ctx.resolved.filter((r) => r.elementId).length + refMedias.length,
-      estimate: exactCost ?? estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
-      estimate_exact: exactCost != null,
-      _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
-    };
+    const genId = crypto.randomUUID();
     await db.insert(generations).values({
-      id: crypto.randomUUID(),
+      id: genId,
       shotId: input.shotId,
       episodeId: shot.episodeId,
       kind: "video",
       promptId: promptRow.id,
       provider: provider.name,
       model: modelId,
-      paramsJson: JSON.stringify(paramsJson),
+      paramsJson: JSON.stringify({
+        quality,
+        start_frame_ref: input.startFrameRefId ?? null,
+        character_refs: 0,
+        estimate: estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
+        estimate_exact: false,
+        _pending: { at: Date.now() }, // ждёт фоновой отправки провайдеру
+      }),
       status: "queued",
-      providerJobId: sub.jobId,
       source: "api",
     });
-    jobs.push({ model: modelId, jobId: sub.jobId });
+    pending.push({ genId, modelId, promptRow, provider, quality, model });
   }
   await db.update(shots).set({ status: "generating" }).where(eq(shots.id, input.shotId));
-  return { submitted: jobs.length, jobs };
+
+  // ---------- Фаза 2 (фон): отправка провайдеру, обновление той же строки ----------
+  async function submitOne(p: Pending): Promise<void> {
+    const { genId, modelId, promptRow, provider, quality, model } = p;
+    const virtual = VIRTUAL_MODELS[modelId];
+    const params = {
+      ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
+      ...(virtual?.params ?? {}),
+    };
+    const logRefs = [
+      ...(input.startFrameRefId ? [{ id: input.startFrameRefId, role: "start_frame" }] : []),
+      ...(await refsFor(promptRow).catch(() => [])).map((r) => ({
+        id: r.refId,
+        caption: r.name,
+        role: "character",
+      })),
+    ];
+    try {
+      const ctx = await ctxFor(provider, promptRow);
+      const exactCost = provider.preflightCost
+        ? await provider
+            .preflightCost({ model: virtual?.base ?? modelId, prompt: promptRow.text, ...params })
+            .catch(() => null)
+        : null;
+      const { text: modelPrompt, refMedias } = promptForModel(provider, ctx, modelId, promptRow);
+      const logRequest = {
+        prompt: modelPrompt,
+        negativePrompt: promptRow.negativePrompt ?? "",
+        params,
+        startFrame: Boolean(ctx.startImageUrl),
+        attachedRefs: logRefs.length,
+      };
+      const submitStarted = Date.now();
+      const sub = await provider
+        .submit({
+          model: virtual?.base ?? modelId,
+          prompt: modelPrompt,
+          negativePrompt: promptRow.negativePrompt ?? undefined,
+          params,
+          startImageUrl: ctx.startImageUrl,
+          characterRefUrls: refMedias,
+        })
+        .catch(async (e: unknown) => {
+          await logModelCall({
+            channel: "video",
+            kind: "video",
+            provider: provider.name,
+            model: modelId,
+            status: "error",
+            request: logRequest,
+            response: { error: e instanceof Error ? e.message : String(e) },
+            refs: logRefs,
+            durationMs: Date.now() - submitStarted,
+            episodeId: shot.episodeId,
+            shotId: input.shotId,
+          });
+          throw e;
+        });
+      await logModelCall({
+        channel: "video",
+        kind: "video",
+        provider: provider.name,
+        model: modelId,
+        status: "ok",
+        request: logRequest,
+        response: { jobId: sub.jobId, statusUrl: sub.statusUrl ?? null },
+        refs: logRefs,
+        durationMs: Date.now() - submitStarted,
+        episodeId: shot.episodeId,
+        shotId: input.shotId,
+      });
+      const paramsJson: UrlBundle = {
+        ...params,
+        quality,
+        start_frame_ref: input.startFrameRefId ?? null,
+        character_refs:
+          provider.name === "kling-mcp"
+            ? refMedias.length
+            : ctx.resolved.filter((r) => r.elementId).length + refMedias.length,
+        estimate: exactCost ?? estimateJobCredits(model?.credits ?? null, input.durationSec, quality),
+        estimate_exact: exactCost != null,
+        _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
+      };
+      // _pending исчезает вместе с новым paramsJson → задача перестаёт быть плейсхолдером
+      await db
+        .update(generations)
+        .set({ providerJobId: sub.jobId, paramsJson: JSON.stringify(paramsJson) })
+        .where(eq(generations.id, genId));
+    } catch (e) {
+      await db
+        .update(generations)
+        .set({ status: "failed", error: e instanceof Error ? e.message : "Не удалось отправить задачу" })
+        .where(eq(generations.id, genId));
+      await recalcShotStatus(input.shotId);
+    }
+  }
+
+  // ответ клиенту уже ушёл; отправляем последовательно (один аккаунт провайдера)
+  void (async () => {
+    for (const p of pending) await submitOne(p);
+  })().catch(() => {});
+
+  return { queued: pending.length };
 }
 
 // ---------- Задачи-референсы (Nano Banana / Upscale / Правка, spec §2.6/§3.2) ----------
@@ -902,7 +949,24 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
       gen.kind === "reference"
         ? imageProvider
         : ((await videoProviderByName(gen.provider)) ?? videoProvider);
-    if (!gen.providerJobId || gen.provider !== provider.name) continue;
+    if (!gen.providerJobId) {
+      // плейсхолдер видео-задачи ещё отправляется в фоне (submitJobs). Если завис
+      // дольше 3 минут (например, сервер перезапускался в момент отправки) —
+      // помечаем ошибкой, чтобы не крутился вечный «в очереди».
+      if (gen.kind === "video") {
+        const pend = (JSON.parse(gen.paramsJson || "{}") as { _pending?: { at?: number } })._pending;
+        if (pend?.at && Date.now() - pend.at > 180_000) {
+          await db
+            .update(generations)
+            .set({ status: "failed", error: "Не удалось отправить задачу — попробуйте ещё раз" })
+            .where(eq(generations.id, gen.id));
+          if (gen.shotId) await recalcShotStatus(gen.shotId);
+          updated++;
+        }
+      }
+      continue;
+    }
+    if (gen.provider !== provider.name) continue;
     const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
     try {
       const status = await provider.getStatus({

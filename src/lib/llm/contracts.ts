@@ -69,9 +69,11 @@ export const techniquePickSchema = z.object({
 
 /** Анализ референса персонажа (кнопка «Анализ» в библии, vision-модель). */
 export const imageAnalysisSchema = z.object({
+  name: z.string().default(""), // имя сущности на английском (транслит собственных имён)
   description: z.string().default(""), // короткий визуальный якорь на английском (без одежды)
   wardrobe: z.string().default(""), // одежда на английском — уходит в промпты как есть
   face_only: z.boolean().default(false), // в кадре только лицо/портрет
-  caption: z.string().default(""), // короткая подпись референса на английском
+  caption: z.string().default(""), // подпись главного референса на английском (если своей нет)
+  captions: z.array(z.string()).default([]), // переводы существующих подписей референсов (по порядку)
 });
 export type ImageAnalysis = z.infer<typeof imageAnalysisSchema>;

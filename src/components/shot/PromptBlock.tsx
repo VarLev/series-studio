@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
-import { generateShotPromptsFor, latestPromptVersion } from "@/lib/actions/prompts";
+import { generateShotPromptsFor, latestPromptVersion, deleteTrackPrompts } from "@/lib/actions/prompts";
 import { LLM_MODELS, PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { useT } from "@/components/I18nProvider";
@@ -65,10 +65,18 @@ export default function PromptBlock({
   // результата, если ответ долгого запроса потеряется в туннеле
   const [generating, setGenerating] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const timers = useRef<{ tick?: ReturnType<typeof setInterval>; poll?: ReturnType<typeof setInterval> }>({});
+  const timers = useRef<{
+    tick?: ReturnType<typeof setInterval>;
+    poll?: ReturnType<typeof setInterval>;
+    refresh?: ReturnType<typeof setInterval>;
+  }>({});
   const doneRef = useRef(false);
   const [copied, setCopied] = useState(false);
   const [technique, setTechnique] = useState<UsedTechnique | null>(null);
+  // удаление промпта трека — двухшаговое (взвод → подтверждение)
+  const [armDelete, setArmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const trackVersions = versions.filter((v) => promptFamily(v.targetModel) === family);
   const current = trackVersions[0] ?? null;
@@ -93,6 +101,7 @@ export default function PromptBlock({
   function cleanupTimers() {
     if (timers.current.tick) clearInterval(timers.current.tick);
     if (timers.current.poll) clearInterval(timers.current.poll);
+    if (timers.current.refresh) clearInterval(timers.current.refresh);
     timers.current = {};
   }
   // на размонтирование — гасим таймеры
@@ -101,9 +110,20 @@ export default function PromptBlock({
   function finishOk() {
     if (doneRef.current) return;
     doneRef.current = true;
-    cleanupTimers();
+    // гасим таймер и поллинг, но НЕ refresh-повторы (их запустим ниже)
+    if (timers.current.tick) clearInterval(timers.current.tick);
+    if (timers.current.poll) clearInterval(timers.current.poll);
     setGenerating(false);
-    router.refresh(); // подтягиваем сохранённую версию промпта в дерево
+    // Через туннель одиночный router.refresh() иногда теряется (RSC-ответ дропается),
+    // и свежий промпт не появляется до ручного обновления. Повторяем несколько раз —
+    // как только обновлённое дерево доедет, промпт отрисуется сам.
+    router.refresh();
+    let tries = 0;
+    const iv = setInterval(() => {
+      router.refresh();
+      if (++tries >= 4) clearInterval(iv);
+    }, 1000);
+    timers.current.refresh = iv; // для гашения на размонтирование
   }
   function finishErr(msg: string) {
     if (doneRef.current) return;
@@ -170,6 +190,25 @@ export default function PromptBlock({
     setTimeout(() => setCopied(false), 1500);
   }
 
+  // на размонтирование — гасим таймер взвода
+  useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
+
+  async function onDeleteTrack() {
+    if (!current) return;
+    if (!armDelete) {
+      setArmDelete(true);
+      armTimer.current = setTimeout(() => setArmDelete(false), 3500);
+      return;
+    }
+    if (armTimer.current) clearTimeout(armTimer.current);
+    setArmDelete(false);
+    setDeleting(true);
+    await deleteTrackPrompts(shotId, family);
+    setDeleting(false);
+    setExpanded(false);
+    router.refresh(); // промпт трека исчез → появится форма «Сгенерировать»
+  }
+
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-700">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
@@ -199,6 +238,21 @@ export default function PromptBlock({
             >
               ✎
             </button>
+            <button
+              onClick={onDeleteTrack}
+              disabled={deleting}
+              title={t(
+                `Удалить промпт ${family === "kling" ? "Kling" : "Seedance"} и сгенерировать заново`,
+                `Delete the ${family === "kling" ? "Kling" : "Seedance"} prompt to regenerate`,
+              )}
+              className="flex h-7 items-center justify-center rounded-md px-1.5 text-[12px] disabled:opacity-50"
+              style={{
+                color: armDelete ? "var(--danger)" : "var(--text-300)",
+                background: armDelete ? "rgba(194,71,106,.12)" : "none",
+              }}
+            >
+              {deleting ? "…" : armDelete ? t("удалить?", "delete?") : "🗑"}
+            </button>
           </>
         )}
       </div>
@@ -215,6 +269,7 @@ export default function PromptBlock({
                 setFamily(f.id);
                 setCreateChoice(f.id);
                 setExpanded(false);
+                setArmDelete(false);
               }}
               className="flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold"
               style={{

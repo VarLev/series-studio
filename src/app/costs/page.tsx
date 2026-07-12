@@ -12,9 +12,10 @@ import {
 import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
 import { saveSettings, logoutAction } from "@/lib/actions/settings";
-import { ScreenHeader, SectionLabel, EmptyState } from "@/components/ui";
+import { SectionLabel, EmptyState } from "@/components/ui";
 import KnowledgeIngest from "@/components/costs/KnowledgeIngest";
 import CatalogRefresh from "@/components/costs/CatalogRefresh";
+import SettingsHeader from "@/components/settings/SettingsHeader";
 import LimitStepper from "@/components/costs/LimitStepper";
 import HiggsfieldBalance from "@/components/costs/HiggsfieldBalance";
 import KlingBalance from "@/components/costs/KlingBalance";
@@ -101,7 +102,13 @@ export default async function CostsPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader backHref="/settings" eyebrow={t("Пульт", "Console")} title={t("Затраты", "Costs")} />
+      <SettingsHeader
+        title={t("Затраты", "Costs")}
+        subtitle={t(
+          "Балансы, расходы по эпизодам и каталог моделей.",
+          "Balances, per-episode costs and the model catalog.",
+        )}
+      />
       <SettingsTabs />
       <div className="flex flex-col gap-6 p-4 pb-12">
         {/* Живые балансы кредитов подписок */}

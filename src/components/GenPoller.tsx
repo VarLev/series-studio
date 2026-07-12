@@ -18,12 +18,14 @@ export default function GenPoller({ activeCount }: { activeCount: number }) {
       if (busy.current || document.visibilityState === "hidden") return;
       busy.current = true;
       try {
-        const res = await fetch("/api/generations/poll", {
+        // poll двигает статусы у провайдера И запускает фоновую отправку плейсхолдеров;
+        // обновляем экран каждый тик, пока есть активные задачи — часть изменений
+        // (проставленный jobId, провал фоновой отправки) происходит вне ответа poll
+        await fetch("/api/generations/poll", {
           method: "POST",
           signal: AbortSignal.timeout(20_000),
         });
-        const data = (await res.json()) as { updated: number };
-        if (data.updated > 0) router.refresh();
+        router.refresh();
       } catch {
         // сеть моргнула — попробуем в следующий тик
       } finally {

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
 import { EntityAvatar, ENTITY_TYPE_LABEL } from "@/components/ui";
 import { addShotEntity, removeShotEntity, setShotEntityOutfit } from "@/lib/actions/shots";
+import { effectiveOutfit } from "@/lib/wardrobe";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
@@ -15,11 +16,15 @@ export interface ChipEntity {
   avatarUrl: string | null;
   linked: boolean;
   auto: boolean;
-  /** наряд в этой группе (якорь одежды); пусто → базовый гардероб */
+  /** сценарный наряд в этой группе (из разбивки/ручной правки) */
   outfit: string;
-  /** базовый гардероб из библии (фолбэк и placeholder) */
+  /** базовый гардероб из библии */
   wardrobe: string;
+  /** источник для промпта: "" | "bible" → библия, "generated" → сценарный наряд */
+  outfitSource: string;
 }
+
+type Source = "bible" | "generated";
 
 export default function EntityChips({
   shotId,
@@ -32,6 +37,7 @@ export default function EntityChips({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [outfitFor, setOutfitFor] = useState<ChipEntity | null>(null);
   const [outfitText, setOutfitText] = useState("");
+  const [source, setSource] = useState<Source>("bible");
   const [pending, startTransition] = useTransition();
   const linked = entities.filter((e) => e.linked);
   const available = entities.filter((e) => !e.linked);
@@ -40,57 +46,55 @@ export default function EntityChips({
     if (e.type !== "character") return;
     setOutfitFor(e);
     setOutfitText(e.outfit);
+    setSource(e.outfitSource === "generated" ? "generated" : "bible");
   }
 
   return (
     <>
       <div className="flex flex-wrap gap-1.5">
-        {linked.map((e) => (
-          <span
-            key={e.id}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-ink-600 py-1 pl-1 pr-1.5"
-            style={
-              e.type === "character" && (e.outfit || e.wardrobe)
-                ? { borderColor: "var(--border-strong)" }
-                : undefined
-            }
-          >
-            {/* тап по персонажу — якорь одежды этой группы */}
-            <button
-              onClick={() => openOutfit(e)}
-              disabled={e.type !== "character"}
-              title={
-                e.type === "character"
-                  ? e.outfit || e.wardrobe || t("Задать одежду в группе", "Set outfit for this group")
-                  : undefined
-              }
-              className="inline-flex items-center gap-1.5 disabled:cursor-default"
+        {linked.map((e) => {
+          // что реально уйдёт в промпт (для индикатора чипа)
+          const eff = effectiveOutfit(e, e.wardrobe);
+          const isChar = e.type === "character";
+          return (
+            <span
+              key={e.id}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-ink-600 py-1 pl-1 pr-1.5"
+              style={isChar && eff ? { borderColor: "var(--border-strong)" } : undefined}
             >
-              <EntityAvatar name={e.name} imageUrl={e.avatarUrl} size={22} />
-              <span className="text-[12px] font-medium text-t200">{e.name}</span>
-              {e.type === "character" && (
-                <span
-                  className="text-[10px]"
-                  style={{ color: e.outfit || e.wardrobe ? "var(--success)" : "var(--text-400)" }}
-                >
-                  👔
+              {/* тап по персонажу — якорь одежды этой группы */}
+              <button
+                onClick={() => openOutfit(e)}
+                disabled={!isChar}
+                title={isChar ? eff || t("Задать одежду в группе", "Set outfit for this group") : undefined}
+                className="inline-flex items-center gap-1.5 disabled:cursor-default"
+              >
+                <EntityAvatar name={e.name} imageUrl={e.avatarUrl} size={22} />
+                <span className="text-[12px] font-medium text-t200">{e.name}</span>
+                {isChar && (
+                  <span
+                    className="text-[10px]"
+                    style={{ color: eff ? "var(--success)" : "var(--text-400)" }}
+                  >
+                    👔
+                  </span>
+                )}
+              </button>
+              {e.auto && (
+                <span className="rounded-[3px] bg-[rgba(139,95,176,.14)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-300">
+                  {t("авто", "auto")}
                 </span>
               )}
-            </button>
-            {e.auto && (
-              <span className="rounded-[3px] bg-[rgba(139,95,176,.14)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-300">
-                {t("авто", "auto")}
-              </span>
-            )}
-            <button
-              aria-label={`${t("Убрать", "Remove")} ${e.name}`}
-              onClick={() => startTransition(() => removeShotEntity(shotId, e.id))}
-              className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger"
-            >
-              ×
-            </button>
-          </span>
-        ))}
+              <button
+                aria-label={`${t("Убрать", "Remove")} ${e.name}`}
+                onClick={() => startTransition(() => removeShotEntity(shotId, e.id))}
+                className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger"
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
         <button
           aria-label="Добавить сущность"
           onClick={() => setSheetOpen(true)}
@@ -134,40 +138,85 @@ export default function EntityChips({
         </div>
       </Sheet>
 
-      {/* якорь одежды: наряд персонажа в ЭТОЙ группе (между группами может отличаться) */}
+      {/* Одежда персонажа в группе: 2 блока (библия / сценарий) + выбор источника */}
       <Sheet
         open={Boolean(outfitFor)}
         onClose={() => setOutfitFor(null)}
         title={`${t("Одежда в группе", "Outfit in this group")} · ${outfitFor?.name ?? ""}`}
       >
         {outfitFor && (
-          <div className="flex flex-col gap-3 pb-2">
-            <textarea
-              value={outfitText}
-              onChange={(e) => setOutfitText(e.target.value)}
-              rows={3}
-              autoFocus
-              spellCheck={false}
-              placeholder={
-                outfitFor.wardrobe ||
-                t(
-                  "На английском, напр.: charcoal wool coat over white shirt, black jeans",
-                  "In English, e.g.: charcoal wool coat over white shirt, black jeans",
-                )
-              }
-              className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t100 outline-none focus:border-[var(--border-strong)]"
-            />
+          <div className="flex flex-col gap-4 pb-2">
+            {/* Блок 1 — одежда из библии (read-only, меняется в Библии) */}
+            <div className="flex flex-col gap-1.5">
+              <div className="section-label">{t("1 · Одежда из библии", "1 · Bible wardrobe")}</div>
+              <div className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t200">
+                {outfitFor.wardrobe || (
+                  <span className="text-t400">
+                    {t("не задан — укажите в разделе «Библия»", "not set — add it in the Bible section")}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Блок 2 — сценарная одежда (из разбивки/ручная), пусто если не генерировалась */}
+            <div className="flex flex-col gap-1.5">
+              <div className="section-label">{t("2 · Одежда из сценария", "2 · Scene wardrobe")}</div>
+              <textarea
+                value={outfitText}
+                onChange={(e) => setOutfitText(e.target.value)}
+                rows={3}
+                spellCheck={false}
+                placeholder={t(
+                  "Пусто — одежда не описана в сюжете, берётся из библии. Можно вписать наряд вручную (на английском).",
+                  "Empty — not described in the story, taken from the bible. You can type an outfit manually (in English).",
+                )}
+                className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t100 outline-none focus:border-[var(--border-strong)]"
+              />
+            </div>
+
+            {/* Переключатель источника для промпта */}
+            <div className="flex flex-col gap-1.5">
+              <div className="section-label">{t("В финальный промпт", "Into the final prompt")}</div>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    { id: "bible", ru: "Из библии", en: "Bible" },
+                    { id: "generated", ru: "Сценарная", en: "Scene" },
+                  ] as const
+                ).map((opt) => {
+                  const active = source === opt.id;
+                  const disabled = opt.id === "generated" && !outfitText.trim();
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => !disabled && setSource(opt.id)}
+                      disabled={disabled}
+                      className="min-h-11 rounded-lg border px-3 text-[12px] font-semibold disabled:opacity-40"
+                      style={{
+                        borderColor: active ? "var(--violet-400)" : "var(--border-subtle)",
+                        background: active ? "rgba(139,95,176,.14)" : "transparent",
+                        color: active ? "var(--text-100)" : "var(--text-300)",
+                      }}
+                    >
+                      {t(opt.ru, opt.en)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <p className="text-[11px] leading-relaxed text-t400">
               {t(
-                "Одежда фиксируется для всех шотов этой группы (WARDROBE LOCK в промпте). Пусто — берётся базовый гардероб из библии. Пишите на английском: текст уходит в промпт как есть.",
-                "Locked for every shot of this group (WARDROBE LOCK in the prompt). Empty — the bible's base wardrobe is used. Write in English: the text goes into the prompt verbatim.",
+                "По умолчанию одежда берётся из библии. Сценарный наряд появляется, только если сюжет описал внешний вид в этой сцене — тогда переключатель встаёт на «Сценарная». Выбранный вариант уходит в промпт (WARDROBE LOCK) для всех шотов группы.",
+                "By default clothing comes from the bible. A scene outfit appears only when the story described the look in this scene — then the switch defaults to “Scene”. The chosen one goes into the prompt (WARDROBE LOCK) for every shot of the group.",
               )}
             </p>
+
             <button
               disabled={pending}
               onClick={() =>
                 startTransition(async () => {
-                  await setShotEntityOutfit(shotId, outfitFor.id, outfitText);
+                  await setShotEntityOutfit(shotId, outfitFor.id, outfitText, source);
                   toast(t("Одежда группы сохранена", "Group outfit saved"));
                   setOutfitFor(null);
                 })

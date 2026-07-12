@@ -112,9 +112,10 @@ export default async function ShotPage(ctx: {
     avatarUrl: avatarByEntity.get(e.id) ?? null,
     linked: linkedIds.has(e.id),
     auto: links.find((l) => l.entityId === e.id)?.auto ?? false,
-    // якорь одежды: наряд в этой группе + базовый гардероб из библии (фолбэк)
+    // якорь одежды: сценарный наряд группы, базовый гардероб из библии и источник
     outfit: links.find((l) => l.entityId === e.id)?.outfit ?? "",
     wardrobe: e.wardrobe,
+    outfitSource: links.find((l) => l.entityId === e.id)?.outfitSource ?? "",
   }));
   const styleChips = chipData
     .filter((c) => c.type === "style")

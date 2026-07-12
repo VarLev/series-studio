@@ -87,14 +87,17 @@ export default function EntityForm({
         return;
       }
       // сервер уже сохранил значения — синхронизируем поля и снимок
+      // (имя, описание и гардероб; подписи референсов правятся в БД → галерея)
       setFields((f) => {
         const next = {
           ...f,
+          name: res.name || f.name,
           description: res.description || f.description,
           wardrobe: res.wardrobe || f.wardrobe,
         };
         setSaved((s) => ({
           ...s,
+          name: res.name || s.name,
           description: res.description || s.description,
           wardrobe: res.wardrobe || s.wardrobe,
         }));
@@ -103,7 +106,7 @@ export default function EntityForm({
       toast(
         res.faceOnly
           ? t("Анализ готов · референс помечен «только лицо»", "Analyzed · reference marked face-only")
-          : t("Анализ готов — описание и гардероб заполнены", "Analyzed — description and wardrobe filled"),
+          : t("Анализ готов — все поля переведены на английский", "Analyzed — all fields translated to English"),
       );
     });
   }
