@@ -541,6 +541,7 @@ export async function llmAnalyzeCharacterRef(refId: string): Promise<ImageAnalys
         "Analyze this character reference and fill the fields in English.",
       imageBase64: base64,
       imageMediaType: mediaType,
+      refIds: [refId],
     },
     imageAnalysisSchema,
   );

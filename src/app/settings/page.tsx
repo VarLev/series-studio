@@ -5,6 +5,7 @@ import { listTechniques } from "@/lib/director";
 import { isConnected } from "@/lib/higgsfieldMcp";
 import { isConnected as isKlingConnected } from "@/lib/klingMcp";
 import SettingsClient from "@/components/settings/SettingsClient";
+import SettingsTabs from "@/components/settings/SettingsTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function SettingsPage() {
           )}
         </p>
       </div>
+      <SettingsTabs />
       <SettingsClient
         uiLang={settings.ui_lang}
         uiTheme={settings.ui_theme}

@@ -128,6 +128,24 @@ CREATE TABLE IF NOT EXISTS llm_usage (
   episode_id text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS model_log (
+  id text PRIMARY KEY,
+  channel text NOT NULL DEFAULT 'llm',
+  kind text NOT NULL DEFAULT '',
+  provider text NOT NULL DEFAULT '',
+  model text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'ok',
+  request_json text NOT NULL DEFAULT '{}',
+  response_json text NOT NULL DEFAULT '{}',
+  refs_json text NOT NULL DEFAULT '[]',
+  input_tokens integer NOT NULL DEFAULT 0,
+  output_tokens integer NOT NULL DEFAULT 0,
+  duration_ms integer NOT NULL DEFAULT 0,
+  episode_id text,
+  shot_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS model_log_created_idx ON model_log (created_at DESC);
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS token text;
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS width integer;
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS height integer;

@@ -19,6 +19,7 @@ import LimitStepper from "@/components/costs/LimitStepper";
 import HiggsfieldBalance from "@/components/costs/HiggsfieldBalance";
 import KlingBalance from "@/components/costs/KlingBalance";
 import ConfirmButton from "@/components/ConfirmButton";
+import SettingsTabs from "@/components/settings/SettingsTabs";
 import { deleteKnowledgeDoc, clearKnowledge } from "@/lib/actions/deletes";
 
 export const dynamic = "force-dynamic";
@@ -100,7 +101,8 @@ export default async function CostsPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader backHref="/episodes" eyebrow={t("Пульт", "Console")} title={t("Затраты и настройки", "Costs & settings")} />
+      <ScreenHeader backHref="/settings" eyebrow={t("Пульт", "Console")} title={t("Затраты", "Costs")} />
+      <SettingsTabs />
       <div className="flex flex-col gap-6 p-4 pb-12">
         {/* Живые балансы кредитов подписок */}
         <HiggsfieldBalance />

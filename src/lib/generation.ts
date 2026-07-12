@@ -30,6 +30,7 @@ import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
 import { imageModelMeta, type ImageModelMeta } from "@/lib/imageModels";
 import { promptFamily } from "@/lib/llm/models";
+import { logModelCall } from "@/lib/modelLog";
 
 // ---------- Каталог моделей (TZ §0.2) ----------
 
@@ -576,13 +577,56 @@ export async function submitJobs(
       ? await provider.preflightCost({ model: virtual?.base ?? modelId, prompt: promptRow.text, ...params }).catch(() => null)
       : null;
     const { text: modelPrompt, refMedias } = promptForModel(provider, ctx, modelId, promptRow);
-    const sub = await provider.submit({
-      model: virtual?.base ?? modelId,
+    // журнал «Console»: что уходит в видео-модель и какие референсы приложены
+    const logRefs = [
+      ...(input.startFrameRefId ? [{ id: input.startFrameRefId, role: "start_frame" }] : []),
+      ...(await refsFor(promptRow)).map((r) => ({ id: r.refId, caption: r.name, role: "character" })),
+    ];
+    const logRequest = {
       prompt: modelPrompt,
-      negativePrompt: promptRow.negativePrompt ?? undefined,
+      negativePrompt: promptRow.negativePrompt ?? "",
       params,
-      startImageUrl: ctx.startImageUrl,
-      characterRefUrls: refMedias,
+      startFrame: Boolean(ctx.startImageUrl),
+      attachedRefs: logRefs.length,
+    };
+    const submitStarted = Date.now();
+    const sub = await provider
+      .submit({
+        model: virtual?.base ?? modelId,
+        prompt: modelPrompt,
+        negativePrompt: promptRow.negativePrompt ?? undefined,
+        params,
+        startImageUrl: ctx.startImageUrl,
+        characterRefUrls: refMedias,
+      })
+      .catch(async (e: unknown) => {
+        await logModelCall({
+          channel: "video",
+          kind: "video",
+          provider: provider.name,
+          model: modelId,
+          status: "error",
+          request: logRequest,
+          response: { error: e instanceof Error ? e.message : String(e) },
+          refs: logRefs,
+          durationMs: Date.now() - submitStarted,
+          episodeId: shot.episodeId,
+          shotId: input.shotId,
+        });
+        throw e;
+      });
+    await logModelCall({
+      channel: "video",
+      kind: "video",
+      provider: provider.name,
+      model: modelId,
+      status: "ok",
+      request: logRequest,
+      response: { jobId: sub.jobId, statusUrl: sub.statusUrl ?? null },
+      refs: logRefs,
+      durationMs: Date.now() - submitStarted,
+      episodeId: shot.episodeId,
+      shotId: input.shotId,
     });
     const paramsJson: UrlBundle = {
       ...params,
@@ -657,12 +701,47 @@ export async function submitReferenceJob(input: ReferenceJobInput): Promise<void
     }
   }
 
-  const sub = await provider.submit({
-    model: input.model,
+  const imgLogRefs = (input.sourceRefIds ?? []).map((id) => ({ id, role: input.sourceTag }));
+  const imgLogRequest = {
     prompt: input.prompt,
     params,
-    referenceUrls: referenceUrls.length ? referenceUrls : undefined,
-    referenceImages: referenceImages.length ? referenceImages : undefined,
+    attachedRefs: (input.sourceRefIds ?? []).length,
+  };
+  const imgStarted = Date.now();
+  const sub = await provider
+    .submit({
+      model: input.model,
+      prompt: input.prompt,
+      params,
+      referenceUrls: referenceUrls.length ? referenceUrls : undefined,
+      referenceImages: referenceImages.length ? referenceImages : undefined,
+    })
+    .catch(async (e: unknown) => {
+      await logModelCall({
+        channel: "image",
+        kind: input.sourceTag,
+        provider: provider.name,
+        model: input.model,
+        status: "error",
+        request: imgLogRequest,
+        response: { error: e instanceof Error ? e.message : String(e) },
+        refs: imgLogRefs,
+        durationMs: Date.now() - imgStarted,
+        episodeId: input.episodeId,
+      });
+      throw e;
+    });
+  await logModelCall({
+    channel: "image",
+    kind: input.sourceTag,
+    provider: provider.name,
+    model: input.model,
+    status: "ok",
+    request: imgLogRequest,
+    response: { jobId: sub.jobId, statusUrl: sub.statusUrl ?? null },
+    refs: imgLogRefs,
+    durationMs: Date.now() - imgStarted,
+    episodeId: input.episodeId,
   });
   const paramsJson: UrlBundle = {
     ...params,

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { z } from "zod";
 import { getDb, llmUsage } from "@/lib/db";
+import { logModelCall } from "@/lib/modelLog";
 
 let client: Anthropic | null = null;
 let openaiClient: OpenAI | null = null;
@@ -96,6 +97,13 @@ export interface LlmCall {
   /** vision: изображение для анализа (base64 без префикса data:) */
   imageBase64?: string;
   imageMediaType?: string;
+  /** id референсов, приложенных к вызову (для журнала «Console») */
+  refIds?: string[];
+}
+
+interface TextResult {
+  text: string;
+  usage: { input_tokens: number; output_tokens: number } | null;
 }
 
 async function recordUsage(
@@ -119,16 +127,58 @@ async function recordUsage(
 
 export async function runText(call: LlmCall): Promise<string> {
   const provider = providerOf(call.model);
-  if (provider === "anthropic") return runAnthropicText(call);
   if (call.imageBase64 && provider === "deepseek") {
     throw new Error(
       `Модель «${call.model}» не принимает изображения — выберите в настройках vision-модель (Haiku/Gemini).`,
     );
   }
-  return runOpenAiText(call, provider);
+  const started = Date.now();
+  const refs = (call.refIds ?? []).map((id) => ({ id }));
+  try {
+    const { text, usage } =
+      provider === "anthropic"
+        ? await runAnthropicText(call)
+        : await runOpenAiText(call, provider);
+    if (usage) await recordUsage(call, usage);
+    await logModelCall({
+      channel: "llm",
+      kind: call.kind,
+      provider,
+      model: call.model,
+      status: "ok",
+      request: {
+        system: call.system,
+        user: call.user,
+        hasImage: Boolean(call.imageBase64),
+        imageMediaType: call.imageBase64 ? call.imageMediaType ?? "image/png" : undefined,
+        maxTokens: call.maxTokens,
+      },
+      response: { text },
+      refs,
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      durationMs: Date.now() - started,
+      episodeId: call.episodeId ?? null,
+    });
+    return text;
+  } catch (e) {
+    await logModelCall({
+      channel: "llm",
+      kind: call.kind,
+      provider,
+      model: call.model,
+      status: "error",
+      request: { system: call.system, user: call.user, hasImage: Boolean(call.imageBase64) },
+      response: { error: e instanceof Error ? e.message : String(e) },
+      refs,
+      durationMs: Date.now() - started,
+      episodeId: call.episodeId ?? null,
+    });
+    throw e;
+  }
 }
 
-async function runAnthropicText(call: LlmCall): Promise<string> {
+async function runAnthropicText(call: LlmCall): Promise<TextResult> {
   const anthropic = getClient();
   try {
     const content: Anthropic.ContentBlockParam[] = call.imageBase64
@@ -159,11 +209,17 @@ async function runAnthropicText(call: LlmCall): Promise<string> {
       { signal: AbortSignal.timeout(LLM_TIMEOUT_MS) },
     );
     const message = await stream.finalMessage();
-    await recordUsage(call, message.usage);
-    return message.content
+    const text = message.content
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("");
+    return {
+      text,
+      usage: {
+        input_tokens: message.usage.input_tokens,
+        output_tokens: message.usage.output_tokens,
+      },
+    };
   } catch (e) {
     if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
       throw new Error(
@@ -174,7 +230,7 @@ async function runAnthropicText(call: LlmCall): Promise<string> {
   }
 }
 
-async function runOpenAiText(call: LlmCall, provider: Provider): Promise<string> {
+async function runOpenAiText(call: LlmCall, provider: Provider): Promise<TextResult> {
   const openai = openAiCompatClient(provider);
   try {
     // vision через OpenAI-совместимый формат: картинка как data-URI (Gemini/GPT)
@@ -219,8 +275,7 @@ async function runOpenAiText(call: LlmCall, provider: Provider): Promise<string>
         };
       }
     }
-    if (usage) await recordUsage(call, usage);
-    return text;
+    return { text, usage };
   } catch (e) {
     const providerName =
       provider === "deepseek" ? "DeepSeek" : provider === "gemini" ? "Gemini" : "GPT";

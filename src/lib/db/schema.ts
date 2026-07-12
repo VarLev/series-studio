@@ -176,3 +176,28 @@ export const llmUsage = pgTable("llm_usage", {
   episodeId: text("episode_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Консоль (вкладка «Console»): журнал ВСЕХ обращений к моделям — что и в каком
+ * виде ушло и что пришло в ответ. Пишется на двух воронках: текстовые LLM-вызовы
+ * (client.runText) и постановка задач генерации видео/картинок (generation.ts).
+ */
+export const modelLog = pgTable("model_log", {
+  id: text("id").primaryKey(),
+  channel: text("channel").notNull().default("llm"), // llm | video | image
+  kind: text("kind").notNull().default(""), // analysis | breakdown | prompt | … | video | reference
+  provider: text("provider").notNull().default(""), // anthropic | openai | gemini | higgsfield-mcp | kling-mcp | google
+  model: text("model").notNull().default(""),
+  status: text("status").notNull().default("ok"), // ok | error
+  // что отправлено (system/user/prompt/params/hasImage) и что пришло (text/jobId/error/usage)
+  requestJson: text("request_json").notNull().default("{}"),
+  responseJson: text("response_json").notNull().default("{}"),
+  // прикреплённые референсы: [{id, caption, role}] — превью резолвит страница
+  refsJson: text("refs_json").notNull().default("[]"),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  durationMs: integer("duration_ms").notNull().default(0),
+  episodeId: text("episode_id"),
+  shotId: text("shot_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

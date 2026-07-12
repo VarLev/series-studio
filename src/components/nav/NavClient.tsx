@@ -8,15 +8,16 @@ const ITEMS = [
   { href: "/episodes", ru: "Серии", en: "Episodes", icon: "▤" },
   { href: "/bible", ru: "Библия", en: "Bible", icon: "❖" },
   { href: "/queue", ru: "Очередь", en: "Queue", icon: "⏳" },
-  { href: "/costs", ru: "Затраты", en: "Costs", icon: "◔" },
+  { href: "/console", ru: "Консоль", en: "Console", icon: "❯" },
   { href: "/settings", ru: "Настройки", en: "Settings", icon: "⚙" },
 ];
 
 /**
- * Таб-бар живёт только на четырёх верхних экранах: на вложенных (карточка шота,
+ * Таб-бар живёт только на верхних экранах: на вложенных (карточка шота,
  * серия, референсы) у экранов свои нижние панели — таб-бар их перекрывал.
+ * «Затраты» (/costs) переехали внутрь Настроек — своего таба у них больше нет.
  */
-const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/costs", "/settings"];
+const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/console", "/settings"];
 
 /** Нижний таб-бар (мобайл, spec §2.1) + сайдбар (десктоп, spec §4). */
 export default function NavClient({ activeJobs }: { activeJobs: number }) {
