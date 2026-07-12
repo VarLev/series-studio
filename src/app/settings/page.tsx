@@ -3,6 +3,7 @@ import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
 import { listTechniques } from "@/lib/director";
 import { isConnected } from "@/lib/higgsfieldMcp";
+import { isConnected as isKlingConnected } from "@/lib/klingMcp";
 import SettingsClient from "@/components/settings/SettingsClient";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export default async function SettingsPage() {
   const settings = await getAllSettings();
   const techniques = await listTechniques();
   const hfConnected = await isConnected();
+  const klingConnected = await isKlingConnected();
   const t = await getT();
 
   return (
@@ -33,6 +35,7 @@ export default async function SettingsPage() {
         uiLang={settings.ui_lang}
         uiTheme={settings.ui_theme}
         hfConnected={hfConnected}
+        klingConnected={klingConnected}
         breakdownTemplate={settings.tpl_breakdown}
         storyboardTemplate={settings.tpl_storyboard}
         videoTemplate={settings.tpl_video}

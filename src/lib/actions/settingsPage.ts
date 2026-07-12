@@ -92,6 +92,34 @@ export async function hfMcpListTools(): Promise<
   }
 }
 
+// ---------- Kling MCP (видео на платных кредитах подписки Kling) ----------
+
+export async function klingMcpDisconnect(): Promise<void> {
+  await requireAuth();
+  const { disconnect } = await import("@/lib/klingMcp");
+  await disconnect();
+  revalidatePath("/settings");
+}
+
+/**
+ * who_am_i — проверка подключения и discovery: возвращает личность,
+ * доступные модели и спецификации параметров каждого инструмента.
+ */
+export async function klingWhoAmI(): Promise<
+  { ok: true; text: string } | { ok: false; error: string }
+> {
+  await requireAuth();
+  try {
+    const { isConnected, callKlingTool } = await import("@/lib/klingMcp");
+    if (!(await isConnected())) return { ok: false, error: "not_connected" };
+    const res = await callKlingTool("who_am_i", {}, { retry: true });
+    const text = res.text || JSON.stringify(res.structured ?? {});
+    return { ok: true, text: text.slice(0, 8000) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
+
 /** Текущий баланс кредитов подписки Higgsfield (MCP balance). */
 export async function hfBalance(): Promise<
   { ok: true; credits: number | null; plan: string; usd: number | null } | { ok: false; error: string }

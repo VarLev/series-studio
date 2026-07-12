@@ -18,6 +18,8 @@ import {
   saveUiPref,
   hfMcpDisconnect,
   hfMcpListTools,
+  klingMcpDisconnect,
+  klingWhoAmI,
 } from "@/lib/actions/settingsPage";
 import { SectionLabel } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
@@ -199,6 +201,82 @@ function HiggsfieldConnect({ connected }: { connected: boolean }) {
   );
 }
 
+function KlingConnect({ connected }: { connected: boolean }) {
+  const router = useRouter();
+  const t = useT();
+  const [info, setInfo] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function check() {
+    setChecking(true);
+    setError("");
+    const res = await klingWhoAmI();
+    setChecking(false);
+    if (res.ok) setInfo(res.text);
+    else setError(res.error);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5">
+      <div className="flex items-center gap-2">
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: connected ? "var(--success)" : "var(--text-400)" }}
+        />
+        <span className="text-[13px] font-semibold text-t100">
+          {connected
+            ? t("Kling подключён — видео на кредитах подписки Kling", "Kling connected — video on Kling plan credits")
+            : t("Kling не подключён", "Kling not connected")}
+        </span>
+      </div>
+      <div className="text-[10.5px] leading-relaxed text-t400">
+        {t(
+          "Официальный Kling MCP (kling.ai/mcp): вход через ваш аккаунт Kling (OAuth, без ключей). Списывает ПЛАТНЫЕ кредиты подписки по ценам платформы. Ограничения Kling: бонусные кредиты и off-peak-бесплатные генерации через API не работают; только Personal-воркспейс; ссылки на результат живут 24 часа (приложение скачивает файл сразу).",
+          "Official Kling MCP (kling.ai/mcp): sign in with your Kling account (OAuth, no keys). Spends PAID plan credits at platform pricing. Kling limits: bonus credits and off-peak free generations don't work via API; Personal workspace only; result URLs live 24h (the app downloads files immediately).",
+        )}
+      </div>
+      <div className="flex gap-2">
+        {connected ? (
+          <>
+            <button
+              onClick={check}
+              disabled={checking}
+              className="min-h-10 flex-1 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t200 hover:bg-ink-500 disabled:opacity-50"
+            >
+              {checking ? t("Проверяю…", "Checking…") : t("Проверить (who_am_i: модели)", "Test (who_am_i: models)")}
+            </button>
+            <ConfirmButton
+              action={async () => {
+                await klingMcpDisconnect();
+                router.refresh();
+              }}
+              label={t("Отключить", "Disconnect")}
+              confirmLabel={t("Отключить аккаунт?", "Disconnect account?")}
+              doneToast={t("Kling отключён", "Kling disconnected")}
+              className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] px-3 text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
+            />
+          </>
+        ) : (
+          <a
+            href="/api/kling/oauth/start"
+            className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400"
+            style={{ boxShadow: "var(--glow-violet-sm)" }}
+          >
+            {t("Подключить аккаунт Kling", "Connect Kling account")}
+          </a>
+        )}
+      </div>
+      {error && <div className="text-[11px] text-danger">{error}</div>}
+      {info && (
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-2.5 font-mono text-[10px] leading-relaxed text-t200">
+          {info}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsClient({
   breakdownTemplate,
   storyboardTemplate,
@@ -207,6 +285,7 @@ export default function SettingsClient({
   uiLang,
   uiTheme,
   hfConnected,
+  klingConnected,
 }: {
   breakdownTemplate: string;
   storyboardTemplate: string;
@@ -215,6 +294,7 @@ export default function SettingsClient({
   uiLang: string;
   uiTheme: string;
   hfConnected: boolean;
+  klingConnected: boolean;
 }) {
   const router = useRouter();
   const t = useT();
@@ -325,6 +405,9 @@ export default function SettingsClient({
 
       <SectionLabel>{t("Генерация видео (Higgsfield)", "Video generation (Higgsfield)")}</SectionLabel>
       <HiggsfieldConnect connected={hfConnected} />
+
+      <SectionLabel>{t("Генерация видео (Kling)", "Video generation (Kling)")}</SectionLabel>
+      <KlingConnect connected={klingConnected} />
 
       <SectionLabel>{t("Шаблоны промптов", "Prompt templates")}</SectionLabel>
       <TemplateEditor
