@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { isAuthenticated } from "@/lib/auth";
 import { putFile } from "@/lib/storage";
+import { normalizeUploadImage } from "@/lib/image";
 import { getDb, references, generations, shots } from "@/lib/db";
 import { nextRefToken, probeImageSize, recalcShotStatus } from "@/lib/generation";
 import { eq } from "drizzle-orm";
@@ -43,14 +44,20 @@ export async function POST(req: NextRequest) {
   if (!allowed.includes(file.type)) {
     return NextResponse.json({ error: `Неподдерживаемый тип файла: ${file.type}` }, { status: 400 });
   }
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const rawBuffer = Buffer.from(await file.arrayBuffer());
+  // крупные изображения ужимаем без видимой потери качества (EXIF-поворот,
+  // длинная сторона ≤ 2048, пережатие) — видео и GIF проходят как есть
+  const norm = IMAGE_TYPES.includes(file.type)
+    ? await normalizeUploadImage(rawBuffer, file.type)
+    : { data: rawBuffer, contentType: file.type, ext: extFor(file.type) };
+  const buffer = norm.data;
   const id = crypto.randomUUID();
   const db = await getDb();
 
   if (kind === "result") {
     const shotId = String(form.get("shotId") ?? "");
     if (!shotId) return NextResponse.json({ error: "shotId обязателен" }, { status: 400 });
-    const storagePath = await putFile(`results/${shotId}/${id}${extFor(file.type)}`, buffer, file.type);
+    const storagePath = await putFile(`results/${shotId}/${id}${norm.ext}`, buffer, norm.contentType);
     await db.insert(generations).values({
       id,
       shotId,
@@ -74,9 +81,9 @@ export async function POST(req: NextRequest) {
   const sourceRaw = String(form.get("source") ?? "upload");
   const source = ["upload", "frame-grab"].includes(sourceRaw) ? sourceRaw : "upload";
   const storagePath = await putFile(
-    `refs/${entityId ?? shotId ?? episodeId ?? "misc"}/${id}${extFor(file.type)}`,
+    `refs/${entityId ?? shotId ?? episodeId ?? "misc"}/${id}${norm.ext}`,
     buffer,
-    file.type,
+    norm.contentType,
   );
   // референс серии (без сущности и шота) получает токен REF_NN и размеры (spec §1)
   const isSeriesRef = Boolean(episodeId && !entityId && !shotId);

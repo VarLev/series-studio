@@ -481,17 +481,12 @@ export async function llmRevisePrompt(
   ).then(enforceTemplateInvariants);
 }
 
-const IMAGE_MIME: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-};
-
 /**
- * Кнопка «Анализ» в библии: vision-модель описывает референс персонажа —
- * внешность (RU), гардероб (EN, уходит в промпты как есть), флаг «только лицо».
+ * Кнопка «Анализ» в библии: vision-модель описывает референс персонажа — весь
+ * результат ТОЛЬКО на английском (description, wardrobe, caption). Уже введённые
+ * пользователем поля (на любом языке) передаются модели — она переводит их на
+ * английский и сливает с тем, что видит на картинке. Крупные фото ужимаются на
+ * лету (см. toVisionImageData), чтобы не упереться в лимит vision-модели.
  * Модель — «для простых запросов» из настроек; если она не видит картинки
  * (DeepSeek) — самая дешёвая vision-модель (Haiku 4.5).
  */
@@ -499,34 +494,53 @@ export async function llmAnalyzeCharacterRef(refId: string): Promise<ImageAnalys
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, refId));
   if (!ref) throw new Error("Референс не найден");
-  const data = await readFile(ref.storagePath);
-  if (data.length > 4_500_000) {
-    throw new Error("Файл референса больше 4.5 МБ — vision-модель его не примет");
-  }
-  const ext = ref.storagePath.slice(ref.storagePath.lastIndexOf(".")).toLowerCase();
+  const [entity] = ref.entityId
+    ? await db.select().from(entities).where(eq(entities.id, ref.entityId))
+    : [];
+  const raw = await readFile(ref.storagePath);
+  const { toVisionImageData } = await import("@/lib/image");
+  const { base64, mediaType } = await toVisionImageData(raw, ref.storagePath);
   const settings = await getAllSettings();
   const model = visionModelFrom(settings.llm_simple_model);
+
+  // уже заполненные поля (могут быть на любом языке) — модель переведёт и учтёт
+  const existingDescription = entity?.description?.trim() ?? "";
+  const existingWardrobe = entity?.wardrobe?.trim() ?? "";
+  const existingBlock =
+    existingDescription || existingWardrobe
+      ? "The user already filled these fields (they may be in ANY language). Translate them into " +
+        "English and MERGE with what you see — keep the user's facts, route clothing wording into " +
+        "wardrobe and appearance wording into description:\n" +
+        (existingDescription ? `- current description: ${existingDescription}\n` : "") +
+        (existingWardrobe ? `- current wardrobe: ${existingWardrobe}\n` : "")
+      : "";
+
   return runJson(
     {
       kind: "analysis",
       model,
       maxTokens: 1500,
       system:
-        "Ты — ассистент библии персонажей AI-сериала. Проанализируй референс-изображение " +
-        "персонажа и верни ТОЛЬКО один JSON-объект без пояснений:\n" +
+        "You are the character-bible assistant of an AI film series. Analyze the character reference " +
+        "image and return ONLY one JSON object, no explanations. EVERYTHING you output MUST be in " +
+        "ENGLISH, regardless of the language of the image or of any provided text:\n" +
         '{"description":"...","wardrobe":"...","face_only":true,"caption":"..."}\n' +
-        "- description: КОРОТКИЙ визуальный якорь НА РУССКОМ — одна фраза: пол, примерный возраст и " +
-        "2–3 самые характерные приметы (тип/цвет волос, телосложение, особая черта). НЕ абзац, " +
-        "детали облика задаёт сам референс. Одежду сюда НЕ включай.\n" +
-        "- wardrobe: одежда и аксессуары НА АНГЛИЙСКОМ, в формате видеопромпта " +
-        '(например "charcoal wool coat over white shirt, black jeans, silver ring"). ' +
-        "Если одежды практически не видно (портрет) — пустая строка.\n" +
-        "- face_only: true, если в кадре только лицо/портрет по плечи и одежду персонажа " +
-        "по этому референсу зафиксировать нельзя.\n" +
-        "- caption: короткая подпись референса на русском, 2–5 слов (например «анфас, тёмная куртка»).",
-      user: "Проанализируй этот референс персонажа.",
-      imageBase64: data.toString("base64"),
-      imageMediaType: IMAGE_MIME[ext] ?? "image/png",
+        "- description: a SHORT visual anchor in ENGLISH — one phrase: gender, approximate age and " +
+        "2–3 most characteristic traits (hair type/color, build, a distinctive feature). NOT a " +
+        "paragraph — the reference itself carries the fine detail. Do NOT put clothing here.\n" +
+        "- wardrobe: clothing and accessories in ENGLISH, in video-prompt format " +
+        '(e.g. "charcoal wool coat over white shirt, black jeans, silver ring"). ' +
+        "If clothing is essentially not visible (portrait) AND the user gave no wardrobe text — empty " +
+        "string; but if the user already provided wardrobe text, always translate and keep it.\n" +
+        "- face_only: true if the frame shows only the face/portrait to the shoulders and the " +
+        "character's clothing cannot be anchored from this reference.\n" +
+        '- caption: a short reference caption in ENGLISH, 2–5 words (e.g. "front view, dark jacket").\n' +
+        "If provided text conflicts with the image, trust the provided text for identity/clothing intent.",
+      user:
+        (existingBlock ? existingBlock + "\n" : "") +
+        "Analyze this character reference and fill the fields in English.",
+      imageBase64: base64,
+      imageMediaType: mediaType,
     },
     imageAnalysisSchema,
   );

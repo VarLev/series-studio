@@ -190,7 +190,10 @@ export default function EntityForm({
       {entity.type === "character" && (
         <div className="flex flex-col gap-1.5">
           <SectionLabel
-            hint={t("на английском · наследуется группами шотов", "in English · inherited by shot groups")}
+            hint={t(
+              "на английском · применяется даже с «только лицо»",
+              "in English · applied even with face-only",
+            )}
           >
             {t("Гардероб (базовый)", "Wardrobe (base)")}
           </SectionLabel>

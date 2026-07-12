@@ -50,7 +50,12 @@ export default function UploadButton({
           throw new Error(body.error ?? t(`Ошибка загрузки (${res.status})`, `Upload failed (${res.status})`));
         }
       }
+      // через туннель одиночный router.refresh() иногда теряется, и загруженное
+      // фото появляется только после ручного обновления страницы. refresh
+      // идемпотентен (тот же контент → no-op), поэтому повторяем ещё раз чуть
+      // позже — так дропнутый RSC-запрос почти наверняка добирает картинку.
       router.refresh();
+      setTimeout(() => router.refresh(), 900);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Ошибка загрузки", "Upload failed"));
     } finally {
