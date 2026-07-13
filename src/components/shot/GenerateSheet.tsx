@@ -11,6 +11,7 @@ import { toast } from "@/components/Toaster";
 import { preflightVideoCredits, startGeneration } from "@/lib/actions/generate";
 import { creditsToUsd, fmtUsd } from "@/lib/pricing";
 import { promptFamily, type PromptFamily } from "@/lib/llm/models";
+import { usePromptTrack } from "@/components/shot/PromptTrackContext";
 import { useT } from "@/components/I18nProvider";
 
 export interface CatalogModel {
@@ -66,6 +67,10 @@ export default function GenerateSheet({
   defaultStartFrameId: string | null;
 }) {
   const t = useT();
+  // «открытая» версия активного трека — именно она уйдёт на генерацию (переген
+  // одного шота / выбранная старая версия); undefined → последняя версия трека
+  const { family, openByFamily } = usePromptTrack();
+  const openPromptId = openByFamily[family];
   const [selected, setSelected] = useState<Set<string>>(
     () =>
       new Set(
@@ -77,8 +82,9 @@ export default function GenerateSheet({
   const [duration, setDuration] = useState(Math.min(15, Math.max(4, groupDurationSec)));
   // дефолт качества — 480p (Kling его не умеет → авто-720, см. klingFallback)
   const [quality, setQuality] = useState<string>("480p");
+  // сериал вертикальный: дефолт 9:16, если из промпта пришёл неизвестный/пустой аспект
   const [aspect, setAspect] = useState<string>(
-    (ASPECTS as readonly string[]).includes(aspectRatio) ? aspectRatio : "16:9",
+    (ASPECTS as readonly string[]).includes(aspectRatio) ? aspectRatio : "9:16",
   );
   // роль start-frame из референсов шота подставляется автоматически (spec §3.1)
   const [startFrame, setStartFrame] = useState<string>(defaultStartFrameId ?? "");
@@ -160,6 +166,9 @@ export default function GenerateSheet({
       // промпт каждой модели сервер подбирает по её семейству (Seedance/Kling)
       const res = await startGeneration({
         shotId,
+        // открытая версия активного трека (напр. промпт одного шота); для моделей
+        // другого семейства сервер возьмёт их последнюю версию
+        promptId: openPromptId || undefined,
         modelIds: [...selected],
         startFrameRefId: startFrame || undefined,
         durationSec: duration,

@@ -99,6 +99,19 @@ export interface LlmCall {
   imageMediaType?: string;
   /** id референсов, приложенных к вызову (для журнала «Console») */
   refIds?: string[];
+  /**
+   * Часть system-промпта, не зависящая от конкретного вызова (шаблон, правила
+   * сериала, индекс библиотеки приёмов) — идёт ПЕРЕД `system` отдельным блоком
+   * с cache_control (Anthropic prompt caching: повторные вызовы в рамках одного
+   * эпизода платят за неё только один раз вместо каждого шота). У OpenAI-совместимых
+   * провайдеров кэш срабатывает автоматически на совпадающий префикс — здесь просто
+   * склеивается перед `system`.
+   */
+  cacheableSystemPrefix?: string;
+}
+
+function fullSystemText(call: LlmCall): string {
+  return call.cacheableSystemPrefix ? `${call.cacheableSystemPrefix}\n\n${call.system}` : call.system;
 }
 
 interface TextResult {
@@ -147,7 +160,7 @@ export async function runText(call: LlmCall): Promise<string> {
       model: call.model,
       status: "ok",
       request: {
-        system: call.system,
+        system: fullSystemText(call),
         user: call.user,
         hasImage: Boolean(call.imageBase64),
         imageMediaType: call.imageBase64 ? call.imageMediaType ?? "image/png" : undefined,
@@ -168,7 +181,7 @@ export async function runText(call: LlmCall): Promise<string> {
       provider,
       model: call.model,
       status: "error",
-      request: { system: call.system, user: call.user, hasImage: Boolean(call.imageBase64) },
+      request: { system: fullSystemText(call), user: call.user, hasImage: Boolean(call.imageBase64) },
       response: { error: e instanceof Error ? e.message : String(e) },
       refs,
       durationMs: Date.now() - started,
@@ -198,11 +211,24 @@ async function runAnthropicText(call: LlmCall): Promise<TextResult> {
           { type: "text", text: call.user },
         ]
       : [{ type: "text", text: call.user }];
+    // videoTemplate+rules (или индекс приёмов) не зависят от конкретного шота —
+    // отдельным cache_control блоком ПЕРЕД остальным system, чтобы повторные вызовы
+    // в рамках эпизода не платили за него заново (Anthropic prompt caching)
+    const system: string | Anthropic.TextBlockParam[] = call.cacheableSystemPrefix
+      ? [
+          {
+            type: "text",
+            text: call.cacheableSystemPrefix,
+            cache_control: { type: "ephemeral" },
+          },
+          ...(call.system ? [{ type: "text" as const, text: call.system }] : []),
+        ]
+      : call.system;
     const stream = anthropic.messages.stream(
       {
         model: call.model,
         max_tokens: call.maxTokens ?? 8192,
-        system: call.system,
+        system,
         messages: [{ role: "user", content }],
       },
       // жёсткий потолок: подвисший стрим не держит кнопку «Claude пишет…» бесконечно
@@ -255,8 +281,11 @@ async function runOpenAiText(call: LlmCall, provider: Provider): Promise<TextRes
       {
         model: call.model,
         ...tokenParam,
+        // префикс первым — так совпадающее начало промпта подхватывает автоматическое
+        // кэширование провайдера (OpenAI/DeepSeek/Gemini кэшируют по префиксу сами,
+        // без явных флагов, в отличие от Anthropic)
         messages: [
-          { role: "system", content: call.system },
+          { role: "system", content: fullSystemText(call) },
           { role: "user", content: userContent },
         ],
         stream: true,

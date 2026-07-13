@@ -299,7 +299,7 @@ export async function retryGeneration(
     promptId: prompt.id,
     modelIds: [gen.model],
     durationSec: params.duration ?? 15,
-    aspectRatio: params.aspect_ratio ?? "16:9",
+    aspectRatio: params.aspect_ratio ?? "9:16",
     quality: params.quality ?? "720p",
     startFrameRefId: params.start_frame_ref ?? undefined,
     confirmed: true,

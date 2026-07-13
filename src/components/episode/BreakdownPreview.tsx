@@ -51,6 +51,7 @@ export default function BreakdownPreview({
     time: item.time,
     duration_sec: item.duration_sec,
     location: item.location,
+    time_weather: item.time_weather,
     scene_start: item.scene_start,
     characters: item.characters,
     wardrobe: item.wardrobe,

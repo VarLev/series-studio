@@ -8,10 +8,17 @@
  */
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateGroupBeats, reviseGroup } from "@/lib/actions/shots";
+import {
+  updateGroupBeats,
+  reviseGroup,
+  updateGroupLocation,
+  updateGroupTimeWeather,
+} from "@/lib/actions/shots";
+import { generateSingleShotPrompt } from "@/lib/actions/prompts";
 import type { GroupShot } from "@/lib/llm/contracts";
-import { CHEAPEST_LLM } from "@/lib/llm/models";
+import { CHEAPEST_LLM, PROMPT_FAMILIES } from "@/lib/llm/models";
 import { estTextUsd, LLM_PRICES, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
+import { usePromptTrack } from "@/components/shot/PromptTrackContext";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
@@ -29,11 +36,20 @@ export default function GroupShotsEditor({
   shotId,
   initialBeats,
   simpleModel = CHEAPEST_LLM,
+  llmModel,
+  location = "",
+  timeWeather = "",
 }: {
   shotId: string;
   initialBeats: GroupShot[];
   /** «модель для простых запросов» из настроек — ей идёт переделка группы */
   simpleModel?: string;
+  /** ИИ для промпт-фабрики (та же, что в блоке промпта) — генерит промпт одного шота */
+  llmModel?: string;
+  /** локация сюжетной связки (одна до следующего «начала сцены») */
+  location?: string;
+  /** время суток и погода сюжетной связки (тоже одни на сцену) */
+  timeWeather?: string;
 }) {
   const router = useRouter();
   const t = useT();
@@ -47,6 +63,60 @@ export default function GroupShotsEditor({
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
   const [saving, startSave] = useTransition();
+
+  // локация связки: правка на любой группе обновляет все группы сцены
+  const [loc, setLoc] = useState(location);
+  const [savingLoc, startSaveLoc] = useTransition();
+  const [prevLocation, setPrevLocation] = useState(location);
+  if (prevLocation !== location) {
+    setPrevLocation(location);
+    setLoc(location);
+  }
+  const locDirty = loc.trim() !== location.trim();
+
+  // время суток и погода связки: правка на любой группе обновляет все группы сцены
+  const [tw, setTw] = useState(timeWeather);
+  const [savingTw, startSaveTw] = useTransition();
+  const [prevTw, setPrevTw] = useState(timeWeather);
+  if (prevTw !== timeWeather) {
+    setPrevTw(timeWeather);
+    setTw(timeWeather);
+  }
+  const twDirty = tw.trim() !== timeWeather.trim();
+  // быстрые чипы: клик добавляет термин к полю (через запятую)
+  const TW_PRESETS = [
+    { ru: "день", en: "day" },
+    { ru: "вечер", en: "evening" },
+    { ru: "ночь", en: "night" },
+    { ru: "рассвет", en: "dawn" },
+    { ru: "солнечно", en: "sunny" },
+    { ru: "пасмурно", en: "overcast" },
+    { ru: "дождь", en: "rain" },
+    { ru: "туман", en: "fog" },
+    { ru: "снег", en: "snow" },
+  ];
+  function addTwPreset(term: string) {
+    setTw((prev) => {
+      const cur = prev.trim();
+      if (cur.toLowerCase().split(/[,\s]+/).includes(term)) return prev; // уже есть
+      return cur ? `${cur}, ${term}` : term;
+    });
+  }
+
+  // активный трек (Seedance/Kling) + иконка — из общего контекста карточки шота
+  const { family, setOpen } = usePromptTrack();
+  const famMeta = PROMPT_FAMILIES.find((f) => f.id === family) ?? PROMPT_FAMILIES[0];
+  const [genBeat, setGenBeat] = useState<number | null>(null);
+  async function onGenShot(order: number) {
+    setGenBeat(order);
+    const res = await generateSingleShotPrompt(shotId, family, order, llmModel);
+    setGenBeat(null);
+    if (res.ok) {
+      setOpen(family, res.promptId); // открытой станет новая версия — она уйдёт в генерацию
+      toast(t(`Промпт шота ${order} создан (${famMeta.label}) — открыт`, `Shot ${order} prompt created (${famMeta.label}) — opened`));
+      router.refresh();
+    } else toast(res.error);
+  }
 
   // шоты, добавленные в Rework (правка ограничивается ими); порядок добавления
   const [reworkOrders, setReworkOrders] = useState<number[]>([]);
@@ -178,6 +248,90 @@ export default function GroupShotsEditor({
       className="relative flex flex-col gap-1.5"
       style={{ touchAction: drag ? "none" : undefined }}
     >
+      {/* Локация сюжетной связки: одна на все группы сцены (до следующего scene_start);
+          уходит в промпты Seedance всех связанных групп */}
+      <div className="flex flex-col gap-1 rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-2.5">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
+            📍 Location
+          </span>
+          <span className="text-[9px] text-t400">
+            {t("одна на сцену · уходит в промпты всей связки", "one per scene · goes into every linked group's prompt")}
+          </span>
+          <span className="flex-1" />
+          {locDirty && (
+            <button
+              disabled={savingLoc}
+              onClick={() =>
+                startSaveLoc(async () => {
+                  await updateGroupLocation(shotId, loc);
+                  toast(t("Локация сцены сохранена (вся связка)", "Scene location saved (whole chain)"));
+                })
+              }
+              className="rounded-md bg-violet-500 px-2.5 py-1 text-[10px] font-semibold uppercase text-white hover:bg-violet-400 disabled:opacity-50"
+            >
+              {savingLoc ? t("…", "…") : t("Сохранить", "Save")}
+            </button>
+          )}
+        </div>
+        <input
+          value={loc}
+          onChange={(e) => setLoc(e.target.value)}
+          placeholder={t(
+            "Локация сцены (напр.: салон движущейся машины у кампуса Эшфорд)",
+            "Scene location (e.g.: inside a moving car near the Ashford campus)",
+          )}
+          className={`${fieldCls} text-[12px] text-t200`}
+        />
+      </div>
+
+      {/* Время суток и погода — тоже одни на сюжетную связку, уходят в промпты */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-2.5">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
+            🕓 {t("Время и погода", "Time & weather")}
+          </span>
+          <span className="text-[9px] text-t400">
+            {t("одни на сцену · день/ночь, дождь…", "one per scene · day/night, rain…")}
+          </span>
+          <span className="flex-1" />
+          {twDirty && (
+            <button
+              disabled={savingTw}
+              onClick={() =>
+                startSaveTw(async () => {
+                  await updateGroupTimeWeather(shotId, tw);
+                  toast(t("Время/погода сохранены (вся связка)", "Time/weather saved (whole chain)"));
+                })
+              }
+              className="rounded-md bg-violet-500 px-2.5 py-1 text-[10px] font-semibold uppercase text-white hover:bg-violet-400 disabled:opacity-50"
+            >
+              {savingTw ? t("…", "…") : t("Сохранить", "Save")}
+            </button>
+          )}
+        </div>
+        <input
+          value={tw}
+          onChange={(e) => setTw(e.target.value)}
+          placeholder={t(
+            "Время суток и погода (напр.: вечер, пасмурно, начинается дождь)",
+            "Time of day & weather (e.g.: evening, overcast, rain starting)",
+          )}
+          className={`${fieldCls} text-[12px] text-t200`}
+        />
+        <div className="flex flex-wrap gap-1">
+          {TW_PRESETS.map((p) => (
+            <button
+              key={p.en}
+              onClick={() => addTwPreset(p.en)}
+              className="rounded-full border border-[var(--border-subtle)] bg-ink-600 px-2 py-0.5 text-[10px] text-t300 hover:border-[var(--border-strong)] hover:text-t100"
+            >
+              {t(p.ru, p.en)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {beats.map((b, i) => {
         const isEditing = editing.has(i);
         const inRework = validRework.includes(b.order);
@@ -209,6 +363,23 @@ export default function GroupShotsEditor({
                 </span>
               )}
               <span className="flex-1" />
+              {/* иконка активной модели: клик = промпт ТОЛЬКО этого шота (новая версия) */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (genBeat === null) onGenShot(b.order);
+                }}
+                disabled={genBeat !== null}
+                title={t(
+                  `Сгенерировать промпт только этого шота для ${famMeta.label} (новая версия, старая сохранится)`,
+                  `Generate a prompt for this shot only for ${famMeta.label} (new version, old kept)`,
+                )}
+                className="flex h-7 items-center gap-1 rounded-md border border-[var(--border-subtle)] px-1.5 text-[10px] font-semibold text-t300 hover:border-[var(--border-strong)] hover:text-t100 disabled:opacity-50"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={famMeta.icon} alt="" className="h-3.5 w-3.5 rounded-[2px]" />
+                {genBeat === b.order ? "…" : "⚡"}
+              </button>
               <button
                 onClick={() => toggleEdit(i)}
                 title={isEditing ? t("Готово", "Done") : t("Редактировать", "Edit")}

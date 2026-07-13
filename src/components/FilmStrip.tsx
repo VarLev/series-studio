@@ -9,6 +9,8 @@ export interface StripShot {
   orderIndex: number;
   status: string;
   thumbUrl: string | null;
+  /** миниатюра — кадр видео (mp4) → нужен <video>, а не <img> */
+  thumbIsVideo?: boolean;
   /** начало новой сюжетной сцены — маркер 🎬 на миниатюре */
   sceneStart?: boolean;
 }
@@ -48,8 +50,19 @@ export default function FilmStrip({
               }}
             >
               {s.thumbUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={s.thumbUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                s.thumbIsVideo ? (
+                  <video
+                    // #t=0.1 — браузер показывает стоп-кадр вместо пустого плеера
+                    src={`${s.thumbUrl}#t=0.1`}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={s.thumbUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                )
               ) : (
                 <span className="flex h-full w-full items-center justify-center text-[9px] text-t400">
                   ✦

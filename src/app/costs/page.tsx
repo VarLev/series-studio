@@ -94,6 +94,15 @@ export default async function CostsPage() {
       hint: t("тон, жанр, запреты — контекст всех LLM-вызовов", "tone, genre, restrictions — context for all LLM calls"),
       textarea: true,
     },
+    {
+      key: "series_style",
+      label: t("Визуальный стиль сериала", "Series visual style"),
+      hint: t(
+        "единый стиль, вставляется в КАЖДЫЙ промпт дословно (свет, грейдинг, look) — чтобы не «плавал»",
+        "one style, injected verbatim into EVERY prompt (light, grading, look) — so it doesn't drift",
+      ),
+      textarea: true,
+    },
     { key: "llm_model", label: t("Модель LLM (промпты, раскадровка)", "LLM model (prompts, breakdown)") },
     { key: "llm_price_in", label: t("Тариф LLM, $ за 1М входных токенов", "LLM price, $ per 1M input tokens") },
     { key: "llm_price_out", label: t("Тариф LLM, $ за 1М выходных токенов", "LLM price, $ per 1M output tokens") },

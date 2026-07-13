@@ -446,6 +446,8 @@ interface ProviderCtx {
     media: { id: string; url: string };
     elementId: string | null;
   }>;
+  /** композиционные референсы шота (кадрирование/свет/настроение), @Comp1..@CompN */
+  compositions: Array<{ media: { id: string; url: string } }>;
 }
 
 export async function submitJobs(input: SubmitInput): Promise<{ queued: number }> {
@@ -517,7 +519,16 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       );
       resolved.push({ elementName: r.elementName, name: r.name, media, elementId });
     }
-    const ctx = { startImageUrl, resolved };
+    // композиционные референсы шота (роль != start_frame) — грузим медиа провайдеру
+    const compRows = (
+      await db.select().from(references).where(eq(references.shotId, input.shotId)).orderBy(asc(references.createdAt))
+    ).filter((r) => r.role !== "start_frame");
+    const compositions: ProviderCtx["compositions"] = [];
+    for (const c of compRows) {
+      const media = await mediaForReference(c.id, provider).catch(() => null);
+      if (media) compositions.push({ media });
+    }
+    const ctx = { startImageUrl, resolved, compositions };
     ctxCache.set(cacheKey, ctx);
     return ctx;
   }
@@ -543,6 +554,11 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
         mapping.push({ elementName: r.elementName, name: r.name, token: `<<<image_${slot++}>>>` });
         refMedias.push(r.media.url);
       }
+      // композиционные референсы @Comp1.. → следующие слоты картинок
+      ctx.compositions.forEach((c, i) => {
+        mapping.push({ elementName: `Comp${i + 1}`, name: `Comp${i + 1}`, token: `<<<image_${slot++}>>>` });
+        refMedias.push(c.media.url);
+      });
       let text = replaceMentions(promptRow.text, mapping, false);
       if (ctx.startImageUrl) text = text.replace(/@start(?![\w-])/gi, "<<<image_1>>>");
       return { text, refMedias };
@@ -557,6 +573,13 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
         refMedias.push(r.media.id);
       }
     }
+    // композиционные референсы @Comp1.. → @imageN (только Seedance/Higgsfield)
+    if (supportsImageRefs) {
+      ctx.compositions.forEach((c, i) => {
+        mapping.push({ elementName: `Comp${i + 1}`, name: `Comp${i + 1}`, token: `@image${ordinal++}` });
+        refMedias.push(c.media.id);
+      });
+    }
     return { text: replaceMentions(promptRow.text, mapping, Boolean(ctx.startImageUrl)), refMedias };
   }
 
@@ -568,16 +591,18 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
     genId: string;
     modelId: string;
     promptRow: (typeof allPrompts)[number];
-    provider: GenerationProvider;
     quality: string;
     model: CatalogModel | undefined;
   }
-  // сперва резолвим промпты всех моделей: нет промпта → ошибка ДО любых вставок
+  // Фаза 1 — ТОЛЬКО данные из БД-каталога, БЕЗ сети: имя провайдера берём строкой
+  // из каталога (не резолвим провайдер-объект, т.к. это дёргает проверку/рефреш
+  // токенов Higgsfield/Kling по сети и задерживает появление карточки).
+  // Сперва резолвим промпты всех моделей: нет промпта → ошибка ДО любых вставок.
   const plan = input.modelIds.map((modelId) => ({ modelId, promptRow: promptRowFor(modelId) }));
   const pending: Pending[] = [];
   for (const { modelId, promptRow } of plan) {
     const model = catalog.find((m) => m.id === modelId);
-    const provider = await providerForModel(modelId, catalog);
+    const providerName = model?.provider ?? "higgsfield-mcp";
     const quality = effectiveQuality(modelId, input.quality, model?.qualities ?? []);
     const genId = crypto.randomUUID();
     await db.insert(generations).values({
@@ -586,7 +611,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       episodeId: shot.episodeId,
       kind: "video",
       promptId: promptRow.id,
-      provider: provider.name,
+      provider: providerName,
       model: modelId,
       paramsJson: JSON.stringify({
         quality,
@@ -599,13 +624,13 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       status: "queued",
       source: "api",
     });
-    pending.push({ genId, modelId, promptRow, provider, quality, model });
+    pending.push({ genId, modelId, promptRow, quality, model });
   }
   await db.update(shots).set({ status: "generating" }).where(eq(shots.id, input.shotId));
 
   // ---------- Фаза 2 (фон): отправка провайдеру, обновление той же строки ----------
   async function submitOne(p: Pending): Promise<void> {
-    const { genId, modelId, promptRow, provider, quality, model } = p;
+    const { genId, modelId, promptRow, quality, model } = p;
     const virtual = VIRTUAL_MODELS[modelId];
     const params = {
       ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
@@ -620,6 +645,8 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       })),
     ];
     try {
+      // резолв провайдер-объекта (проверка/рефреш токенов по сети) — уже в фоне
+      const provider = await providerForModel(modelId, catalog);
       const ctx = await ctxFor(provider, promptRow);
       const exactCost = provider.preflightCost
         ? await provider

@@ -18,6 +18,11 @@ export const DEFAULT_SETTINGS = {
     "Тон: психологическое напряжение, никакого гламура. " +
     "Сеттинг: университет Эшфорд. " +
     "Запреты: без явной эротики, без романтизации насилия.",
+  // единый визуальный стиль сериала — вставляется в КАЖДЫЙ промпт ДОСЛОВНО, чтобы
+  // атмосфера/грейдинг не «плавали» от версии к версии
+  series_style:
+    "Dark romance psychological thriller. Natural low-light realism, muted ungraded colors, " +
+    "realistic skin tones. No glossy music-video look, no polished fantasy glow, no cartoon look.",
   credit_confirm_limit: "50",
   // по умолчанию для Seedance берём Fast-вариант (дешевле/быстрее)
   target_models: "kling3_0,seedance_2_0_fast",

@@ -63,10 +63,20 @@ export const shots = pgTable("shots", {
   beatsJson: text("beats_json").notNull().default("[]"),
   actionMd: text("action_md").notNull().default(""),
   cameraHint: text("camera_hint").notNull().default(""),
+  // локация группы из разбивки сюжета; едина для сюжетной связки (до следующего
+  // scene_start) — правка одной группы обновляет всю связку
+  location: text("location").notNull().default(""),
+  // время суток и погода (день/ночь/вечер, солнечно/пасмурно/дождь…) — тоже
+  // едины на сюжетную связку и уходят в промпты всех связанных групп
+  timeWeather: text("time_weather").notNull().default(""),
   status: text("status").notNull().default("draft"), // draft | prompted | generating | review | approved
   // начало новой сюжетной сцены: жёсткой связности с предыдущей группой нет,
   // общие якоря — только персонажи/локации библии (первая группа — всегда сцена)
   sceneStart: boolean("scene_start").notNull().default(false),
+  // вставная группа (спин-офф сцены): создана по запросу пользователя внутри
+  // сцены, но живёт отдельно — свои локация/погода/референсы, своя шкала времени
+  // от 00:00; в сквозной таймкод эпизода и сюжетную связку сцены НЕ входит
+  isInsert: boolean("is_insert").notNull().default(false),
   winnerGenerationId: text("winner_generation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

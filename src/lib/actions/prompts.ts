@@ -2,11 +2,11 @@
 
 import { desc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, generations, prompts, shots } from "@/lib/db";
+import { getDb, entities, generations, prompts, shotEntities, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmShotPrompt, llmRevisePrompt } from "@/lib/llm/factory";
 import { PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
-import { collapseAt } from "@/lib/entityName";
+import { anchorCharacterNames, collapseAt } from "@/lib/entityName";
 import type { ShotPrompt } from "@/lib/llm/contracts";
 
 type Result = { ok: true; promptId: string } | { ok: false; error: string };
@@ -31,14 +31,23 @@ async function insertVersion(
 ): Promise<string> {
   const db = await getDb();
   const id = crypto.randomUUID();
+  // персонажи шота: их имена в тексте промпта приводим к якорям @element_name
+  // (обычные имена собственные допустимы только в репликах — внутри кавычек)
+  const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
+  const linkedEntities = links.length
+    ? await db.select().from(entities).where(inArray(entities.id, links.map((l) => l.entityId)))
+    : [];
+  const charList = linkedEntities
+    .filter((e) => e.type === "character")
+    .map((e) => ({ name: e.name, elementName: e.elementName }));
   await db.insert(prompts).values({
     id,
     shotId,
     version: await nextVersion(shotId),
     parentId,
     targetModel,
-    // @@Craig → @Craig: element_name уже содержит @, модель могла задвоить
-    text: collapseAt(data.prompt),
+    // имена → якоря @element_name, затем @@Craig → @Craig (модель могла задвоить)
+    text: collapseAt(anchorCharacterNames(data.prompt, charList)),
     negativePrompt: data.negative_prompt ? collapseAt(data.negative_prompt) : null,
     paramsJson: JSON.stringify({
       ...data.params,
@@ -117,6 +126,36 @@ export async function generateShotPromptsFor(
 }
 
 /**
+ * Промпт ТОЛЬКО для одного шота группы (order бита) под трек — новая версия в
+ * истории (старые не удаляются). Нужен, чтобы дёшево перегенерировать один
+ * неудачный шот, а не всю группу. Возвращает id новой версии — клиент делает её
+ * открытой, и на генерацию уйдёт именно она.
+ */
+export async function generateSingleShotPrompt(
+  shotId: string,
+  family: PromptFamily,
+  beatOrder: number,
+  llmModel?: string,
+): Promise<Result> {
+  await requireAuth();
+  try {
+    const meta = PROMPT_FAMILIES.find((f) => f.id === family);
+    if (!meta) return { ok: false, error: `Неизвестный трек: ${family}` };
+    const data = await llmShotPrompt(shotId, meta.targetModel, llmModel, beatOrder);
+    const promptId = await insertVersion(
+      shotId,
+      meta.targetModel,
+      data,
+      null,
+      `Только шот ${beatOrder}`,
+    );
+    return { ok: true, promptId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
+
+/**
  * Удалить промпт трека (Seedance/Kling) целиком — все его версии — чтобы можно
  * было сгенерировать заново «с чистого листа». Ссылки не оставляем сиротами:
  * генерации, созданные этими промптами, теряют promptId (видео сохраняются).
@@ -183,7 +222,7 @@ export async function saveManualVersion(
       negative_prompt: prev.negativePrompt ?? "",
       reference_element_names: params.reference_element_names ?? [],
       used_technique_ids: params.techniques ?? [],
-      params: { aspect_ratio: params.aspect_ratio ?? "16:9", duration: params.duration ?? 15 },
+      params: { aspect_ratio: params.aspect_ratio ?? "9:16", duration: params.duration ?? 15 },
     },
     promptId,
     note || "Ручная правка",

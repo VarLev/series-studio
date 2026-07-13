@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { moveShot } from "@/lib/actions/shots";
 import { deleteShot, deleteAllShots } from "@/lib/actions/deletes";
 import { StatusPill, EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import LongPressMenu from "@/components/LongPressMenu";
+import InsertGroupSheet from "./InsertGroupSheet";
 import { useT } from "@/components/I18nProvider";
 
 export interface ShotListItem {
@@ -19,6 +20,8 @@ export interface ShotListItem {
   status: string;
   /** начало новой сюжетной сцены (первая группа считается началом всегда) */
   sceneStart: boolean;
+  /** вставная группа (спин-офф сцены): своя шкала времени и свои параметры */
+  isInsert: boolean;
   entityNames: string[];
   /** чистые визуальные описания шотов группы (без «Шот N (время):») — для промпта листа */
   beats: string[];
@@ -30,12 +33,17 @@ export interface ShotListItem {
 export default function ShotsList({
   episodeId,
   shots,
+  defaultModel,
 }: {
   episodeId: string;
   shots: ShotListItem[];
+  /** модель по умолчанию для вставных групп (та же, что у раскадровки) */
+  defaultModel: string;
 }) {
   const t = useT();
   const [, startTransition] = useTransition();
+  // «+» на разделителе сцены → шторка вставной группы для этой сцены
+  const [insertFor, setInsertFor] = useState<{ shotId: string; scene: number } | null>(null);
 
   if (!shots.length) {
     return (
@@ -73,6 +81,18 @@ export default function ShotsList({
                 {t("Сцена", "Scene")} {scene}
               </span>
               <span className="h-px flex-1 bg-[var(--border-default)]" />
+              {/* вставная группа: новые шоты по запросу — в конец этой сцены */}
+              <button
+                aria-label={t("Добавить шоты в сцену", "Add shots to this scene")}
+                title={t(
+                  "Добавить в сцену вставную группу шотов (по вашему запросу)",
+                  "Add an insert shot group to this scene (from your request)",
+                )}
+                onClick={() => setInsertFor({ shotId: shot.id, scene })}
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-[var(--border-default)] text-[13px] leading-none text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
+              >
+                +
+              </button>
             </div>
           )}
         <LongPressMenu
@@ -84,7 +104,11 @@ export default function ShotsList({
           )}
           doneToast={t("Шот удалён", "Shot deleted")}
           action={deleteShot.bind(null, shot.id)}
-          className="flex items-stretch gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-2.5 hover:border-[var(--border-strong)]"
+          className={`flex items-stretch gap-2 rounded-xl border bg-ink-700 p-2.5 hover:border-[var(--border-strong)] ${
+            shot.isInsert
+              ? "border-dashed border-[rgba(139,95,176,.5)]"
+              : "border-[var(--border-subtle)]"
+          }`}
         >
           <Link
             href={`/episodes/${episodeId}/shots/${shot.id}`}
@@ -132,8 +156,23 @@ export default function ShotsList({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <StatusPill status={shot.status} />
+                {shot.isInsert && (
+                  <span className="rounded bg-[rgba(139,95,176,.18)] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200">
+                    {t("вставка", "insert")}
+                  </span>
+                )}
                 {shot.timecode && (
-                  <span className="font-mono text-[9.5px] text-t400">{shot.timecode}</span>
+                  <span
+                    className={`font-mono text-[9.5px] ${shot.isInsert ? "text-violet-300" : "text-t400"}`}
+                    title={
+                      shot.isInsert
+                        ? t("своя шкала времени — в сквозной таймкод не входит", "own clock — not part of the episode timecode")
+                        : undefined
+                    }
+                  >
+                    {shot.isInsert ? "⎘ " : ""}
+                    {shot.timecode}
+                  </span>
                 )}
                 {shot.entityNames.length > 0 && (
                   <span className="truncate font-mono text-[9.5px] text-t400">
@@ -179,6 +218,14 @@ export default function ShotsList({
           className="mt-1 min-h-11 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
         />
       )}
+
+      <InsertGroupSheet
+        episodeId={episodeId}
+        anchor={insertFor}
+        onClose={() => setInsertFor(null)}
+        defaultModel={defaultModel}
+        baselineCount={shots.length}
+      />
     </div>
   );
 }

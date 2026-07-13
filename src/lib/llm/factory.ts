@@ -14,6 +14,7 @@ import {
 } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
 import { readFile } from "@/lib/storage";
+import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
 import { TIMING_RULES, LANGUAGE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { effectiveOutfit } from "@/lib/wardrobe";
@@ -23,12 +24,14 @@ import {
   breakdownSchema,
   groupPatchSchema,
   imageAnalysisSchema,
+  insertGroupsSchema,
   shotPromptSchema,
   techniquePickSchema,
   type Breakdown,
   type GroupPatch,
   type GroupShot,
   type ImageAnalysis,
+  type InsertGroups,
   type ShotPrompt,
 } from "./contracts";
 
@@ -139,7 +142,7 @@ export async function llmBreakdown(
         "а ТОЛЬКО одним JSON-объектом без пояснений:\n" +
         '{"summary":"краткий сюжет эпизода","characters":["персонажи"],"locations":["локации"],' +
         '"groups":[{"order":1,"title":"название группы","time":"00:00–00:14","duration_sec":14,' +
-        '"location":"локация группы","scene_start":true,"characters":["персонажи группы"],' +
+        '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain","scene_start":true,"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если сюжет его описал для этой сцены, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
@@ -147,6 +150,10 @@ export async function llmBreakdown(
         "сцену: смена локации, скачок во времени или разрыв непрерывности действия. Если группа — " +
         "прямое продолжение предыдущей (та же обстановка, действие течёт без разрыва) — scene_start: false. " +
         "Первая группа эпизода — всегда scene_start: true.\n" +
+        "ВРЕМЯ СУТОК И ПОГОДА: для каждой группы заполни time_weather по сюжету — время суток и " +
+        "погода (напр. «evening, overcast», «night, rain», «bright sunny day»). Внутри одной сцены " +
+        "(scene_start: false) — ОДИНАКОВО во всех группах; менять можно только на границе сцены " +
+        "(scene_start: true). Если сюжет не уточняет — выбери правдоподобное и держи единым по сцене.\n" +
         "ГАРДЕРОБ (якорь одежды): НЕ придумывай одежду. По умолчанию у каждого персонажа " +
         "есть базовый гардероб в библии — приложение подставит его само, поэтому в обычном " +
         "случае outfit оставляй ПУСТОЙ СТРОКОЙ. Заполняй outfit (на английском, годный для " +
@@ -235,6 +242,54 @@ export async function llmReviseGroup(input: {
 }
 
 /**
+ * Вставные группы (спин-офф сцены): по запросу пользователя и краткому контексту
+ * сцены модель создаёт 1..N НОВЫХ групп шотов (каждая ≤15 сек — отдельное
+ * AI-видео). Вставки живут внутри сцены, но со своими локацией/временем/погодой
+ * и своей шкалой времени — существующие группы и сквозной таймкод не трогают.
+ */
+export async function llmInsertGroups(input: {
+  episodeId: string;
+  /** краткий контекст сцены: локация/время + содержание её групп (НЕ весь сюжет) */
+  sceneContext: string;
+  /** запрос пользователя: что должно происходить в новых шотах */
+  request: string;
+  model?: string;
+}): Promise<InsertGroups> {
+  const { rules, model } = await seriesSystemBase();
+  const bible = await bibleContext(undefined, { mode: "names" });
+  return runJson(
+    {
+      kind: "breakdown",
+      model: input.model || model,
+      episodeId: input.episodeId,
+      maxTokens: 16000,
+      system:
+        `${rules}\n\n${bible}\n\n` +
+        "Ты добавляешь ВСТАВНЫЕ группы шотов к существующей сцене вертикального сериала " +
+        "(группа = отдельное AI-видео не длиннее 15 секунд). Пользователь описал, что должно " +
+        "происходить в новых шотах; контекст сцены дан ТОЛЬКО для связности (персонажи, тон, " +
+        "обстановка) — существующие группы НЕ переписывай и НЕ пересказывай.\n" +
+        "Создай столько групп, сколько требует запрос (обычно 1–3). У вставки могут быть СВОИ " +
+        "локация и время/погода: если запрос переносит действие в другое место или время — задай " +
+        "новые значения; если нет — повтори значения сцены.\n" +
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n` +
+        "Верни ТОЛЬКО JSON без пояснений:\n" +
+        '{"groups":[{"order":1,"title":"название группы","duration_sec":14,' +
+        '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain",' +
+        '"characters":["персонажи группы"],' +
+        '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если запрос или сцена его описали, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
+        '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
+        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
+        "Время шотов отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот каждой группы — с 00:00.",
+      user:
+        `Контекст сцены (для связности, НЕ переписывать):\n${input.sceneContext}\n\n` +
+        `Запрос пользователя — что должно быть в новых шотах:\n${input.request}`,
+    },
+    insertGroupsSchema,
+  );
+}
+
+/**
  * Этап 1 фабрики: Haiku просматривает индекс библиотеки приёмов (500 карточек)
  * и выбирает до 5 кандидатов под действие шота. Дёшево (~1 цент), полные тексты
  * кандидатов идут во второй, основной вызов.
@@ -247,19 +302,22 @@ async function pickTechniqueCandidates(
   const all = await listTechniques();
   if (!all.length) return [];
   try {
+    // индекс библиотеки не зависит от сцены — вызывается на КАЖДЫЙ шот эпизода,
+    // поэтому весь system целиком идёт в кэшируемый префикс (см. cacheableSystemPrefix)
     const res = await runJson(
       {
         kind: "prompt",
         model,
         episodeId,
         maxTokens: 500,
-        system:
+        cacheableSystemPrefix:
           "Ты подбираешь режиссёрские приёмы к сцене вертикального сериала. " +
           "Ниже индекс библиотеки: id | название | камера | теги | категория. " +
           "Выбери до 5 приёмов, которые реально усилят сцену (движение камеры, свет, композиция). " +
           "Если ничего не подходит — верни пустой список.\n" +
           'Верни ТОЛЬКО JSON: {"ids":["b19"]}\n\n' +
           techniqueIndex(all),
+        system: "",
         user: `Сцена: ${shotDescription}`,
       },
       techniquePickSchema,
@@ -277,6 +335,9 @@ async function pickTechniqueCandidates(
  * должны быть в каждом видео-промпте — гарантируем программно, а не надеждой на LLM.
  */
 function enforceTemplateInvariants(res: ShotPrompt): ShotPrompt {
+  // срезаем заголовок-метку шаблона, если модель начала промпт с него
+  // («SEEDANCE 2.0 PROMPT», «KLING 3.0 OMNI PROMPT» и т.п.)
+  res.prompt = res.prompt.replace(/^\s*(?:SEEDANCE|KLING)[^\n]*PROMPT\s*\n+/i, "").trimStart();
   const tail: string[] = [];
   if (!/9\s*:\s*16/.test(res.prompt)) tail.push("Format: vertical 9:16.");
   if (!/no subtitles/i.test(res.prompt)) tail.push("No subtitles. No text overlays.");
@@ -291,6 +352,8 @@ export async function llmShotPrompt(
   shotId: string,
   targetModel: string,
   modelOverride?: string,
+  /** order одного бита группы — промпт только для этого шота (переген одного шота) */
+  singleBeatOrder?: number,
 ): Promise<ShotPrompt> {
   const db = await getDb();
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
@@ -347,16 +410,60 @@ export async function llmShotPrompt(
     : `СТАРТОВЫЙ КАДР: к этой группе стартовый кадр НЕ прикреплён — НЕ упоминай ${startAnchor}, ` +
       `@Start, @Image1 или "starting frame" вообще, даже если шаблон выше показывает такую строку в примере.`;
 
+  // ---------- композиционные референсы шота (кадрирование/свет/настроение) ----------
+  // приложение реально прикрепляет их к задаче и заменяет якоря @CompN на слоты картинок
+  const compCount = shotRefs.filter((r) => r.role !== "start_frame").length;
+  const compAnchors = Array.from({ length: compCount }, (_, i) => `@Comp${i + 1}`).join(", ");
+  const compositionBlock = compCount
+    ? `КОМПОЗИЦИОННЫЕ РЕФЕРЕНСЫ: к шоту приложено ${compCount} шт. — якоря ${compAnchors} ` +
+      `(приложение заменит их на реальные слоты картинок при отправке). Для КАЖДОГО добавь в начале ` +
+      `промпта ровно одну строку вида "Use @Comp1 ONLY as composition and blocking reference." — ` +
+      `и больше нигде его не упоминай.`
+    : `КОМПОЗИЦИОННЫЕ РЕФЕРЕНСЫ: к шоту не приложены — НЕ упоминай @Comp, "composition reference" или лишние @ImageN.`;
+
   // ---------- сюжетная сцена: непрерывность или чистый лист ----------
-  // первая группа эпизода — всегда начало сцены; иначе смотрим флаг scene_start
+  // первая группа эпизода — всегда начало сцены; иначе смотрим флаг scene_start.
+  // Вставные группы (is_insert) из непрерывности исключаем: сосед-вставка — не
+  // «предыдущая группа» сцены
   const [prevGroup] = await db
     .select()
     .from(shots)
-    .where(and(eq(shots.episodeId, shot.episodeId), lt(shots.orderIndex, shot.orderIndex)))
+    .where(
+      and(
+        eq(shots.episodeId, shot.episodeId),
+        lt(shots.orderIndex, shot.orderIndex),
+        eq(shots.isInsert, false),
+      ),
+    )
     .orderBy(desc(shots.orderIndex))
     .limit(1);
+  // локация сцены: одна на всю сюжетную связку (до следующего scene_start) —
+  // каждая группа связки получает ОДИНАКОВОЕ описание локации в промпт
+  const episodeShots = await db
+    .select()
+    .from(shots)
+    .where(eq(shots.episodeId, shot.episodeId))
+    .orderBy(asc(shots.orderIndex));
+  const sceneLocation = chainLocation(episodeShots, shotId);
+  const locationBlock = sceneLocation
+    ? `ЛОКАЦИЯ СЦЕНЫ (единая для всех групп этой сюжетной связки): "${sceneLocation}". ` +
+      "Используй именно её как локацию в Scene/GLOBAL CONTINUITY (переведи на английский при " +
+      "необходимости) — НЕ выдумывай другую обстановку и не меняй место действия между группами связки."
+    : "";
+  const sceneTimeWeather = chainTimeWeather(episodeShots, shotId);
+  const timeWeatherBlock = sceneTimeWeather
+    ? `ВРЕМЯ СУТОК И ПОГОДА (единые для всех групп этой сюжетной связки): "${sceneTimeWeather}". ` +
+      "Отрази их в Scene/GLOBAL CONTINUITY и в описании света/неба (переведи на английский при " +
+      "необходимости) — держи одинаковыми во всех группах связки, НЕ меняй время суток и погоду между группами."
+    : "";
   let sceneBlock = "";
-  if (!prevGroup || shot.sceneStart) {
+  if (shot.isInsert) {
+    sceneBlock =
+      "ВСТАВНАЯ ГРУППА (спин-офф сцены): самостоятельная мини-сцена по мотивам основной. " +
+      "НЕ привязывайся к моментальному действию и состоянию соседних групп — используй ТОЛЬКО " +
+      "собственные локацию/время/погоду этой группы (заданы ниже) и постоянные якоря библии " +
+      "(персонажи, их референсы).";
+  } else if (!prevGroup || shot.sceneStart) {
     sceneBlock =
       "НОВАЯ СЦЕНА: эта группа начинает новую сюжетную сцену. НЕ привязывайся к обстановке, " +
       "свету, времени суток или действию предыдущих групп — постоянные якоря только персонажи " +
@@ -374,8 +481,22 @@ export async function llmShotPrompt(
     sceneBlock =
       `ПРОДОЛЖЕНИЕ СЦЕНЫ: эта группа — прямое продолжение группы «${prevGroup.title}» ` +
       `(её содержание: ${prevDigest.slice(0, 400)}). Сохрани ту же локацию, время суток, свет, ` +
-      "погоду и одежду персонажей; действие продолжается без разрыва.";
+      "погоду и одежду персонажей; действие продолжается без разрыва — состояние машины/объектов " +
+      "и положение персонажей вытекает из конца предыдущей группы, без резких скачков.";
   }
+
+  // GLOBAL CONTINUITY = только инвариант сцены (одинаков у всех связанных групп);
+  // моментальное действие/движение туда НЕ пишем — оно идёт в Action шотов.
+  const continuityBlock =
+    "GLOBAL CONTINUITY — пиши ТОЛЬКО инварианты сцены, которые ОДИНАКОВЫ во всех связанных группах " +
+    "этой сюжетной связки: локация, время суток, погода/свет, кто где находится и на каком месте " +
+    "(позиции персонажей), одежда, общий тон, что НЕЛЬЗЯ менять. КАТЕГОРИЧЕСКИ НЕ пиши в GLOBAL " +
+    "CONTINUITY моментальное состояние или движение — едет / тормозит / останавливается / " +
+    "припаркована / куда именно направляется / что делает прямо сейчас: это относится к отдельному " +
+    "шоту и идёт ТОЛЬКО в Action. Поэтому у связанных групп GLOBAL CONTINUITY по смыслу СОВПАДАЕТ, " +
+    "различается лишь Action. Пример: НЕВЕРНО — \"the car drives away\" / \"the car is parked\" в " +
+    "GLOBAL CONTINUITY; ВЕРНО — \"interior of @Jacob's car, @Jacob at the wheel (left), @Simon in " +
+    "the passenger seat (right), morning, overcast\" (константа), а едет машина или уже стоит — только в Action шота.";
 
   const wardrobeBlock =
     outfits.length || faceOnly.length
@@ -394,11 +515,28 @@ export async function llmShotPrompt(
       : "";
 
   // структура шотов группы из раскадровки v2: тайминг/план/камера/действие/реплика
-  let beats: GroupShot[] = [];
+  let allBeats: GroupShot[] = [];
   try {
     const parsed = JSON.parse(shot.beatsJson || "[]");
-    if (Array.isArray(parsed)) beats = parsed as GroupShot[];
+    if (Array.isArray(parsed)) allBeats = parsed as GroupShot[];
   } catch {}
+  // режим одного шота: промпт только для одного бита группы (дешёвый переген
+  // неудачного шота вместо всей группы)
+  const singleBeat =
+    singleBeatOrder != null ? allBeats.find((b) => b.order === singleBeatOrder) : undefined;
+  const beats = singleBeat ? [singleBeat] : allBeats;
+  const singleDur = singleBeat
+    ? (() => {
+        const r = singleBeat.time ? parseTimeRange(singleBeat.time) : null;
+        return r ? r[1] - r[0] : Math.max(2, Math.round(shot.durationSec / Math.max(1, allBeats.length)));
+      })()
+    : shot.durationSec;
+  const singleShotBlock = singleBeat
+    ? `РЕЖИМ ОДНОГО ШОТА: собери промпт ТОЛЬКО для этого одного шота — самостоятельное короткое ` +
+      `видео на ${singleDur} сек. НЕ добавляй другие шоты группы (никаких SHOT 02/03), в промпте ` +
+      `ровно ОДИН SHOT. Время отсчитывай от 0.0 (Time: 0.0–${singleDur.toFixed(1)}). ` +
+      `Duration: ${singleDur} seconds. Single continuous shot. Всё, что не относится к этому шоту, убери.`
+    : "";
   const beatsBlock = beats.length
     ? "Шоты группы по раскадровке (соблюдай их тайминг и порядок в SHOT-блоках промпта):\n" +
       beats
@@ -447,7 +585,18 @@ export async function llmShotPrompt(
     "в шоте опускай, если они не изменились.\n" +
     "- Каждый запрет — один раз. Strict rules: не более 5 строк, только специфичное для этой сцены; " +
     "не повторяй то, что уже зафиксировано в GLOBAL CONTINUITY, WARDROBE LOCK, DIALOGUE LOCK или Framing.\n" +
-    "- Не добавляй декларации без визуального смысла и дублирующиеся эпитеты атмосферы в каждом блоке.";
+    "- Не добавляй декларации без визуального смысла и дублирующиеся эпитеты атмосферы в каждом блоке.\n" +
+    '- НЕ начинай промпт с заголовка-метки вроде "SEEDANCE 2.0 PROMPT" или "KLING 3.0 OMNI PROMPT" — ' +
+    "это название секции шаблона, а не часть промпта. Первая строка — сразу по делу.";
+
+  // единый визуальный стиль сериала — дословно в каждый промпт, чтобы атмосфера/
+  // грейдинг не менялись от версии к версии (жалоба: «стиль снова поменялся»)
+  const styleBlock = settings.series_style?.trim()
+    ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА (единый для ВСЕХ шотов, групп и версий). Вставь его как блок " +
+      "VISUAL STYLE и как атмосферу в GLOBAL CONTINUITY ДОСЛОВНО, СЛОВО В СЛОВО — НЕ перефразируй, " +
+      "НЕ заменяй синонимами и НЕ придумывай свои эпитеты света/погоды/грейдинга от версии к версии: " +
+      `"${settings.series_style.trim()}".`
+    : "";
 
   return runJson(
     {
@@ -455,9 +604,12 @@ export async function llmShotPrompt(
       model,
       episodeId: shot.episodeId,
       maxTokens: 8000,
-      // шаблон видео-промпта заказчика (настройки, свой на семейство) — основа системной инструкции
+      // шаблон видео-промпта заказчика + правила сериала не зависят от конкретного
+      // шота — кэшируемый префикс (см. cacheableSystemPrefix в client.ts), экономит
+      // на каждом следующем шоте эпизода вместо повторной полной оплаты
+      cacheableSystemPrefix: `${videoTemplate}\n\n${rules}`,
       system:
-        `${videoTemplate}\n\n${rules}\n\n${bible}\n\n${sceneBlock}\n\n${startFrameBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
@@ -471,8 +623,11 @@ export async function llmShotPrompt(
         "собственные (персонажи, локации, бренды) — латиницей по-английски; для сущностей библии " +
         "используй их element_name. Реплики в DIALOGUE LOCK — на английском (переведи, если в " +
         "исходнике они на другом языке).\n" +
-        "Используй element_name сущностей как визуальные якоря. В reference_element_names перечисли " +
-        "element_name сущностей, чьи референсы нужно прикрепить к задаче.\n" +
+        "ИМЕНА ПЕРСОНАЖЕЙ: в тексте промпта КАЖДОЕ упоминание персонажа пиши ТОЛЬКО как его " +
+        "element_name (@Simon, @Jacob) — НИКОГДА не пиши имя персонажа обычным словом (Simon, Jacob) " +
+        "вне кавычек. Обычные имена собственные допустимы ИСКЛЮЧИТЕЛЬНО внутри реплик (в кавычках " +
+        "DIALOGUE LOCK). В reference_element_names перечисли element_name сущностей, чьи референсы " +
+        "нужно прикрепить к задаче.\n" +
         "Идентичность персонажей несут их референсы (element/image) — в тексте промпта ссылайся на " +
         "element_name и НЕ переписывай их внешность подробно. Описывай действие, эмоцию, свет и камеру; " +
         "внешность из библии — только чтобы не спутать персонажей, а не для копирования в промпт.\n" +
@@ -480,9 +635,11 @@ export async function llmShotPrompt(
         '"used_technique_ids":["..."],"params":{"aspect_ratio":"9:16","duration":15}}',
       // actionMd собирается из шотов группы — при наличии beats не дублируем его
       user:
-        (beatsBlock
-          ? `Группа (${shot.durationSec} сек).\n${beatsBlock}\n`
-          : `Действие группы (${shot.durationSec} сек): ${shot.actionMd}\n`) +
+        (singleBeat
+          ? `ОДИН ШОТ группы (${singleDur} сек) — самостоятельное короткое видео:\n${beatsBlock}\n`
+          : beatsBlock
+            ? `Группа (${shot.durationSec} сек).\n${beatsBlock}\n`
+            : `Действие группы (${shot.durationSec} сек): ${shot.actionMd}\n`) +
         (shot.cameraHint ? `Подсказка по камере: ${shot.cameraHint}\n` : "") +
         (shot.title ? `Название: ${shot.title}` : ""),
     },
@@ -514,17 +671,24 @@ export async function llmRevisePrompt(
   const reviseStartBlock = reviseShotRefs.some((r) => r.role === "start_frame")
     ? `СТАРТОВЫЙ КАДР: прикреплён — ссылка на него ровно одной строкой "Use ${reviseAnchor} as the locked starting frame.".`
     : `СТАРТОВЫЙ КАДР: НЕ прикреплён — убери/не добавляй упоминания ${reviseAnchor}, @Start, @Image1 и "starting frame".`;
+  const reviseStyleBlock = settings.series_style?.trim()
+    ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА (единый, ДОСЛОВНО, не перефразируй и не меняй эпитеты между версиями): " +
+      `"${settings.series_style.trim()}". Он должен остаться в VISUAL STYLE и атмосфере GLOBAL CONTINUITY без изменений.`
+    : "";
   return runJson(
     {
       kind: "revision",
       model,
       episodeId: shot?.episodeId,
       maxTokens: 8000,
+      cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}`,
       system:
-        `${reviseTemplate}\n\n${rules}\n\n${reviseStartBlock}\n\n${knowledge}\n\n` +
+        `${reviseStartBlock}\n\n${reviseStyleBlock}\n\n${knowledge}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. Промпт на английском, не длиннее 3500 символов, без " +
-        "дублирующихся правил и тавтологичных identity-строк (одна на персонажа).\n" +
+        "дублирующихся правил и тавтологичных identity-строк (одна на персонажа). Имена персонажей " +
+        "в тексте — ТОЛЬКО как @element_name (@Simon); обычные имена собственные допустимы лишь " +
+        "внутри реплик (в кавычках).\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
         '"used_technique_ids":[],"params":{"aspect_ratio":"9:16","duration":15}}',
       user:

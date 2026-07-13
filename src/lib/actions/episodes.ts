@@ -1,18 +1,14 @@
 "use server";
 
-import { and, asc, desc, eq, sql as dsql } from "drizzle-orm";
+import { asc, desc, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, episodes, shots, shotEntities, entities } from "@/lib/db";
+import { getDb, episodes, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
 import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
-import { stripAt } from "@/lib/entityName";
+import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
 import type { Breakdown } from "@/lib/llm/contracts";
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Эпизод создаётся ТОЛЬКО когда в черновике появился текст (замечание заказчика:
@@ -90,21 +86,8 @@ export async function saveBreakdown(
   await requireAuth();
   const db = await getDb();
   // персонажи/локации из ответа модели → сущности библии: по name и element_name,
-  // без учёта @ и регистра (element_name всегда с @, модель может писать и без)
-  const allEntities = await db.select().from(entities);
-  const byName = new Map<string, string>();
-  for (const e of allEntities) {
-    byName.set(stripAt(e.elementName), e.id);
-    byName.set(stripAt(e.name), e.id);
-  }
-  // индекс для скана текста битов: регэксп по границам слов → id сущности
-  const scanIndex = allEntities
-    .flatMap((e) => [
-      { key: stripAt(e.name), id: e.id },
-      { key: stripAt(e.elementName), id: e.id },
-    ])
-    .filter((x) => x.key.length >= 2)
-    .map((x) => ({ id: x.id, re: new RegExp(`(^|[^\\wа-яё])${escapeRe(x.key)}([^\\wа-яё]|$)`, "i") }));
+  // без учёта @ и регистра + скан текста битов (общий хелпер, см. entityLink.ts)
+  const linkIndex = await buildEntityLinkIndex();
 
   const oldShots = await db.select().from(shots).where(eq(shots.episodeId, episodeId));
   if (mode === "replace") {
@@ -130,40 +113,18 @@ export async function saveBreakdown(
       beatsJson: JSON.stringify(beats),
       actionMd: composeActionMd(beats, group.title),
       cameraHint: "",
+      location: group.location ?? "",
+      timeWeather: group.time_weather ?? "",
       status: "draft",
       sceneStart: group.scene_start,
     });
-    const linked = new Set<string>();
-    // 1) явный список персонажей/локаций группы от модели
-    for (const name of [...group.characters, group.location]) {
-      const entityId = byName.get(stripAt(name));
-      if (entityId) linked.add(entityId);
-    }
-    // 2) скан текста битов: подхватываем упомянутых в кадре персонажей из библии,
-    //    которых модель забыла внести в characters[] (замечание заказчика: Craig в тени)
-    const beatsText = beats
-      .map((b) => `${b.framing} ${b.camera} ${b.action} ${b.dialogue}`)
-      .join(" ");
-    for (const { id, re } of scanIndex) {
-      if (re.test(beatsText)) linked.add(id);
-    }
-    for (const entityId of linked) {
-      await db
-        .insert(shotEntities)
-        .values({ shotId, entityId, auto: true })
-        .onConflictDoNothing();
-    }
-    // якорь одежды: наряд пишем ТОЛЬКО когда сюжет описал его для сцены (иначе по
-    // умолчанию берётся базовый гардероб из библии). Помечаем источник "generated",
-    // чтобы этот сценарный наряд ушёл в промпт вместо библейского.
-    for (const w of group.wardrobe ?? []) {
-      const entityId = byName.get(stripAt(w.name));
-      if (!entityId || !w.outfit.trim()) continue;
-      await db
-        .update(shotEntities)
-        .set({ outfit: w.outfit.trim(), outfitSource: "generated" })
-        .where(and(eq(shotEntities.shotId, shotId), eq(shotEntities.entityId, entityId)));
-    }
+    await linkGroupEntities(linkIndex, shotId, {
+      names: [...group.characters, group.location],
+      beatsText: beats
+        .map((b) => `${b.framing} ${b.camera} ${b.action} ${b.dialogue}`)
+        .join(" "),
+      wardrobe: group.wardrobe,
+    });
   }
   await recomputeEpisodeTimecodes(episodeId);
   await db.update(episodes).set({ status: "storyboarded" }).where(eq(episodes.id, episodeId));

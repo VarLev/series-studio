@@ -168,6 +168,9 @@ ALTER TABLE shot_entities ADD COLUMN IF NOT EXISTS outfit_source text NOT NULL D
 DELETE FROM settings WHERE key LIKE 'hf_element_%' OR key LIKE 'hf_media2_%';
 UPDATE settings SET value = 'kling3_0,seedance_2_0_fast' WHERE key = 'target_models' AND value = 'kling3_0,seedance_2_0';
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS scene_start boolean NOT NULL DEFAULT false;
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT '';
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS time_weather text NOT NULL DEFAULT '';
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS is_insert boolean NOT NULL DEFAULT false;
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

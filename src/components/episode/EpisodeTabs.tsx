@@ -78,7 +78,8 @@ export default function EpisodeTabs({
         <StoryboardTab episodeId={episodeId} shots={shots} data={storyboard} />
       )}
 
-      {tab === "Шоты" && <ShotsList episodeId={episodeId} shots={shots} />}
+      {/* вставные группы создаются той же моделью, что выбрана для раскадровки */}
+      {tab === "Шоты" && <ShotsList episodeId={episodeId} shots={shots} defaultModel={bdModel} />}
     </div>
   );
 }

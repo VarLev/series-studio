@@ -26,6 +26,7 @@ import EntityChips from "@/components/shot/EntityChips";
 import StyleChips from "@/components/shot/StyleChips";
 import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
+import PromptTrackProvider from "@/components/shot/PromptTrackContext";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
 import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
@@ -35,6 +36,7 @@ import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
 import QueuePill from "@/components/QueuePill";
 import FilmStrip from "@/components/FilmStrip";
+import { chainLocation, chainTimeWeather } from "@/lib/beats";
 
 export const dynamic = "force-dynamic";
 
@@ -66,19 +68,46 @@ export default async function ShotPage(ctx: {
   const shotRefsAll = shotIds.length
     ? await db.select().from(references).where(inArray(references.shotId, shotIds))
     : [];
+  // референс-миниатюра шота (фолбэк, если готового видео ещё нет)
   const thumbByShot = new Map<string, string>();
   for (const ref of shotRefsAll.sort((a) => (a.role === "start_frame" ? -1 : 0))) {
     if (ref.shotId && !thumbByShot.has(ref.shotId)) {
       thumbByShot.set(ref.shotId, await getFileUrl(ref.storagePath));
     }
   }
-  const stripShots = allShots.map((s, i) => ({
-    id: s.id,
-    orderIndex: s.orderIndex,
-    status: s.status,
-    thumbUrl: thumbByShot.get(s.id) ?? null,
-    sceneStart: i === 0 || s.sceneStart,
-  }));
+  // основная миниатюра киноленты = кадр ФАКТИЧЕСКОГО видео: последний утверждённый
+  // (★), иначе первый готовый результат (совпадает с логикой списка шотов серии)
+  const stripGens = shotIds.length
+    ? (await db.select().from(generations).where(inArray(generations.shotId, shotIds))).filter(
+        (g) => g.shotId && g.status === "done" && g.resultStoragePath,
+      )
+    : [];
+  const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
+  const videoThumbByShot = new Map<string, { url: string; isVideo: boolean }>();
+  for (const s of allShots) {
+    const arr = stripGens
+      .filter((g) => g.shotId === s.id)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    if (!arr.length) continue;
+    const winners = arr.filter((g) => g.winner);
+    const best = winners.length ? winners[winners.length - 1] : arr[0];
+    videoThumbByShot.set(s.id, {
+      url: await getFileUrl(best.resultStoragePath!),
+      isVideo: VIDEO_EXT.test(best.resultStoragePath!),
+    });
+  }
+  const stripShots = allShots.map((s, i) => {
+    const vt = videoThumbByShot.get(s.id);
+    return {
+      id: s.id,
+      orderIndex: s.orderIndex,
+      status: s.status,
+      // сперва кадр видео, иначе референс шота
+      thumbUrl: vt?.url ?? thumbByShot.get(s.id) ?? null,
+      thumbIsVideo: vt?.isVideo ?? false,
+      sceneStart: i === 0 || s.sceneStart,
+    };
+  });
   const shotIdx = allShots.findIndex((s) => s.id === shotId);
   const prevShot = allShots[shotIdx - 1] ?? null;
   const nextShot = allShots[shotIdx + 1] ?? null;
@@ -122,14 +151,22 @@ export default async function ShotPage(ctx: {
     .map((c) => ({ id: c.id, name: c.name, linked: c.linked }));
   const entityChips = chipData.filter((c) => c.type !== "style");
 
-  // референсы шота (с ролями)
-  const shotRefRows = shotRefsAll.filter((r) => r.shotId === shotId);
+  // референсы шота (с ролями); порядок createdAt = порядок якорей @Comp1..N
+  // (тот же порядок использует generation.ts при прикреплении картинок к задаче)
+  const shotRefRows = shotRefsAll
+    .filter((r) => r.shotId === shotId)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  let compNo = 0;
+  const anchorByRefId = new Map(
+    shotRefRows.map((r) => [r.id, r.role === "start_frame" ? "@Start" : `@Comp${++compNo}`]),
+  );
   const shotRefs = await Promise.all(
     shotRefRows.map(async (r) => ({
       id: r.id,
       url: await getFileUrl(r.storagePath),
       caption: r.caption,
       role: (r.role ?? "composition") as "start_frame" | "composition",
+      anchor: anchorByRefId.get(r.id) ?? "",
     })),
   );
 
@@ -227,17 +264,40 @@ export default async function ShotPage(ctx: {
 
   const epN = String(episode?.number ?? 0).padStart(2, "0");
   const grpN = String(shot.orderIndex).padStart(2, "0");
+  const hasStartFrame = shotRefs.some((r) => r.role === "start_frame");
   const tokens = [
     ...chipData.filter((c) => c.linked).map((c) => c.elementName),
     ...seriesRefRows.map((r) => r.token).filter((t): t is string => Boolean(t)),
+    // якоря референсов шота: @Comp1..N (композиция) и @Start/@Image1 (стартовый кадр)
+    ...shotRefs.filter((r) => r.role !== "start_frame").map((r) => r.anchor),
+    ...(hasStartFrame ? ["@Start", "@Image1"] : []),
   ];
+  // миниатюры токенов: тап по токену в тексте промпта раскрывает картинку
+  const tokenImages: Record<string, string> = {};
+  for (const c of chipData) {
+    if (c.linked && c.avatarUrl) tokenImages[c.elementName] = c.avatarUrl;
+  }
+  seriesRefRows.forEach((r, i) => {
+    if (r.token && seriesRefs[i]) tokenImages[r.token] = seriesRefs[i].url;
+  });
+  for (const r of shotRefs) {
+    if (r.role === "start_frame") {
+      tokenImages["@Start"] = r.url;
+      tokenImages["@Image1"] = r.url;
+    } else if (r.anchor) {
+      tokenImages[r.anchor] = r.url;
+    }
+  }
   const current = versions[0] ?? null;
-  // аспект из параметров последней версии — дефолт для шторки генерации
-  let promptAspect = "16:9";
+  // активный трек по умолчанию — семейство последней версии (для PromptTrackProvider)
+  const initialPromptFamily = versions[0] ? promptFamily(versions[0].targetModel) : "seedance";
+  // аспект из параметров последней версии — дефолт для шторки генерации.
+  // Сериал вертикальный, поэтому дефолт — 9:16 (а не 16:9).
+  let promptAspect = "9:16";
   try {
     promptAspect =
       (JSON.parse(versionRows[0]?.paramsJson || "{}") as { aspect_ratio?: string }).aspect_ratio ??
-      "16:9";
+      "9:16";
   } catch {}
   // режиссёрские приёмы 🎥 текущей версии КАЖДОГО трека (Seedance/Kling)
   async function techniquesOf(row: (typeof versionRows)[number] | null) {
@@ -303,6 +363,7 @@ export default async function ShotPage(ctx: {
         <FilmStrip episodeId={episodeId} shots={stripShots} currentShotId={shotId} />
       </div>
 
+      <PromptTrackProvider initialFamily={initialPromptFamily}>
       <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[280px_1fr]">
         {/* master-колонка (spec §4, десктоп) */}
         <aside className="hidden overflow-y-auto border-r border-[var(--border-subtle)] p-3 lg:block">
@@ -349,8 +410,19 @@ export default async function ShotPage(ctx: {
               {grpN}
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <div>
+              <div className="flex items-center gap-1.5">
                 <StatusPill status={shot.status} />
+                {shot.isInsert && (
+                  <span
+                    title={t(
+                      "вставная группа: своя шкала времени, свои локация/погода — в сквозной таймкод не входит",
+                      "insert group: own clock, own location/weather — not part of the episode timecode",
+                    )}
+                    className="rounded bg-[rgba(139,95,176,.18)] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200"
+                  >
+                    {t("вставка", "insert")}
+                  </span>
+                )}
               </div>
               <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
                 {shot.timecode ? `${shot.timecode} · ` : ""}
@@ -364,13 +436,16 @@ export default async function ShotPage(ctx: {
             </div>
           </div>
 
-          {/* граница сюжетной сцены: тумблер «новая сцена / продолжение» */}
-          <SceneToggle
-            shotId={shotId}
-            sceneStart={shot.sceneStart}
-            isFirst={shotIdx === 0}
-            prevGroupNo={prevShot ? String(prevShot.orderIndex).padStart(2, "0") : null}
-          />
+          {/* граница сюжетной сцены: тумблер «новая сцена / продолжение».
+              У вставной группы границ сцен нет — тумблер не показываем */}
+          {!shot.isInsert && (
+            <SceneToggle
+              shotId={shotId}
+              sceneStart={shot.sceneStart}
+              isFirst={shotIdx === 0}
+              prevGroupNo={prevShot ? String(prevShot.orderIndex).padStart(2, "0") : null}
+            />
+          )}
 
           {beats.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -383,6 +458,9 @@ export default async function ShotPage(ctx: {
                 shotId={shotId}
                 initialBeats={beats}
                 simpleModel={settings.llm_simple_model}
+                llmModel={settings.llm_model}
+                location={chainLocation(allShots, shotId)}
+                timeWeather={chainTimeWeather(allShots, shotId)}
               />
             </div>
           ) : (
@@ -428,6 +506,7 @@ export default async function ShotPage(ctx: {
             episodeId={episodeId}
             versions={versions}
             tokens={tokens}
+            tokenImages={tokenImages}
             llmModel={settings.llm_model}
             usedTechniquesByFamily={usedTechniquesByFamily}
           />
@@ -483,6 +562,7 @@ export default async function ShotPage(ctx: {
         aspectRatio={promptAspect}
         defaultStartFrameId={defaultStartFrame?.id ?? null}
       />
+      </PromptTrackProvider>
     </main>
   );
 }

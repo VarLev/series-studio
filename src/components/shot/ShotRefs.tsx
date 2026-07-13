@@ -18,6 +18,8 @@ interface ShotRef {
   url: string;
   caption: string;
   role: "start_frame" | "composition";
+  /** якорь в тексте промпта: @Start | @Comp1..N — связь картинки с промптом */
+  anchor: string;
 }
 
 interface PickerRef {
@@ -91,7 +93,10 @@ export default function ShotRefs({
               </button>
             </div>
             <div className="mt-1 truncate font-mono text-[8.5px] text-t400">
-              {r.caption || roleLabel(r.role)}
+              {/* якорь = имя референса в тексте промпта (@Comp1 / @Start) */}
+              {r.anchor && <span className="font-semibold text-violet-200">{r.anchor}</span>}
+              {r.anchor && r.caption ? " · " : ""}
+              {r.caption || (!r.anchor ? roleLabel(r.role) : "")}
             </div>
           </div>
         ))}

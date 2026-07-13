@@ -25,6 +25,8 @@ export const breakdownSchema = z.object({
       time: z.string().default(""), // «00:00–00:14»
       duration_sec: z.number().int().min(1).max(60).default(15),
       location: z.string().default(""),
+      // время суток и погода (напр. «night, rain») — едины на сюжетную связку
+      time_weather: z.string().default(""),
       // начало новой сюжетной сцены (смена места/времени/непрерывности действия)
       scene_start: z.boolean().default(false),
       characters: z.array(z.string()).default([]),
@@ -37,6 +39,31 @@ export const breakdownSchema = z.object({
   ),
 });
 export type Breakdown = z.infer<typeof breakdownSchema>;
+
+/**
+ * Вставные группы (llmInsertGroups): по запросу пользователя модель создаёт
+ * 1..N новых групп внутри сцены — форма группы та же, что в раскадровке,
+ * но без scene_start (вставки не двигают границы сцен и сквозной таймкод).
+ */
+export const insertGroupsSchema = z.object({
+  groups: z
+    .array(
+      z.object({
+        order: z.number().int(),
+        title: z.string().default(""),
+        duration_sec: z.number().int().min(1).max(60).default(15),
+        location: z.string().default(""),
+        time_weather: z.string().default(""),
+        characters: z.array(z.string()).default([]),
+        wardrobe: z
+          .array(z.object({ name: z.string(), outfit: z.string().default("") }))
+          .default([]),
+        shots: z.array(groupShotSchema).default([]),
+      }),
+    )
+    .default([]),
+});
+export type InsertGroups = z.infer<typeof insertGroupsSchema>;
 
 /** Переделка одной группы по замечанию пользователя (llmReviseGroup). */
 export const groupPatchSchema = z.object({
@@ -55,10 +82,12 @@ export const shotPromptSchema = z.object({
   used_technique_ids: z.array(z.string()).default([]),
   params: z
     .object({
-      aspect_ratio: z.string().default("16:9"),
+      // сериал вертикальный — дефолт 9:16 (enforceTemplateInvariants всё равно
+      // форсит 9:16, но не оставляем 16:9 в пайплайне вовсе)
+      aspect_ratio: z.string().default("9:16"),
       duration: z.number().default(15),
     })
-    .default({ aspect_ratio: "16:9", duration: 15 }),
+    .default({ aspect_ratio: "9:16", duration: 15 }),
 });
 export type ShotPrompt = z.infer<typeof shotPromptSchema>;
 

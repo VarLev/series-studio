@@ -87,7 +87,7 @@ export default async function ReviewPage(ctx: {
       shotDurationSec={shot.durationSec}
       regenParams={{
         durationSec: latestParams.duration ?? shot.durationSec,
-        aspectRatio: latestParams.aspect_ratio ?? "16:9",
+        aspectRatio: latestParams.aspect_ratio ?? "9:16",
         quality: latestParams.quality ?? "720p",
       }}
     />

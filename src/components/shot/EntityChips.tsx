@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
 import { EntityAvatar, ENTITY_TYPE_LABEL } from "@/components/ui";
 import { addShotEntity, removeShotEntity, setShotEntityOutfit } from "@/lib/actions/shots";
@@ -39,8 +39,15 @@ export default function EntityChips({
   const [outfitText, setOutfitText] = useState("");
   const [source, setSource] = useState<Source>("bible");
   const [pending, startTransition] = useTransition();
-  const linked = entities.filter((e) => e.linked);
-  const available = entities.filter((e) => !e.linked);
+  // добавление/удаление чипа отражается мгновенно, сервер догоняет в фоне
+  // (без этого на медленной сети — напр. через туннель — клик выглядит «не работает»)
+  const [optimisticEntities, setLinked] = useOptimistic(
+    entities,
+    (state, change: { id: string; linked: boolean }) =>
+      state.map((e) => (e.id === change.id ? { ...e, linked: change.linked } : e)),
+  );
+  const linked = optimisticEntities.filter((e) => e.linked);
+  const available = optimisticEntities.filter((e) => !e.linked);
 
   function openOutfit(e: ChipEntity) {
     if (e.type !== "character") return;
@@ -87,8 +94,14 @@ export default function EntityChips({
               )}
               <button
                 aria-label={`${t("Убрать", "Remove")} ${e.name}`}
-                onClick={() => startTransition(() => removeShotEntity(shotId, e.id))}
-                className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger"
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    setLinked({ id: e.id, linked: false });
+                    await removeShotEntity(shotId, e.id);
+                  })
+                }
+                className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger disabled:opacity-50"
               >
                 ×
               </button>
@@ -117,11 +130,15 @@ export default function EntityChips({
           {available.map((e) => (
             <button
               key={e.id}
+              disabled={pending}
               onClick={() => {
-                startTransition(() => addShotEntity(shotId, e.id));
+                startTransition(async () => {
+                  setLinked({ id: e.id, linked: true });
+                  await addShotEntity(shotId, e.id);
+                });
                 setSheetOpen(false);
               }}
-              className="flex min-h-12 items-center gap-2.5 border-b border-[var(--border-subtle)] px-1 py-2 text-left hover:bg-ink-600"
+              className="flex min-h-12 items-center gap-2.5 border-b border-[var(--border-subtle)] px-1 py-2 text-left hover:bg-ink-600 disabled:opacity-50"
             >
               <EntityAvatar name={e.name} imageUrl={e.avatarUrl} size={28} />
               <span className="min-w-0 flex-1">

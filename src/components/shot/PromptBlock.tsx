@@ -7,6 +7,7 @@ import PromptText from "./PromptText";
 import { generateShotPromptsFor, latestPromptVersion, deleteTrackPrompts } from "@/lib/actions/prompts";
 import { LLM_MODELS, PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
+import { usePromptTrack } from "@/components/shot/PromptTrackContext";
 import { useT } from "@/components/I18nProvider";
 
 export interface PromptVersion {
@@ -36,6 +37,7 @@ export default function PromptBlock({
   episodeId,
   versions,
   tokens,
+  tokenImages = {},
   llmModel,
   usedTechniquesByFamily = { seedance: [], kling: [] },
 }: {
@@ -43,6 +45,8 @@ export default function PromptBlock({
   episodeId: string;
   versions: PromptVersion[];
   tokens: string[];
+  /** токен → url миниатюры (тап по токену в тексте промпта раскрывает её) */
+  tokenImages?: Record<string, string | null>;
   llmModel: string;
   /** приёмы 🎥 текущей версии каждого трека */
   usedTechniquesByFamily?: Record<PromptFamily, UsedTechnique[]>;
@@ -50,21 +54,42 @@ export default function PromptBlock({
   const router = useRouter();
   const t = useT();
   const en = t("ru", "en") === "en";
+  // маркер незавершённой генерации в localStorage: переживает уход со страницы и
+  // возврат/ремаунт. Читаем ОДИН раз при монтировании (ленивый инициализатор).
+  const genKey = `pgen:${shotId}`;
+  const [resumeMarker] = useState<{ families: PromptFamily[]; baseline: number; startedAt: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem(genKey);
+      if (!raw) return null;
+      const m = JSON.parse(raw) as { families?: PromptFamily[]; baseline?: number; startedAt?: number };
+      if (!m?.startedAt || !m.families?.length) return null;
+      if (Date.now() - m.startedAt > 240_000) {
+        localStorage.removeItem(genKey);
+        return null;
+      }
+      return { families: m.families, baseline: m.baseline ?? 0, startedAt: m.startedAt };
+    } catch {
+      return null;
+    }
+  });
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  // активный трек: Seedance / Kling (у каждого свой промпт и своя история)
-  const [family, setFamily] = useState<PromptFamily>(() =>
-    versions[0] ? promptFamily(versions[0].targetModel) : "seedance",
-  );
+  // активный трек и «открытая» версия — из общего контекста (его же читают
+  // GroupShotsEditor для иконки-генерации и ActionBar для отправки на генерацию)
+  const { family, setFamily, openByFamily, setOpen } = usePromptTrack();
   // что создавать кнопкой: один трек или оба
   const [createChoice, setCreateChoice] = useState<PromptFamily | "both">("seedance");
   // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт)
   const [factoryModel, setFactoryModel] = useState(llmModel);
   const [error, setError] = useState("");
   // своя машина состояний вместо useTransition: нужен таймер и поллинг-подхват
-  // результата, если ответ долгого запроса потеряется в туннеле
-  const [generating, setGenerating] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  // результата, если ответ долгого запроса потеряется в туннеле. При возобновлении
+  // сразу показываем «идёт генерация».
+  const [generating, setGenerating] = useState(Boolean(resumeMarker));
+  const [elapsed, setElapsed] = useState(() =>
+    resumeMarker ? Math.floor((Date.now() - resumeMarker.startedAt) / 1000) : 0,
+  );
   const timers = useRef<{
     tick?: ReturnType<typeof setInterval>;
     poll?: ReturnType<typeof setInterval>;
@@ -79,7 +104,11 @@ export default function PromptBlock({
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const trackVersions = versions.filter((v) => promptFamily(v.targetModel) === family);
-  const current = trackVersions[0] ?? null;
+  // «открытая» версия трека: выбранная в контексте, иначе последняя. На генерацию
+  // уходит именно она (см. ActionBar/GenerateSheet).
+  const openId = openByFamily[family];
+  const current =
+    (openId ? trackVersions.find((v) => v.id === openId) : null) ?? trackVersions[0] ?? null;
   const hasByFamily: Record<PromptFamily, boolean> = {
     seedance: versions.some((v) => promptFamily(v.targetModel) === "seedance"),
     kling: versions.some((v) => promptFamily(v.targetModel) === "kling"),
@@ -107,9 +136,18 @@ export default function PromptBlock({
   // на размонтирование — гасим таймеры
   useEffect(() => cleanupTimers, []);
 
+  function clearMarker() {
+    try {
+      localStorage.removeItem(genKey);
+    } catch {}
+  }
+
   function finishOk() {
     if (doneRef.current) return;
     doneRef.current = true;
+    clearMarker();
+    // новая версия трека стала последней — открываем её (сбрасываем ручной выбор)
+    setOpen(family, undefined);
     // гасим таймер и поллинг, но НЕ refresh-повторы (их запустим ниже)
     if (timers.current.tick) clearInterval(timers.current.tick);
     if (timers.current.poll) clearInterval(timers.current.poll);
@@ -128,25 +166,20 @@ export default function PromptBlock({
   function finishErr(msg: string) {
     if (doneRef.current) return;
     doneRef.current = true;
+    clearMarker();
     cleanupTimers();
     setGenerating(false);
     setError(msg);
   }
 
-  function onGenerate() {
-    setError("");
-    setElapsed(0);
-    setGenerating(true);
+  // Слежение за генерацией: таймер «фабрика жива» + поллинг сохранённой версии
+  // (самовосстановление, если ответ основного запроса потерялся в туннеле).
+  // Вынесено, чтобы возобновлять слежение при возврате на страницу.
+  function startWatch(count: number, baseline: number, startedAt: number) {
     doneRef.current = false;
-    const families = createFamilies;
-    // версия-ориентир: успех = появилось столько новых версий, сколько треков создаём
-    const baseline = versions[0]?.version ?? 0;
-    const target = baseline + families.length;
-    const started = Date.now();
-
-    // таймер: показываем, что фабрика жива; жёсткий потолок 240 с
+    const target = baseline + count;
     timers.current.tick = setInterval(() => {
-      const sec = Math.floor((Date.now() - started) / 1000);
+      const sec = Math.floor((Date.now() - startedAt) / 1000);
       setElapsed(sec);
       if (sec >= 240) {
         finishErr(
@@ -157,9 +190,6 @@ export default function PromptBlock({
         );
       }
     }, 1000);
-
-    // самовосстановление: даже если ответ основного запроса потерялся в туннеле,
-    // поллинг увидит сохранённые на сервере версии и подхватит результат
     timers.current.poll = setInterval(async () => {
       try {
         const v = await latestPromptVersion(shotId);
@@ -168,6 +198,20 @@ export default function PromptBlock({
         // сеть моргнула — попробуем в следующий тик
       }
     }, 4000);
+  }
+
+  function onGenerate() {
+    setError("");
+    setElapsed(0);
+    const families = createFamilies;
+    // версия-ориентир: успех = появилось столько новых версий, сколько треков создаём
+    const baseline = versions[0]?.version ?? 0;
+    const startedAt = Date.now();
+    try {
+      localStorage.setItem(genKey, JSON.stringify({ families, baseline, startedAt }));
+    } catch {}
+    setGenerating(true);
+    startWatch(families.length, baseline, startedAt);
 
     // основной запрос: ok → успех; понятная ошибка сервера → показать;
     // обрыв соединения → не падаем, ждём, пока поллинг подхватит результат
@@ -182,6 +226,16 @@ export default function PromptBlock({
         /* соединение потеряно — результат подхватит поллинг */
       });
   }
+
+  // Возврат на страницу во время генерации: маркер уже прочитан в resumeMarker
+  // (ленивый инициализатор), здесь только запускаем слежение — без прямых setState
+  // в теле эффекта (generating/elapsed/family уже проставлены из маркера).
+  useEffect(() => {
+    if (!resumeMarker) return;
+    startWatch(resumeMarker.families.length, resumeMarker.baseline, resumeMarker.startedAt);
+    return cleanupTimers;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function copy() {
     if (!current) return;
@@ -303,7 +357,7 @@ export default function PromptBlock({
             style={{ maxHeight: expanded ? "4000px" : "108px" }}
           >
             <div className="whitespace-pre-wrap break-words p-3 font-mono text-[11.5px] leading-[1.7] text-t200">
-              <PromptText text={current.text} tokens={tokens} />
+              <PromptText text={current.text} tokens={tokens} images={tokenImages} />
             </div>
             {!expanded && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-9 bg-gradient-to-t from-ink-700" />
@@ -440,32 +494,70 @@ export default function PromptBlock({
         )}
       </Sheet>
 
-      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title={t("История версий", "Version history")}>
+      <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title={t("Версии промпта", "Prompt versions")}>
+        <div className="mb-2 text-[10.5px] leading-relaxed text-t400">
+          {t(
+            "«Открыть» делает версию текущей — именно она уйдёт на генерацию. Версии не удаляются.",
+            "“Open” makes a version current — it's the one sent to generation. Versions are never deleted.",
+          )}
+        </div>
         <div className="flex flex-col gap-2.5 pb-2">
-          {trackVersions.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => router.push(`/episodes/${episodeId}/shots/${shotId}/editor?v=${v.id}`)}
-              className="rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3 text-left hover:border-[var(--border-strong)]"
-            >
-              <div className="mb-1.5 flex items-center gap-2">
-                <span className="font-mono text-[11px] font-semibold text-magenta-400">
-                  v{v.version}
-                </span>
-                <span className="font-mono text-[9.5px] text-chrome-mid">{v.targetModel}</span>
-                <span className="ml-auto font-mono text-[9.5px] text-t400">
-                  {v.feedbackNote === "Ручная правка" ? t("ручная правка", "manual edit") : t("фабрика", "factory")} ·{" "}
-                  {new Date(v.createdAt).toLocaleString(t("ru", "en"))}
-                </span>
+          {trackVersions.map((v) => {
+            const isOpen = current?.id === v.id;
+            const kindLabel =
+              v.feedbackNote === "Ручная правка"
+                ? t("ручная правка", "manual edit")
+                : v.feedbackNote?.startsWith("Только шот")
+                  ? t("один шот", "single shot")
+                  : t("фабрика", "factory");
+            return (
+              <div
+                key={v.id}
+                className="rounded-lg border p-3"
+                style={{
+                  borderColor: isOpen ? "var(--border-strong)" : "var(--border-subtle)",
+                  background: isOpen ? "var(--ink-600)" : "var(--ink-800)",
+                }}
+              >
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="font-mono text-[11px] font-semibold text-magenta-400">v{v.version}</span>
+                  {isOpen && (
+                    <span className="rounded bg-[rgba(139,95,176,.18)] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200">
+                      {t("открыт", "open")}
+                    </span>
+                  )}
+                  <span className="font-mono text-[9.5px] text-chrome-mid">{v.targetModel}</span>
+                  <span className="ml-auto font-mono text-[9.5px] text-t400">
+                    {kindLabel} · {new Date(v.createdAt).toLocaleString(t("ru", "en"))}
+                  </span>
+                </div>
+                {v.feedbackNote && <div className="mb-1.5 text-[11px] text-t300">«{v.feedbackNote}»</div>}
+                <div className="line-clamp-4 whitespace-pre-wrap font-mono text-[10.5px] leading-relaxed text-t400">
+                  {v.text}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => {
+                      // undefined, если это последняя версия — чтобы не «залипать» на id
+                      setOpen(family, v.id === trackVersions[0]?.id ? undefined : v.id);
+                      setHistoryOpen(false);
+                    }}
+                    disabled={isOpen}
+                    className="flex-1 rounded-md bg-violet-500 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white hover:bg-violet-400 disabled:opacity-40"
+                  >
+                    {isOpen ? t("Открыт", "Open") : t("Открыть эту версию", "Open this version")}
+                  </button>
+                  <button
+                    onClick={() => router.push(`/episodes/${episodeId}/shots/${shotId}/editor?v=${v.id}`)}
+                    title={t("Править в редакторе", "Edit in editor")}
+                    className="rounded-md border border-[var(--border-default)] px-2.5 py-1.5 text-[11px] font-semibold text-t200 hover:bg-ink-500"
+                  >
+                    ✎
+                  </button>
+                </div>
               </div>
-              {v.feedbackNote && (
-                <div className="mb-1.5 text-[11px] text-t300">«{v.feedbackNote}»</div>
-              )}
-              <div className="line-clamp-4 whitespace-pre-wrap font-mono text-[10.5px] leading-relaxed text-t400">
-                {v.text}
-              </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       </Sheet>
     </div>

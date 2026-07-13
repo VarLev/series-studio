@@ -1,11 +1,19 @@
 "use server";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb, shots, shotEntities, references } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
-import { llmReviseGroup } from "@/lib/llm/factory";
+import {
+  chainLocation,
+  chainTimeWeather,
+  composeActionMd,
+  normalizeBeats,
+  recomputeEpisodeTimecodes,
+  sceneChainOf,
+} from "@/lib/beats";
+import { llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
+import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
 import { getSetting } from "@/lib/settings";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
@@ -85,12 +93,14 @@ export async function reviseGroup(
       if (Array.isArray(raw)) currentBeats = raw as GroupShot[];
     } catch {}
 
-    // контекст — ТОЛЬКО соседние группы (не весь сюжет эпизода): что было до и после
-    const siblings = await db
+    // контекст — ТОЛЬКО соседние группы (не весь сюжет эпизода): что было до и после.
+    // Для основной группы вставки соседями не считаются (у них своя мини-история)
+    const allRows = await db
       .select()
       .from(shots)
       .where(eq(shots.episodeId, shot.episodeId))
       .orderBy(asc(shots.orderIndex));
+    const siblings = shot.isInsert ? allRows : allRows.filter((s) => !s.isInsert);
     const idx = siblings.findIndex((s) => s.id === shotId);
     const digest = (s: (typeof siblings)[number]): string => {
       try {
@@ -162,6 +172,181 @@ export async function reviseGroup(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
   }
+}
+
+/**
+ * Локация сюжетной связки: одна на все группы сцены (до следующего scene_start),
+ * поэтому правка на любой группе обновляет ВСЮ связку.
+ */
+export async function updateGroupLocation(shotId: string, location: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  const siblings = await db
+    .select()
+    .from(shots)
+    .where(eq(shots.episodeId, shot.episodeId))
+    .orderBy(asc(shots.orderIndex));
+  const chain = sceneChainOf(siblings, shotId);
+  const ids = (chain.length ? chain : [shot]).map((s) => s.id);
+  await db
+    .update(shots)
+    .set({ location: location.trim() })
+    .where(inArray(shots.id, ids));
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Время суток и погода сюжетной связки: одни на все группы сцены (как локация) —
+ * правка на любой группе обновляет всю связку.
+ */
+export async function updateGroupTimeWeather(shotId: string, timeWeather: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  const siblings = await db
+    .select()
+    .from(shots)
+    .where(eq(shots.episodeId, shot.episodeId))
+    .orderBy(asc(shots.orderIndex));
+  const chain = sceneChainOf(siblings, shotId);
+  const ids = (chain.length ? chain : [shot]).map((s) => s.id);
+  await db
+    .update(shots)
+    .set({ timeWeather: timeWeather.trim() })
+    .where(inArray(shots.id, ids));
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Вставные группы шотов (спин-офф сцены): по запросу пользователя модель создаёт
+ * новые группы внутри сцены anchor-шота (шот-начало сцены, где нажат «+»).
+ * Вставки получают is_insert=true — свои локация/погода/референсы, своя шкала
+ * времени от 00:00; сквозной таймкод эпизода и существующие группы не трогают.
+ */
+export async function insertShotGroups(
+  anchorShotId: string,
+  request: string,
+  model?: string,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  await requireAuth();
+  if (!request.trim()) return { ok: false, error: "Опишите, что должно быть в новых шотах" };
+  try {
+    const db = await getDb();
+    const [anchor] = await db.select().from(shots).where(eq(shots.id, anchorShotId));
+    if (!anchor) return { ok: false, error: "Сцена не найдена" };
+    const siblings = await db
+      .select()
+      .from(shots)
+      .where(eq(shots.episodeId, anchor.episodeId))
+      .orderBy(asc(shots.orderIndex));
+
+    // контекст для модели: локация/время сцены + краткое содержание её групп
+    const chain = sceneChainOf(siblings, anchorShotId);
+    const sceneRows = chain.length ? chain : [anchor];
+    const digest = (s: (typeof siblings)[number]): string => {
+      try {
+        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string }>;
+        if (Array.isArray(b)) {
+          const txt = b.map((x) => x.action || "").filter(Boolean).join(" ");
+          if (txt) return txt.slice(0, 280);
+        }
+      } catch {}
+      return (s.actionMd || "").slice(0, 280);
+    };
+    const sceneLocation = chainLocation(siblings, anchorShotId);
+    const sceneTimeWeather = chainTimeWeather(siblings, anchorShotId);
+    const sceneContext =
+      (sceneLocation ? `Локация сцены: ${sceneLocation}\n` : "") +
+      (sceneTimeWeather ? `Время и погода сцены: ${sceneTimeWeather}\n` : "") +
+      sceneRows.map((s) => `Группа «${s.title}»: ${digest(s)}`).join("\n");
+
+    const res = await llmInsertGroups({
+      episodeId: anchor.episodeId,
+      sceneContext,
+      request,
+      model,
+    });
+    if (!res.groups.length) return { ok: false, error: "Модель не вернула ни одной группы" };
+
+    // точка вставки — конец сцены: перед следующим scene_start основной группы
+    // (то есть после последней группы сцены, включая уже существующие вставки)
+    const anchorIdx = siblings.findIndex((s) => s.id === anchorShotId);
+    let insertPos = siblings.length;
+    for (let i = anchorIdx + 1; i < siblings.length; i++) {
+      if (siblings[i].sceneStart && !siblings[i].isInsert) {
+        insertPos = i;
+        break;
+      }
+    }
+    const count = res.groups.length;
+    const base =
+      insertPos < siblings.length
+        ? siblings[insertPos].orderIndex
+        : siblings[siblings.length - 1].orderIndex + 1;
+    if (insertPos < siblings.length) {
+      // раздвигаем хвост эпизода под новые группы
+      await db
+        .update(shots)
+        .set({ orderIndex: sql`${shots.orderIndex} + ${count}` })
+        .where(and(eq(shots.episodeId, anchor.episodeId), gte(shots.orderIndex, base)));
+    }
+
+    const linkIndex = await buildEntityLinkIndex();
+    let order = base;
+    for (const group of [...res.groups].sort((a, b) => a.order - b.order)) {
+      const shotId = crypto.randomUUID();
+      // время шотов нормализуется от 00:00 (вставка = отдельное видео со своей шкалой)
+      const { beats, durationSec } = normalizeBeats(group.shots, group.duration_sec);
+      await db.insert(shots).values({
+        id: shotId,
+        episodeId: anchor.episodeId,
+        orderIndex: order++,
+        title: group.title,
+        durationSec,
+        beatsJson: JSON.stringify(beats),
+        actionMd: composeActionMd(beats, group.title),
+        cameraHint: "",
+        // свои параметры вставки; модель не задала → стартуем от значений сцены
+        location: group.location.trim() || sceneLocation,
+        timeWeather: group.time_weather.trim() || sceneTimeWeather,
+        status: "draft",
+        sceneStart: false,
+        isInsert: true,
+      });
+      await linkGroupEntities(linkIndex, shotId, {
+        names: [...group.characters, group.location],
+        beatsText: beats
+          .map((b) => `${b.framing} ${b.camera} ${b.action} ${b.dialogue}`)
+          .join(" "),
+        wardrobe: group.wardrobe,
+      });
+    }
+    await recomputeEpisodeTimecodes(anchor.episodeId);
+    revalidatePath(`/episodes/${anchor.episodeId}`);
+    return { ok: true, count };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
+
+/**
+ * Лёгкий read для поллинга вставки групп: клиент сравнивает число групп эпизода
+ * с ориентиром — самовосстановление, если ответ долгого экшена потерялся в
+ * туннеле (паттерн PromptBlock, см. latestPromptVersion).
+ */
+export async function countEpisodeShots(episodeId: string): Promise<number> {
+  await requireAuth();
+  const db = await getDb();
+  const rows = await db
+    .select({ id: shots.id })
+    .from(shots)
+    .where(eq(shots.episodeId, episodeId));
+  return rows.length;
 }
 
 /** Начало новой сюжетной сцены: связности с предыдущей группой нет (кроме библии). */
