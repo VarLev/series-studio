@@ -21,7 +21,7 @@ import { promptFamily } from "@/lib/llm/models";
 import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
-import { deleteAllGenerations } from "@/lib/actions/deletes";
+import { deleteAllGenerations, deleteShot } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
 import StyleChips from "@/components/shot/StyleChips";
 import ShotRefs from "@/components/shot/ShotRefs";
@@ -36,7 +36,7 @@ import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
 import QueuePill from "@/components/QueuePill";
 import FilmStrip from "@/components/FilmStrip";
-import { chainLocation, chainTimeWeather } from "@/lib/beats";
+import { chainLocation, chainTimeWeather, displayGroupNumbers } from "@/lib/beats";
 
 export const dynamic = "force-dynamic";
 
@@ -96,11 +96,15 @@ export default async function ShotPage(ctx: {
       isVideo: VIDEO_EXT.test(best.resultStoragePath!),
     });
   }
+  // номер группы в серии: вставные группы (isInsert) в нумерацию не входят
+  const displayNoById = displayGroupNumbers(allShots);
   const stripShots = allShots.map((s, i) => {
     const vt = videoThumbByShot.get(s.id);
     return {
       id: s.id,
       orderIndex: s.orderIndex,
+      displayNo: displayNoById.get(s.id) ?? 0,
+      isInsert: s.isInsert,
       status: s.status,
       // сперва кадр видео, иначе референс шота
       thumbUrl: vt?.url ?? thumbByShot.get(s.id) ?? null,
@@ -263,7 +267,7 @@ export default async function ShotPage(ctx: {
   const defaultModelIds = settings.target_models.split(",").map((m) => m.trim()).filter(Boolean);
 
   const epN = String(episode?.number ?? 0).padStart(2, "0");
-  const grpN = String(shot.orderIndex).padStart(2, "0");
+  const grpN = shot.isInsert ? "✦" : String(displayNoById.get(shotId) ?? 0).padStart(2, "0");
   const hasStartFrame = shotRefs.some((r) => r.role === "start_frame");
   const tokens = [
     ...chipData.filter((c) => c.linked).map((c) => c.elementName),
@@ -341,14 +345,30 @@ export default async function ShotPage(ctx: {
   const shotHref = (s: { id: string }) => `/episodes/${episodeId}/shots/${s.id}`;
 
   const t = await getT();
+  const grpLabel = shot.isInsert ? t("Вставка", "Insert") : `${t("Группа", "Group")} ${grpN}`;
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:max-w-none">
       <ScreenHeader
         backHref={`/episodes/${episodeId}`}
-        eyebrow={`${t("Серия", "Episode")} ${epN} · ${t("Группа", "Group")} ${grpN}`}
+        eyebrow={`${t("Серия", "Episode")} ${epN} · ${grpLabel}`}
         title={shot.title || t("Группа шотов", "Shot group")}
-        right={<QueuePill />}
+        right={
+          shot.isInsert ? (
+            <div className="flex items-center gap-1.5">
+              <ConfirmButton
+                action={deleteShot.bind(null, shotId)}
+                label={t("Удалить вставку", "Delete insert")}
+                confirmLabel={t("Точно удалить эту вставную группу?", "Really delete this insert group?")}
+                className="min-h-8 rounded-full border border-[rgba(194,71,106,.4)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
+                armedClassName="border-danger bg-[rgba(194,71,106,.15)] text-[#e08aa4]"
+              />
+              <QueuePill />
+            </div>
+          ) : (
+            <QueuePill />
+          )
+        }
       />
       <GenPoller activeCount={activeCount} />
       <ShotHotkeys
@@ -372,23 +392,46 @@ export default async function ShotPage(ctx: {
             {allShots.map((s) => {
               const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
               const active = s.id === shotId;
+              const sLabel = s.isInsert ? "✦" : String(displayNoById.get(s.id) ?? 0).padStart(2, "0");
               return (
                 <Link
                   key={s.id}
                   href={shotHref(s)}
-                  className="flex items-center gap-2 rounded-lg border px-2.5 py-2"
+                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+                    s.isInsert ? "border-dashed" : ""
+                  }`}
                   style={{
-                    borderColor: active ? "var(--border-strong)" : "var(--border-subtle)",
-                    background: active ? "var(--ink-600)" : "none",
+                    borderColor: active
+                      ? "var(--border-strong)"
+                      : s.isInsert
+                        ? "rgba(139,95,176,.5)"
+                        : "var(--border-subtle)",
+                    background: active
+                      ? "var(--ink-600)"
+                      : s.isInsert
+                        ? "rgba(139,95,176,.08)"
+                        : "none",
                   }}
                 >
-                  <span className="chrome-text font-display text-[13px] font-bold">
-                    {String(s.orderIndex).padStart(2, "0")}
+                  <span
+                    className="chrome-text font-display text-[13px] font-bold"
+                    style={s.isInsert ? { color: "var(--violet-300)" } : undefined}
+                  >
+                    {sLabel}
                   </span>
-                  {(s.sceneStart || allShots[0]?.id === s.id) && (
-                    <span className="text-[10px] leading-none" title={t("Начало сцены", "Scene start")}>
-                      🎬
+                  {s.isInsert ? (
+                    <span
+                      className="rounded bg-[rgba(139,95,176,.18)] px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em] text-violet-200"
+                      title={t("Вставная группа", "Insert group")}
+                    >
+                      {t("вставка", "insert")}
                     </span>
+                  ) : (
+                    (s.sceneStart || allShots[0]?.id === s.id) && (
+                      <span className="text-[10px] leading-none" title={t("Начало сцены", "Scene start")}>
+                        🎬
+                      </span>
+                    )
                   )}
                   <span className="min-w-0 flex-1 truncate text-[11.5px] text-t200">
                     {s.title || s.actionMd.slice(0, 30)}
@@ -461,6 +504,8 @@ export default async function ShotPage(ctx: {
                 llmModel={settings.llm_model}
                 location={chainLocation(allShots, shotId)}
                 timeWeather={chainTimeWeather(allShots, shotId)}
+                emotionalTone={shot.emotionalTone}
+                useCli={settings.llm_use_cli === "1"}
               />
             </div>
           ) : (
@@ -509,6 +554,7 @@ export default async function ShotPage(ctx: {
             tokenImages={tokenImages}
             llmModel={settings.llm_model}
             usedTechniquesByFamily={usedTechniquesByFamily}
+            useCli={settings.llm_use_cli === "1"}
           />
 
           <div className="flex flex-col gap-1.5">

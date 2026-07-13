@@ -2,7 +2,7 @@
 
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, shots, shotEntities, references } from "@/lib/db";
+import { getDb, shots, shotEntities, references, entities } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import {
   chainLocation,
@@ -11,9 +11,12 @@ import {
   normalizeBeats,
   recomputeEpisodeTimecodes,
   sceneChainOf,
+  sumBeatsDurationSec,
 } from "@/lib/beats";
-import { llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
+import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
+import { listTechniques } from "@/lib/director";
+import { stripAt } from "@/lib/entityName";
 import { getSetting } from "@/lib/settings";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
@@ -54,7 +57,13 @@ export async function moveShot(shotId: string, direction: "up" | "down"): Promis
   revalidatePath(`/episodes/${shot.episodeId}`);
 }
 
-/** Ручная правка шотов группы: перезаписывает beats_json и собранный из него фрагмент. */
+/**
+ * Ручная правка шотов группы: перезаписывает beats_json и собранный из него
+ * фрагмент. Длительность группы (durationSec) пересчитывается программно из
+ * суммы time-диапазонов шотов — так добавление/удаление шота или правка секунд
+ * одного шота (клиент уже пересчитал диапазоны всех шотов) сразу отражаются на
+ * длительности группы и, через recomputeEpisodeTimecodes, на таймкодах эпизода.
+ */
 export async function updateGroupBeats(shotId: string, rawBeats: GroupShot[]): Promise<void> {
   await requireAuth();
   const parsed = z.array(groupShotSchema).safeParse(rawBeats);
@@ -63,10 +72,16 @@ export async function updateGroupBeats(shotId: string, rawBeats: GroupShot[]): P
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot) return;
   const beats = parsed.data.map((b, i) => ({ ...b, order: i + 1 }));
+  const durationSec = Math.min(15, Math.max(3, sumBeatsDurationSec(beats) || shot.durationSec));
   await db
     .update(shots)
-    .set({ beatsJson: JSON.stringify(beats), actionMd: composeActionMd(beats, shot.title) })
+    .set({
+      beatsJson: JSON.stringify(beats),
+      actionMd: composeActionMd(beats, shot.title),
+      durationSec,
+    })
     .where(eq(shots.id, shotId));
+  await recomputeEpisodeTimecodes(shot.episodeId);
   revalidatePath(shotPath(shot.episodeId, shotId));
   revalidatePath(`/episodes/${shot.episodeId}`);
 }
@@ -175,6 +190,144 @@ export async function reviseGroup(
 }
 
 /**
+ * Enhance (кнопка на группе): Opus через CLI переоценивает группу целиком и
+ * применяет результат — переписывает/добавляет/удаляет шоты с таймингом,
+ * закрепляет за шотами режиссёрские приёмы, уточняет локацию/погоду/тон и
+ * умно синхронизирует персонажей в кадре (их референсы идут в генерацию).
+ * ВСЕГДА Opus + CLI (подписка) — это задано в llmEnhanceGroup, не настройкой.
+ */
+export async function enhanceGroup(
+  shotId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAuth();
+  try {
+    const db = await getDb();
+    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+    if (!shot) return { ok: false, error: "Группа не найдена" };
+    let currentBeats: GroupShot[] = [];
+    try {
+      const raw = JSON.parse(shot.beatsJson || "[]");
+      if (Array.isArray(raw)) currentBeats = raw as GroupShot[];
+    } catch {}
+
+    const allRows = await db
+      .select()
+      .from(shots)
+      .where(eq(shots.episodeId, shot.episodeId))
+      .orderBy(asc(shots.orderIndex));
+    const siblings = shot.isInsert ? allRows : allRows.filter((s) => !s.isInsert);
+    const idx = siblings.findIndex((s) => s.id === shotId);
+    const digest = (s: (typeof siblings)[number]): string => {
+      try {
+        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string }>;
+        if (Array.isArray(b)) {
+          const txt = b.map((x) => x.action || "").filter(Boolean).join(" ");
+          if (txt) return txt.slice(0, 280);
+        }
+      } catch {}
+      return (s.actionMd || "").slice(0, 280);
+    };
+    const sceneContext = [
+      idx > 0 ? `Перед этой группой («${siblings[idx - 1].title}»): ${digest(siblings[idx - 1])}` : "",
+      idx >= 0 && idx < siblings.length - 1
+        ? `После этой группы («${siblings[idx + 1].title}»): ${digest(siblings[idx + 1])}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const res = await llmEnhanceGroup({
+      episodeId: shot.episodeId,
+      groupTitle: shot.title,
+      durationSec: shot.durationSec,
+      beats: currentBeats,
+      location: chainLocation(allRows, shotId),
+      timeWeather: chainTimeWeather(allRows, shotId),
+      emotionalTone: shot.emotionalTone,
+      sceneContext,
+    });
+    if (!res.shots.length) return { ok: false, error: "Модель не вернула ни одного шота" };
+
+    // приёмы: оставляем только реально существующие в библиотеке id, максимум 1 на шот
+    const knownTech = new Set((await listTechniques()).map((t) => t.id));
+    const cleanShots = res.shots.map((s) => ({
+      ...s,
+      technique_id: s.technique_id && knownTech.has(s.technique_id) ? s.technique_id : "",
+    }));
+
+    const { beats, durationSec } = normalizeBeats(cleanShots, res.duration_sec);
+    const finalTitle = res.title.trim() || shot.title;
+    await db
+      .update(shots)
+      .set({
+        title: finalTitle,
+        durationSec,
+        beatsJson: JSON.stringify(beats),
+        actionMd: composeActionMd(beats, finalTitle),
+        // тон — свой у группы; локацию/погоду обновим по всей связке ниже
+        emotionalTone: res.emotional_tone.trim() || shot.emotionalTone,
+      })
+      .where(eq(shots.id, shotId));
+
+    // локация/погода — единые на связку (как updateGroupLocation): пишем всей сцене
+    if (res.location.trim() || res.time_weather.trim()) {
+      const chain = sceneChainOf(allRows, shotId);
+      const chainIds = (chain.length ? chain : [shot]).map((s) => s.id);
+      const patch: { location?: string; timeWeather?: string } = {};
+      if (res.location.trim()) patch.location = res.location.trim();
+      if (res.time_weather.trim()) patch.timeWeather = res.time_weather.trim();
+      await db.update(shots).set(patch).where(inArray(shots.id, chainIds));
+    }
+
+    // умная синхронизация персонажей в кадре: привязать реально видимых, убрать
+    // авто-привязанных персонажей, которых в кадре нет (стили и ручные — не трогаем)
+    await syncFrameCharacters(shotId, res.characters_in_frame);
+
+    await recomputeEpisodeTimecodes(shot.episodeId);
+    revalidatePath(shotPath(shot.episodeId, shotId));
+    revalidatePath(`/episodes/${shot.episodeId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
+
+/**
+ * Синхронизация «кто в кадре» для группы: element_name'ы из Enhance → привязки
+ * shotEntities. Добавляем видимых персонажей (auto), снимаем авто-привязки
+ * персонажей, которых модель не считает в кадре. НЕ трогаем стили (type=style)
+ * и ручные привязки (auto=false) — их пользователь ставил сам.
+ */
+async function syncFrameCharacters(shotId: string, elementNames: string[]): Promise<void> {
+  const db = await getDb();
+  const index = await buildEntityLinkIndex();
+  const wanted = new Set(
+    elementNames
+      .map((n) => index.byName.get(stripAt(n)))
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
+  const linkedEntities = links.length
+    ? await db.select().from(entities).where(inArray(entities.id, links.map((l) => l.entityId)))
+    : [];
+  const typeById = new Map(linkedEntities.map((e) => [e.id, e.type]));
+
+  // снять авто-привязки ПЕРСОНАЖЕЙ, которых нет в кадре (стили/ручные не трогаем)
+  for (const l of links) {
+    if (l.auto && typeById.get(l.entityId) === "character" && !wanted.has(l.entityId)) {
+      await db
+        .delete(shotEntities)
+        .where(and(eq(shotEntities.shotId, shotId), eq(shotEntities.entityId, l.entityId)));
+    }
+  }
+  // привязать видимых (идемпотентно)
+  for (const entityId of wanted) {
+    await db.insert(shotEntities).values({ shotId, entityId, auto: true }).onConflictDoNothing();
+  }
+}
+
+/**
  * Локация сюжетной связки: одна на все группы сцены (до следующего scene_start),
  * поэтому правка на любой группе обновляет ВСЮ связку.
  */
@@ -218,6 +371,24 @@ export async function updateGroupTimeWeather(shotId: string, timeWeather: string
     .update(shots)
     .set({ timeWeather: timeWeather.trim() })
     .where(inArray(shots.id, ids));
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Эмоциональный тон группы: в отличие от локации/погоды — СВОЙ у каждой группы,
+ * поэтому правка обновляет ТОЛЬКО эту группу (не сюжетную связку). Задаёт
+ * настроение/атмосферу группы в промпте, перекрывая общий тон сериала.
+ */
+export async function updateGroupEmotionalTone(shotId: string, emotionalTone: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  await db
+    .update(shots)
+    .set({ emotionalTone: emotionalTone.trim() })
+    .where(eq(shots.id, shotId));
   revalidatePath(shotPath(shot.episodeId, shotId));
   revalidatePath(`/episodes/${shot.episodeId}`);
 }
@@ -314,6 +485,7 @@ export async function insertShotGroups(
         // свои параметры вставки; модель не задала → стартуем от значений сцены
         location: group.location.trim() || sceneLocation,
         timeWeather: group.time_weather.trim() || sceneTimeWeather,
+        emotionalTone: group.emotional_tone.trim(),
         status: "draft",
         sceneStart: false,
         isInsert: true,

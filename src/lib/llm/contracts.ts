@@ -11,6 +11,9 @@ export const groupShotSchema = z.object({
   camera: z.string().default(""), // что видит камера
   action: z.string().default(""), // действие и эмоция
   dialogue: z.string().default(""),
+  // id закреплённого за этим шотом режиссёрского приёма (из библиотеки), либо ""
+  // — проставляется кнопкой Enhance; при генерации промпта его язык вплетается
+  technique_id: z.string().default(""),
 });
 export type GroupShot = z.infer<typeof groupShotSchema>;
 
@@ -27,6 +30,8 @@ export const breakdownSchema = z.object({
       location: z.string().default(""),
       // время суток и погода (напр. «night, rain») — едины на сюжетную связку
       time_weather: z.string().default(""),
+      // эмоциональный тон группы (напр. «calm», «tense, ominous») — свой у каждой группы
+      emotional_tone: z.string().default(""),
       // начало новой сюжетной сцены (смена места/времени/непрерывности действия)
       scene_start: z.boolean().default(false),
       characters: z.array(z.string()).default([]),
@@ -54,6 +59,7 @@ export const insertGroupsSchema = z.object({
         duration_sec: z.number().int().min(1).max(60).default(15),
         location: z.string().default(""),
         time_weather: z.string().default(""),
+        emotional_tone: z.string().default(""),
         characters: z.array(z.string()).default([]),
         wardrobe: z
           .array(z.object({ name: z.string(), outfit: z.string().default("") }))
@@ -64,6 +70,24 @@ export const insertGroupsSchema = z.object({
     .default([]),
 });
 export type InsertGroups = z.infer<typeof insertGroupsSchema>;
+
+/**
+ * Enhance (llmEnhanceGroup): Opus переоценивает ОДНУ группу целиком и возвращает
+ * улучшенную версию — переписанные/добавленные/удалённые шоты с таймингом,
+ * закреплённый за каждым шотом приём (technique_id), уточнённые локация/погода/тон
+ * и список персонажей, кто РЕАЛЬНО в кадре (для умной привязки референсов).
+ */
+export const enhanceGroupSchema = z.object({
+  title: z.string().default(""),
+  duration_sec: z.number().int().min(1).max(60).default(15),
+  location: z.string().default(""),
+  time_weather: z.string().default(""),
+  emotional_tone: z.string().default(""),
+  // element_name'ы персонажей, реально присутствующих в кадре этой группы
+  characters_in_frame: z.array(z.string()).default([]),
+  shots: z.array(groupShotSchema).default([]),
+});
+export type EnhanceGroup = z.infer<typeof enhanceGroupSchema>;
 
 /** Переделка одной группы по замечанию пользователя (llmReviseGroup). */
 export const groupPatchSchema = z.object({

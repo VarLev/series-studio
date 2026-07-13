@@ -22,12 +22,13 @@ import { promptFamily, visionModelFrom } from "./models";
 import { runJson } from "./client";
 import {
   breakdownSchema,
+  enhanceGroupSchema,
   groupPatchSchema,
   imageAnalysisSchema,
   insertGroupsSchema,
   shotPromptSchema,
-  techniquePickSchema,
   type Breakdown,
+  type EnhanceGroup,
   type GroupPatch,
   type GroupShot,
   type ImageAnalysis,
@@ -142,7 +143,7 @@ export async function llmBreakdown(
         "а ТОЛЬКО одним JSON-объектом без пояснений:\n" +
         '{"summary":"краткий сюжет эпизода","characters":["персонажи"],"locations":["локации"],' +
         '"groups":[{"order":1,"title":"название группы","time":"00:00–00:14","duration_sec":14,' +
-        '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain","scene_start":true,"characters":["персонажи группы"],' +
+        '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain","emotional_tone":"эмоциональный тон группы на английском, напр. calm / tense, ominous / tender","scene_start":true,"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если сюжет его описал для этой сцены, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
@@ -154,6 +155,12 @@ export async function llmBreakdown(
         "погода (напр. «evening, overcast», «night, rain», «bright sunny day»). Внутри одной сцены " +
         "(scene_start: false) — ОДИНАКОВО во всех группах; менять можно только на границе сцены " +
         "(scene_start: true). Если сюжет не уточняет — выбери правдоподобное и держи единым по сцене.\n" +
+        "ЭМОЦИОНАЛЬНЫЙ ТОН: для КАЖДОЙ группы заполни emotional_tone (на английском, 1–3 слова) — " +
+        "настроение и атмосфера ИМЕННО этого фрагмента по тому, что в нём реально происходит: " +
+        "напр. «calm», «tender», «tense», «anxious, ominous», «warm», «melancholic», «angry». " +
+        "Определяй его по СОДЕРЖАНИЮ группы, а не по общему тону сериала: если в группе ничего " +
+        "напряжённого не происходит — ставь спокойный/нейтральный тон (calm), НЕ нагнетай тревогу. " +
+        "Тон может свободно меняться от группы к группе даже внутри одной сцены.\n" +
         "ГАРДЕРОБ (якорь одежды): НЕ придумывай одежду. По умолчанию у каждого персонажа " +
         "есть базовый гардероб в библии — приложение подставит его само, поэтому в обычном " +
         "случае outfit оставляй ПУСТОЙ СТРОКОЙ. Заполняй outfit (на английском, годный для " +
@@ -171,7 +178,9 @@ export async function llmBreakdown(
         `Целевая продолжительность всего эпизода: ${durPhrase}. Это значение приоритетно — оно ` +
         "заменяет любую другую длительность эпизода, упомянутую в задании; распредели события так, " +
         "чтобы суммарный хронометраж уложился в этот диапазон.\n" +
-        `${LANGUAGE_RULES}`,
+        // программно, поверх редактируемого шаблона задания (tpl_breakdown) — так
+        // точная формула тайминга не зависит от того, что пользователь оставил в шаблоне
+        `${TIMING_RULES}\n${LANGUAGE_RULES}`,
       user,
     },
     breakdownSchema,
@@ -269,13 +278,19 @@ export async function llmInsertGroups(input: {
         "(группа = отдельное AI-видео не длиннее 15 секунд). Пользователь описал, что должно " +
         "происходить в новых шотах; контекст сцены дан ТОЛЬКО для связности (персонажи, тон, " +
         "обстановка) — существующие группы НЕ переписывай и НЕ пересказывай.\n" +
-        "Создай столько групп, сколько требует запрос (обычно 1–3). У вставки могут быть СВОИ " +
-        "локация и время/погода: если запрос переносит действие в другое место или время — задай " +
-        "новые значения; если нет — повтори значения сцены.\n" +
+        "Сам реши, сколько групп создать — одну или несколько: считай по правилам хронометража " +
+        "ниже (реплики и действия по формуле не помещаются в 15 секунд одной группы — значит нужна " +
+        "ещё одна группа), а не по интуиции. У вставки могут быть СВОИ локация и время/погода: если " +
+        "запрос переносит действие в другое место или время — задай новые значения; если нет — " +
+        "повтори значения сцены.\n" +
         `${TIMING_RULES}\n${LANGUAGE_RULES}\n` +
+        "У каждой группы заполни emotional_tone (на английском, 1–3 слова) по тому, что в ней " +
+        "происходит по запросу: calm / tense / tender / anxious, ominous / warm — не нагнетай " +
+        "тревогу, если фрагмент спокойный.\n" +
         "Верни ТОЛЬКО JSON без пояснений:\n" +
         '{"groups":[{"order":1,"title":"название группы","duration_sec":14,' +
         '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain",' +
+        '"emotional_tone":"эмоциональный тон группы, напр. calm / tense, ominous",' +
         '"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если запрос или сцена его описали, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
@@ -290,44 +305,75 @@ export async function llmInsertGroups(input: {
 }
 
 /**
- * Этап 1 фабрики: Haiku просматривает индекс библиотеки приёмов (500 карточек)
- * и выбирает до 5 кандидатов под действие шота. Дёшево (~1 цент), полные тексты
- * кандидатов идут во второй, основной вызов.
+ * Enhance: Opus переоценивает ОДНУ группу целиком (всегда через CLI/подписку) —
+ * возвращает улучшенные шоты с таймингом, закреплённый за каждым шотом приём,
+ * уточнённые локацию/погоду/тон и список персонажей реально в кадре. Заменяет
+ * прежний автоподбор приёмов на этапе генерации промпта (перенесён сюда).
  */
-async function pickTechniqueCandidates(
-  episodeId: string,
-  shotDescription: string,
-  model: string,
-): Promise<string[]> {
+export async function llmEnhanceGroup(input: {
+  episodeId: string;
+  groupTitle: string;
+  durationSec: number;
+  beats: GroupShot[];
+  location: string;
+  timeWeather: string;
+  emotionalTone: string;
+  /** краткий контекст соседних групп (НЕ весь сюжет) — для связности */
+  sceneContext: string;
+}): Promise<EnhanceGroup> {
+  const { rules } = await seriesSystemBase();
+  const bible = await bibleContext(undefined, { mode: "names" });
   const all = await listTechniques();
-  if (!all.length) return [];
-  try {
-    // индекс библиотеки не зависит от сцены — вызывается на КАЖДЫЙ шот эпизода,
-    // поэтому весь system целиком идёт в кэшируемый префикс (см. cacheableSystemPrefix)
-    const res = await runJson(
-      {
-        kind: "prompt",
-        model,
-        episodeId,
-        maxTokens: 500,
-        cacheableSystemPrefix:
-          "Ты подбираешь режиссёрские приёмы к сцене вертикального сериала. " +
-          "Ниже индекс библиотеки: id | название | камера | теги | категория. " +
-          "Выбери до 5 приёмов, которые реально усилят сцену (движение камеры, свет, композиция). " +
-          "Если ничего не подходит — верни пустой список.\n" +
-          'Верни ТОЛЬКО JSON: {"ids":["b19"]}\n\n' +
-          techniqueIndex(all),
-        system: "",
-        user: `Сцена: ${shotDescription}`,
-      },
-      techniquePickSchema,
-    );
-    const known = new Set(all.map((t) => t.id));
-    return res.ids.filter((id) => known.has(id)).slice(0, 5);
-  } catch {
-    // подбор приёмов — вспомогательный шаг: его сбой не должен ломать фабрику
-    return [];
-  }
+  const techIndexBlock = all.length
+    ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (id | название | камера | теги | категория) — " +
+      "для каждого шота выбери НЕ БОЛЕЕ ОДНОГО приёма (technique_id), только если он реально усиливает " +
+      'шот; иначе technique_id: "":\n' +
+      techniqueIndex(all) +
+      "\n\n"
+    : "";
+  const current = input.beats
+    .map(
+      (b) =>
+        `Шот ${b.order} (${b.time}): План/ракурс: ${b.framing}. Камера: ${b.camera}. ` +
+        `Действие: ${b.action}.${b.dialogue ? ` Реплика: «${b.dialogue}»` : ""}` +
+        `${b.technique_id ? ` [закреплён приём: ${b.technique_id}]` : ""}`,
+    )
+    .join("\n");
+  return runJson(
+    {
+      kind: "breakdown",
+      model: "claude-opus-4-8", // Enhance всегда на Opus
+      forceCli: true, // и всегда через подписку (CLI)
+      episodeId: input.episodeId,
+      maxTokens: 12000,
+      system:
+        `${rules}\n\n${bible}\n\n` +
+        "Ты — старший режиссёр вертикального сериала. Переоцени ОДНУ группу шотов и улучши её целиком " +
+        "(группа = отдельное AI-видео не длиннее 15 секунд). Верни улучшенную версию группы. Что можно менять:\n" +
+        "- переписать, добавить или удалить шоты, если это усилит сцену (сохраняя смысл и реплики сюжета);\n" +
+        "- уточнить тайминг каждого шота;\n" +
+        "- заполнить/уточнить location, time_weather, emotional_tone по содержанию группы;\n" +
+        "- для каждого шота закрепить не более ОДНОГО режиссёрского приёма из библиотеки ниже;\n" +
+        "- в characters_in_frame перечислить element_name ТОЛЬКО тех персонажей библии, кто РЕАЛЬНО " +
+        "  присутствует в кадре этой группы (по действию и репликам) — НЕ всех упомянутых, только видимых.\n" +
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n\n` +
+        techIndexBlock +
+        "Верни ТОЛЬКО JSON без пояснений:\n" +
+        '{"title":"название группы","duration_sec":14,"location":"локация","time_weather":"время суток и погода",' +
+        '"emotional_tone":"эмоциональный тон, напр. calm / tense","characters_in_frame":["@Simon"],' +
+        '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
+        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка","technique_id":"b19 или пусто"}]}\n' +
+        "Время шотов отсчитывается от начала группы (первый шот — с 00:00).",
+      user:
+        (input.sceneContext.trim()
+          ? `Контекст соседних групп (для связности, НЕ переписывай их):\n${input.sceneContext}\n\n`
+          : "") +
+        `Группа «${input.groupTitle}» (${input.durationSec} сек). ` +
+        `Текущие: локация "${input.location}", время/погода "${input.timeWeather}", тон "${input.emotionalTone}".\n` +
+        `Текущие шоты:\n${current}`,
+    },
+    enhanceGroupSchema,
+  );
 }
 
 /**
@@ -368,11 +414,6 @@ export async function llmShotPrompt(
   // у каждого семейства свой шаблон: Seedance (tpl_video) и Kling (tpl_video_kling —
   // референсы <<<image_N>>>, нативный звук, своя структура шотов)
   const videoTemplate = isKling ? settings.tpl_video_kling : settings.tpl_video;
-
-  const shotDescription =
-    `${shot.title ? shot.title + ". " : ""}${shot.actionMd}` +
-    (shot.cameraHint ? ` Камера: ${shot.cameraHint}.` : "") +
-    ` Длительность ${shot.durationSec} сек.`;
 
   // ---------- гардероб группы (WARDROBE LOCK) ----------
   // наряд из связки шот×персонаж; пусто → базовый гардероб сущности
@@ -456,6 +497,20 @@ export async function llmShotPrompt(
       "Отрази их в Scene/GLOBAL CONTINUITY и в описании света/неба (переведи на английский при " +
       "необходимости) — держи одинаковыми во всех группах связки, НЕ меняй время суток и погоду между группами."
     : "";
+  // эмоциональный тон — СВОЙ у этой группы; задаёт эмоциональную окраску сцены и
+  // ПЕРЕКРЫВАЕТ общий тон сериала (series_rules/series_style) для настроения этой
+  // группы. Без него спокойная сцена наследовала «психологическое напряжение» серии.
+  const emotionalTone = shot.emotionalTone.trim();
+  const emotionalToneBlock = emotionalTone
+    ? `ЭМОЦИОНАЛЬНЫЙ ТОН ЭТОЙ ГРУППЫ: "${emotionalTone}". Он задаёт ТОЛЬКО атмосферу и уровень ` +
+      "напряжения сцены, и ТОЛЬКО в одном месте: в GLOBAL CONTINUITY зафиксируй настроение этим тоном " +
+      'ОДНОЙ короткой формулировкой (напр. "calm, warm atmosphere"). НЕ создавай отдельную строку или ' +
+      "блок про тон, НЕ выноси его в Performance и НЕ повторяй в каждом шоте — Performance и Action " +
+      "остаются производными от действия конкретного шота, а не от тона. Остальное в GLOBAL CONTINUITY " +
+      "(локация, время, свет, позиции, одежда) не меняй. Если тон спокойный/тёплый/нейтральный — " +
+      'атмосфера спокойная: не добавляй тревогу, саспенс, "dark / psychological thriller / tense" ' +
+      "мотивы, даже если они звучат в общих правилах или визуальном стиле сериала."
+    : "";
   let sceneBlock = "";
   if (shot.isInsert) {
     sceneBlock =
@@ -490,7 +545,8 @@ export async function llmShotPrompt(
   const continuityBlock =
     "GLOBAL CONTINUITY — пиши ТОЛЬКО инварианты сцены, которые ОДИНАКОВЫ во всех связанных группах " +
     "этой сюжетной связки: локация, время суток, погода/свет, кто где находится и на каком месте " +
-    "(позиции персонажей), одежда, общий тон, что НЕЛЬЗЯ менять. КАТЕГОРИЧЕСКИ НЕ пиши в GLOBAL " +
+    "(позиции персонажей), одежда, что НЕЛЬЗЯ менять (атмосферу/настроение сюда НЕ вписывай из общего " +
+    "тона сериала — её задаёт эмоциональный тон группы отдельно). КАТЕГОРИЧЕСКИ НЕ пиши в GLOBAL " +
     "CONTINUITY моментальное состояние или движение — едет / тормозит / останавливается / " +
     "припаркована / куда именно направляется / что делает прямо сейчас: это относится к отдельному " +
     "шоту и идёт ТОЛЬКО в Action. Поэтому у связанных групп GLOBAL CONTINUITY по смыслу СОВПАДАЕТ, " +
@@ -550,14 +606,21 @@ export async function llmShotPrompt(
         )
         .join("\n")
     : "";
-  const candidateIds = await pickTechniqueCandidates(
-    shot.episodeId,
-    shotDescription,
-    settings.llm_simple_model,
-  );
-  const candidates = await getTechniquesByIds(candidateIds);
+  // Режиссёрские приёмы больше НЕ подбираются здесь (лишний вызов на каждый шот
+  // убран). Берём только те, что ЗАКРЕПЛЕНЫ за шотами группы кнопкой Enhance
+  // (technique_id в beat) — их язык вплетается в соответствующий SHOT-блок.
+  const attachedTechIds = [
+    ...new Set(beats.map((b) => b.technique_id).filter((id): id is string => Boolean(id))),
+  ];
+  const candidates = await getTechniquesByIds(attachedTechIds);
+  const techLabel = new Map(candidates.map((t) => [t.id, t.title]));
+  const shotTechLines = beats
+    .filter((b) => b.technique_id && techLabel.has(b.technique_id))
+    .map((b) => `- Шот ${b.order}: приём ${b.technique_id} (${techLabel.get(b.technique_id)})`)
+    .join("\n");
   const techniquesBlock = candidates.length
-    ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (кандидаты под эту сцену):\n" +
+    ? "РЕЖИССЁРСКИЕ ПРИЁМЫ, ЗАКРЕПЛЁННЫЕ ЗА ШОТАМИ ЭТОЙ ГРУППЫ (обязательно вплети язык " +
+      "камеры/света/композиции каждого в СВОЙ шот, адаптируя под сцену и персонажей):\n" +
       candidates
         .map(
           (t) =>
@@ -565,10 +628,7 @@ export async function llmShotPrompt(
             (t.negative ? `\nNegative: ${t.negative}` : ""),
         )
         .join("\n\n") +
-      "\n\nДля каждого шота внутри промпта реши, применим ли какой-то приём из кандидатов: " +
-      "если да — интегрируй его язык камеры/света/композиции в промпт (адаптируя под сцену и персонажей) " +
-      "и добавь id в used_technique_ids; если ни один не подходит — придумай своё режиссёрское решение " +
-      "и оставь used_technique_ids пустым."
+      (shotTechLines ? `\n\nСоответствие «шот → приём»:\n${shotTechLines}` : "")
     : "";
 
   // Компактность: рекомендация Seedance — до 3500 символов; лишние повторы и
@@ -589,13 +649,15 @@ export async function llmShotPrompt(
     '- НЕ начинай промпт с заголовка-метки вроде "SEEDANCE 2.0 PROMPT" или "KLING 3.0 OMNI PROMPT" — ' +
     "это название секции шаблона, а не часть промпта. Первая строка — сразу по делу.";
 
-  // единый визуальный стиль сериала — дословно в каждый промпт, чтобы атмосфера/
-  // грейдинг не менялись от версии к версии (жалоба: «стиль снова поменялся»)
+  // единый визуальный стиль сериала — это про КАРТИНКУ (свет/грейдинг/look), НЕ про
+  // эмоцию. Вставляем ТОЛЬКО в VISUAL STYLE, ОДИН раз — не дублируем в GLOBAL
+  // CONTINUITY (иначе общий «dark thriller» конфликтует со спокойным тоном группы)
   const styleBlock = settings.series_style?.trim()
-    ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА (единый для ВСЕХ шотов, групп и версий). Вставь его как блок " +
-      "VISUAL STYLE и как атмосферу в GLOBAL CONTINUITY ДОСЛОВНО, СЛОВО В СЛОВО — НЕ перефразируй, " +
-      "НЕ заменяй синонимами и НЕ придумывай свои эпитеты света/погоды/грейдинга от версии к версии: " +
-      `"${settings.series_style.trim()}".`
+    ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА — это про КАРТИНКУ (свет, грейдинг, реализм, цвет), НЕ про " +
+      "эмоциональное настроение. Вставь его ДОСЛОВНО, СЛОВО В СЛОВО ТОЛЬКО в блок VISUAL STYLE — " +
+      "РОВНО ОДИН раз; НЕ дублируй его в GLOBAL CONTINUITY, Performance или SHOT-блоки. Не " +
+      "перефразируй и не меняй эпитеты от версии к версии. Эмоцию и атмосферу сцены он НЕ задаёт — " +
+      `их задаёт эмоциональный тон группы (см. ниже): "${settings.series_style.trim()}".`
     : "";
 
   return runJson(
@@ -609,7 +671,7 @@ export async function llmShotPrompt(
       // на каждом следующем шоте эпизода вместо повторной полной оплаты
       cacheableSystemPrefix: `${videoTemplate}\n\n${rules}`,
       system:
-        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
@@ -644,7 +706,14 @@ export async function llmShotPrompt(
         (shot.title ? `Название: ${shot.title}` : ""),
     },
     shotPromptSchema,
-  ).then(enforceTemplateInvariants);
+  )
+    .then(enforceTemplateInvariants)
+    .then((res) => {
+      // приёмы для бейджей 🎥 — детерминированно из закреплённых за шотами
+      // (не из ответа модели): что закреплено Enhance, то и показываем/храним
+      res.used_technique_ids = attachedTechIds;
+      return res;
+    });
 }
 
 /** M3 — правка промпта: замечание → версия N+1 (JSON) */

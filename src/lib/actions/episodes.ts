@@ -115,6 +115,7 @@ export async function saveBreakdown(
       cameraHint: "",
       location: group.location ?? "",
       timeWeather: group.time_weather ?? "",
+      emotionalTone: group.emotional_tone ?? "",
       status: "draft",
       sceneStart: group.scene_start,
     });

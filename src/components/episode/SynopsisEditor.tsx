@@ -8,7 +8,7 @@ import {
   saveLlmModelChoice,
 } from "@/lib/actions/episodes";
 import type { Breakdown } from "@/lib/llm/contracts";
-import { LLM_MODELS } from "@/lib/llm/models";
+import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
 import { estTextUsd, estTokens, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import BreakdownPreview from "./BreakdownPreview";
 import DualRange from "@/components/DualRange";
@@ -58,6 +58,7 @@ export default function SynopsisEditor({
   shotTitles = [],
   breakdownModel,
   onBreakdownModelChange,
+  useCli = false,
 }: {
   episodeId: string;
   initialTitle: string;
@@ -67,6 +68,8 @@ export default function SynopsisEditor({
   shotTitles?: string[];
   breakdownModel: string;
   onBreakdownModelChange: (m: string) => void;
+  /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
+  useCli?: boolean;
 }) {
   const t = useT();
   const draftKey = `ss-draft:${episodeId}`;
@@ -314,15 +317,17 @@ export default function SynopsisEditor({
             {breakingDown
               ? t(`Claude раскадрирует… ${elapsed}с`, `Claude is storyboarding… ${elapsed}s`)
               : (() => {
-                  const usd = fmtUsd(
-                    estTextUsd(breakdownModel, estTokens(synopsis) + 1500, OUT_TOKENS.breakdown),
-                  );
+                  // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
+                  const cost =
+                    useCli && isClaudeModel(breakdownModel)
+                      ? "(CLI)"
+                      : `~${fmtUsd(estTextUsd(breakdownModel, estTokens(synopsis) + 1500, OUT_TOKENS.breakdown))}`;
                   return shotsCount > 0
                     ? t(
-                        `Раскадровать (готовые не дублируются) · ~${usd}`,
-                        `Break down (existing kept) · ~${usd}`,
+                        `Раскадровать (готовые не дублируются) · ${cost}`,
+                        `Break down (existing kept) · ${cost}`,
                       )
-                    : t(`Разбить на группы шотов · ~${usd}`, `Break into shot groups · ~${usd}`);
+                    : t(`Разбить на группы шотов · ${cost}`, `Break into shot groups · ${cost}`);
                 })()}
           </button>
         </div>

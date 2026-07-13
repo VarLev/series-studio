@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, references, shots, shotEntities, entities } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
+import { displayGroupNumbers } from "@/lib/beats";
 import { getT } from "@/lib/i18n-server";
 import { availableImageModels } from "@/lib/generation";
 import { getFileUrl } from "@/lib/storage";
@@ -70,6 +71,9 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     }),
   );
 
+  // номер группы в серии: вставные группы (isInsert) в нумерацию не входят
+  const displayNoById = displayGroupNumbers(shotRows);
+
   const shotItems: ShotListItem[] = shotRows.map((s) => {
     // чистые визуальные описания шотов группы — промпт листа раскадровки
     // не должен содержать «Шот N (00:00–00:05):» и обрезанные хвосты
@@ -96,6 +100,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
       status: s.status,
       sceneStart: s.sceneStart,
       isInsert: s.isInsert,
+      displayNo: displayNoById.get(s.id) ?? 0,
       entityNames: links
         .filter((l) => l.shotId === s.id)
         .map((l) => entityById.get(l.entityId)?.name ?? "")
@@ -243,6 +248,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         initialSynopsis={episode.synopsisMd}
         shots={shotItems}
         breakdownModel={settings.llm_model}
+        useCli={settings.llm_use_cli === "1"}
         storyboard={storyboard}
       />
     </main>

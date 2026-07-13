@@ -2,7 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { z } from "zod";
 import { getDb, llmUsage } from "@/lib/db";
+import { getSetting } from "@/lib/settings";
 import { logModelCall } from "@/lib/modelLog";
+import { runClaudeCliText } from "./cli";
 
 let client: Anthropic | null = null;
 let openaiClient: OpenAI | null = null;
@@ -108,6 +110,12 @@ export interface LlmCall {
    * склеивается перед `system`.
    */
   cacheableSystemPrefix?: string;
+  /**
+   * Принудительно гнать вызов через Claude Code CLI (подписка), не спрашивая
+   * настройку llm_use_cli. Для операций, которые ВСЕГДА идут через подписку
+   * (Enhance на Opus). Работает только для Claude-моделей без картинки.
+   */
+  forceCli?: boolean;
 }
 
 function fullSystemText(call: LlmCall): string {
@@ -145,18 +153,30 @@ export async function runText(call: LlmCall): Promise<string> {
       `Модель «${call.model}» не принимает изображения — выберите в настройках vision-модель (Haiku/Gemini).`,
     );
   }
+  // Claude-текст через Claude Code CLI (подписка вместо API), если включено в
+  // настройках ИЛИ вызов помечен forceCli (Enhance). Vision — всегда API: CLI
+  // не принимает картинку из памяти.
+  const viaCli =
+    provider === "anthropic" &&
+    !call.imageBase64 &&
+    (call.forceCli || (await getSetting("llm_use_cli")) === "1");
+  const loggedProvider = viaCli ? "anthropic-cli" : provider;
   const started = Date.now();
   const refs = (call.refIds ?? []).map((id) => ({ id }));
   try {
-    const { text, usage } =
-      provider === "anthropic"
+    const { text, usage } = viaCli
+      ? // +30 c к потолку: холодный старт процесса CLI не должен съедать бюджет модели
+        await runClaudeCliText(call, LLM_TIMEOUT_MS + 30_000)
+      : provider === "anthropic"
         ? await runAnthropicText(call)
         : await runOpenAiText(call, provider);
-    if (usage) await recordUsage(call, usage);
+    // подписка не тратит деньги — CLI-вызовы не попадают в llm_usage (расходы на
+    // /costs остаются честными); токены видны в журнале «Console» (model_log)
+    if (usage && !viaCli) await recordUsage(call, usage);
     await logModelCall({
       channel: "llm",
       kind: call.kind,
-      provider,
+      provider: loggedProvider,
       model: call.model,
       status: "ok",
       request: {
@@ -178,7 +198,7 @@ export async function runText(call: LlmCall): Promise<string> {
     await logModelCall({
       channel: "llm",
       kind: call.kind,
-      provider,
+      provider: loggedProvider,
       model: call.model,
       status: "error",
       request: { system: fullSystemText(call), user: call.user, hasImage: Boolean(call.imageBase64) },

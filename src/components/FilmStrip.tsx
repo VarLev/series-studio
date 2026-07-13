@@ -7,6 +7,10 @@ import { useT } from "@/components/I18nProvider";
 export interface StripShot {
   id: string;
   orderIndex: number;
+  /** номер группы в серии; вставные группы в нумерацию не входят (0 — номера нет) */
+  displayNo: number;
+  /** вставная группа (спин-офф сцены) — своя визуальная метка вместо номера */
+  isInsert?: boolean;
   status: string;
   thumbUrl: string | null;
   /** миниатюра — кадр видео (mp4) → нужен <video>, а не <img> */
@@ -35,17 +39,20 @@ export default function FilmStrip({
       {shots.map((s) => {
         const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
         const current = s.id === currentShotId;
+        const label = s.isInsert ? "✦" : String(s.displayNo).padStart(2, "0");
         return (
           <Link
             key={s.id}
             href={`/episodes/${episodeId}/shots/${s.id}`}
             className="w-[38px] shrink-0"
-            title={`${t("Группа", "Group")} ${String(s.orderIndex).padStart(2, "0")} · ${t(st.ru, st.en)}`}
+            title={`${s.isInsert ? t("Вставка", "Insert") : t("Группа", "Group")} ${label} · ${t(st.ru, st.en)}`}
           >
             <span
               className="relative block aspect-[9/16] overflow-hidden rounded border-[1.5px] bg-ink-600"
               style={{
-                borderColor: st.color,
+                borderColor: s.isInsert ? "rgba(139,95,176,.7)" : st.color,
+                borderStyle: s.isInsert ? "dashed" : "solid",
+                background: s.isInsert ? "rgba(139,95,176,.1)" : undefined,
                 boxShadow: current ? "var(--glow-violet-sm)" : "none",
               }}
             >
@@ -82,9 +89,9 @@ export default function FilmStrip({
             </span>
             <span
               className="mt-0.5 block text-center font-mono text-[9.5px] font-medium tracking-[0.1em]"
-              style={{ color: current ? "var(--text-100)" : "var(--text-400)" }}
+              style={{ color: current ? "var(--text-100)" : s.isInsert ? "var(--violet-300)" : "var(--text-400)" }}
             >
-              {String(s.orderIndex).padStart(2, "0")}
+              {label}
             </span>
           </Link>
         );

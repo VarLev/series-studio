@@ -240,6 +240,33 @@ export default async function CostsPage() {
         {/* Настройки */}
         <form action={saveSettings} className="flex flex-col gap-3">
           <SectionLabel>{t("Настройки", "Settings")}</SectionLabel>
+          {/* Подключение текстовых Claude-запросов: API (деньги) или Claude Code CLI
+              (подписка Pro/Max). Vision и не-Claude модели всегда идут через свои API. */}
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-t300">
+              {t("Текстовые запросы Claude — подключение", "Claude text requests — connection")}
+              <span className="text-t400">
+                {" "}
+                —{" "}
+                {t(
+                  "CLI тратит подписку Claude (Pro/Max) вместо API-денег; нужен разовый вход: claude → /login",
+                  "CLI spends your Claude subscription (Pro/Max) instead of API money; one-time claude → /login required",
+                )}
+              </span>
+            </span>
+            <select
+              name="llm_use_cli"
+              defaultValue={settings.llm_use_cli}
+              className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 font-mono text-[12.5px] text-t100 outline-none focus:border-[var(--border-strong)]"
+            >
+              <option value="0">
+                {t("Anthropic API — ключ, оплата за токены", "Anthropic API — key, pay per token")}
+              </option>
+              <option value="1">
+                {t("Claude Code CLI — подписка (Pro/Max)", "Claude Code CLI — subscription (Pro/Max)")}
+              </option>
+            </select>
+          </label>
           {fields.map((f) => (
             <label key={f.key} className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-t300">

@@ -52,6 +52,7 @@ export default function BreakdownPreview({
     duration_sec: item.duration_sec,
     location: item.location,
     time_weather: item.time_weather,
+    emotional_tone: item.emotional_tone,
     scene_start: item.scene_start,
     characters: item.characters,
     wardrobe: item.wardrobe,

@@ -12,6 +12,9 @@ export const DEFAULT_SETTINGS = {
   llm_model: "claude-sonnet-4-6",
   // модель для простых запросов: правка групп, подбор приёмов, анализ референсов
   llm_simple_model: "claude-haiku-4-5",
+  // "1" → текстовые Claude-вызовы идут через Claude Code CLI (подписка Pro/Max,
+  // не тратит API-деньги). Vision и не-Claude модели всегда через свои API.
+  llm_use_cli: "0",
   series_title: "The Edge of Stigma",
   series_rules:
     "Жанр: тёмная романтика / психологический триллер (Boys Love). " +

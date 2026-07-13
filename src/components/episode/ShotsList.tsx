@@ -22,6 +22,8 @@ export interface ShotListItem {
   sceneStart: boolean;
   /** вставная группа (спин-офф сцены): своя шкала времени и свои параметры */
   isInsert: boolean;
+  /** номер группы в серии; вставные группы в нумерацию не входят (0 — номера нет) */
+  displayNo: number;
   entityNames: string[];
   /** чистые визуальные описания шотов группы (без «Шот N (время):») — для промпта листа */
   beats: string[];
@@ -30,15 +32,23 @@ export interface ShotListItem {
   thumbIsVideo?: boolean;
 }
 
+/** Номер в бейджах и заголовках: у вставных групп своего номера серии нет. */
+function groupLabel(shot: ShotListItem): string {
+  return shot.isInsert ? "✦" : String(shot.displayNo).padStart(2, "0");
+}
+
 export default function ShotsList({
   episodeId,
   shots,
   defaultModel,
+  useCli = false,
 }: {
   episodeId: string;
   shots: ShotListItem[];
   /** модель по умолчанию для вставных групп (та же, что у раскадровки) */
   defaultModel: string;
+  /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
+  useCli?: boolean;
 }) {
   const t = useT();
   const [, startTransition] = useTransition();
@@ -96,7 +106,7 @@ export default function ShotsList({
             </div>
           )}
         <LongPressMenu
-          title={`${t("Группа", "Group")} ${String(shot.orderIndex).padStart(2, "0")} · ${shot.title || t("Без названия", "Untitled")}`}
+          title={`${shot.isInsert ? t("Вставка", "Insert") : t("Группа", "Group")} ${groupLabel(shot)} · ${shot.title || t("Без названия", "Untitled")}`}
           deleteLabel={t("Удалить шот", "Delete shot")}
           confirmLabel={t(
             "Точно удалить шот с промптами и видео?",
@@ -104,10 +114,10 @@ export default function ShotsList({
           )}
           doneToast={t("Шот удалён", "Shot deleted")}
           action={deleteShot.bind(null, shot.id)}
-          className={`flex items-stretch gap-2 rounded-xl border bg-ink-700 p-2.5 hover:border-[var(--border-strong)] ${
+          className={`flex items-stretch gap-2 rounded-xl border p-2.5 hover:border-[var(--border-strong)] ${
             shot.isInsert
-              ? "border-dashed border-[rgba(139,95,176,.5)]"
-              : "border-[var(--border-subtle)]"
+              ? "border-dashed border-[rgba(139,95,176,.55)] bg-[rgba(139,95,176,.08)]"
+              : "border-[var(--border-subtle)] bg-ink-700"
           }`}
         >
           <Link
@@ -137,13 +147,13 @@ export default function ShotsList({
                 )
               ) : (
                 <span className="chrome-text font-display text-[16px] font-bold">
-                  {String(shot.orderIndex).padStart(2, "0")}
+                  {groupLabel(shot)}
                 </span>
               )}
               {/* когда есть кадр — номер группы маленьким бейджем в углу */}
               {shot.thumbUrl && (
                 <span className="absolute left-0 top-0 rounded-br-md bg-[rgba(6,5,9,.82)] px-1 py-0.5 font-mono text-[8px] font-semibold text-t100">
-                  {String(shot.orderIndex).padStart(2, "0")}
+                  {groupLabel(shot)}
                 </span>
               )}
               <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[rgba(6,5,9,.85)] px-1 pb-0.5 pt-2 text-center font-mono text-[8.5px] font-semibold text-t200">
@@ -200,6 +210,18 @@ export default function ShotsList({
               ↓
             </button>
           </div>
+          {/* вставные группы — свободные, необязательные сцены: удаляются явной
+              кнопкой, не только долгим зажатием (как обычные группы) */}
+          {shot.isInsert && (
+            <ConfirmButton
+              action={deleteShot.bind(null, shot.id)}
+              label="🗑"
+              confirmLabel={t("Удалить вставку?", "Delete insert?")}
+              doneToast={t("Вставка удалена", "Insert deleted")}
+              className="flex w-8 items-center justify-center self-center rounded-md text-[13px] text-t400 hover:bg-ink-500 hover:text-danger disabled:opacity-50"
+              armedClassName="bg-[rgba(194,71,106,.15)] text-danger"
+            />
+          )}
         </LongPressMenu>
         </div>
         );
@@ -225,6 +247,7 @@ export default function ShotsList({
         onClose={() => setInsertFor(null)}
         defaultModel={defaultModel}
         baselineCount={shots.length}
+        useCli={useCli}
       />
     </div>
   );

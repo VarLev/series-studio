@@ -11,12 +11,14 @@ import { useRouter } from "next/navigation";
 import {
   updateGroupBeats,
   reviseGroup,
+  enhanceGroup,
   updateGroupLocation,
   updateGroupTimeWeather,
+  updateGroupEmotionalTone,
 } from "@/lib/actions/shots";
 import { generateSingleShotPrompt } from "@/lib/actions/prompts";
 import type { GroupShot } from "@/lib/llm/contracts";
-import { CHEAPEST_LLM, PROMPT_FAMILIES } from "@/lib/llm/models";
+import { CHEAPEST_LLM, PROMPT_FAMILIES, isClaudeModel } from "@/lib/llm/models";
 import { estTextUsd, LLM_PRICES, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { usePromptTrack } from "@/components/shot/PromptTrackContext";
 import { toast } from "@/components/Toaster";
@@ -24,6 +26,34 @@ import { useT } from "@/components/I18nProvider";
 
 const fieldCls =
   "w-full rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2 outline-none focus:border-[var(--border-strong)]";
+
+const MIN_BEAT_SEC = 1;
+const MAX_GROUP_SEC = 15;
+const TIME_RE = /(\d{1,2}):(\d{2})\s*[–—-]\s*(\d{1,2}):(\d{2})/;
+
+// та же логика, что parseTimeRange/fmtTime в lib/beats.ts — дублируем локально
+// (не тянем @/lib/beats в клиентский бандл: там же серверный @/lib/db)
+function beatSeconds(b: GroupShot): number {
+  const m = b.time.match(TIME_RE);
+  if (!m) return 2;
+  const start = Number(m[1]) * 60 + Number(m[2]);
+  const end = Number(m[3]) * 60 + Number(m[4]);
+  return end > start ? end - start : 2;
+}
+function fmtBeatTime(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+/** Пересчитать «00:00–00:05» у всех шотов подряд по заданным длительностям. */
+function retimeWithDurations(list: GroupShot[], durations: number[]): GroupShot[] {
+  let cursor = 0;
+  return list.map((b, idx) => {
+    const d = durations[idx];
+    const time = `${fmtBeatTime(cursor)}–${fmtBeatTime(cursor + d)}`;
+    cursor += d;
+    return { ...b, order: idx + 1, time };
+  });
+}
 
 interface DragState {
   order: number;
@@ -39,6 +69,8 @@ export default function GroupShotsEditor({
   llmModel,
   location = "",
   timeWeather = "",
+  emotionalTone = "",
+  useCli = false,
 }: {
   shotId: string;
   initialBeats: GroupShot[];
@@ -50,11 +82,17 @@ export default function GroupShotsEditor({
   location?: string;
   /** время суток и погода сюжетной связки (тоже одни на сцену) */
   timeWeather?: string;
+  /** эмоциональный тон группы — свой у каждой группы (не единый на сцену) */
+  emotionalTone?: string;
+  /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
+  useCli?: boolean;
 }) {
   const router = useRouter();
   const t = useT();
   const estModel = LLM_PRICES[simpleModel] ? simpleModel : CHEAPEST_LLM;
-  const reviseUsd = fmtUsd(estTextUsd(estModel, 1500, OUT_TOKENS.revise));
+  // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
+  const viaCli = useCli && isClaudeModel(simpleModel);
+  const reviseCost = viaCli ? "(CLI)" : `~${fmtUsd(estTextUsd(estModel, 1500, OUT_TOKENS.revise))}`;
   const [beats, setBeats] = useState<GroupShot[]>(initialBeats);
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [dirty, setDirty] = useState(false);
@@ -63,6 +101,9 @@ export default function GroupShotsEditor({
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
   const [saving, startSave] = useTransition();
+  // Enhance: полная переоценка группы на Opus через CLI (свой таймер/ошибка)
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceElapsed, setEnhanceElapsed] = useState(0);
 
   // локация связки: правка на любой группе обновляет все группы сцены
   const [loc, setLoc] = useState(location);
@@ -97,6 +138,35 @@ export default function GroupShotsEditor({
   ];
   function addTwPreset(term: string) {
     setTw((prev) => {
+      const cur = prev.trim();
+      if (cur.toLowerCase().split(/[,\s]+/).includes(term)) return prev; // уже есть
+      return cur ? `${cur}, ${term}` : term;
+    });
+  }
+
+  // эмоциональный тон группы: СВОЙ у группы (не на связку) — правка меняет только её
+  const [tone, setTone] = useState(emotionalTone);
+  const [savingTone, startSaveTone] = useTransition();
+  const [prevTone, setPrevTone] = useState(emotionalTone);
+  if (prevTone !== emotionalTone) {
+    setPrevTone(emotionalTone);
+    setTone(emotionalTone);
+  }
+  const toneDirty = tone.trim() !== emotionalTone.trim();
+  // быстрые чипы тона (значение в поле — на английском, уходит в промпт)
+  const TONE_PRESETS = [
+    { ru: "спокойный", en: "calm" },
+    { ru: "нежный", en: "tender" },
+    { ru: "тёплый", en: "warm" },
+    { ru: "радостный", en: "joyful" },
+    { ru: "напряжённый", en: "tense" },
+    { ru: "тревожный", en: "anxious" },
+    { ru: "зловещий", en: "ominous" },
+    { ru: "грустный", en: "melancholic" },
+    { ru: "злой", en: "angry" },
+  ];
+  function addTonePreset(term: string) {
+    setTone((prev) => {
       const cur = prev.trim();
       if (cur.toLowerCase().split(/[,\s]+/).includes(term)) return prev; // уже есть
       return cur ? `${cur}, ${term}` : term;
@@ -147,6 +217,26 @@ export default function GroupShotsEditor({
     return () => clearInterval(id);
   }, [revising]);
 
+  useEffect(() => {
+    if (!enhancing) return;
+    const t0 = Date.now();
+    const id = setInterval(() => setEnhanceElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [enhancing]);
+
+  async function onEnhance() {
+    setError("");
+    setEnhanceElapsed(0);
+    setEnhancing(true);
+    const res = await enhanceGroup(shotId);
+    setEnhancing(false);
+    if (res.ok) {
+      setDirty(false); // прилетят новые initialBeats — синхронизируем с сервером
+      toast(t("Группа улучшена (Opus)", "Group enhanced (Opus)"));
+      router.refresh();
+    } else setError(res.error);
+  }
+
   useEffect(() => () => { if (lp.current?.timer) clearTimeout(lp.current.timer); }, []);
 
   function toggleEdit(i: number) {
@@ -160,6 +250,63 @@ export default function GroupShotsEditor({
 
   function patch(i: number, p: Partial<GroupShot>) {
     setBeats(beats.map((b, idx) => (idx === i ? { ...b, ...p } : b)));
+    setDirty(true);
+  }
+
+  // длительность шота — в секундах; диапазоны всех шотов группы пересчитываются
+  // сразу же (программно, без ИИ), сумма ограничена длиной группы (≤15 сек)
+  function setBeatDuration(i: number, seconds: number) {
+    if (!Number.isFinite(seconds)) return;
+    const durations = beats.map(beatSeconds);
+    durations[i] = Math.max(MIN_BEAT_SEC, Math.round(seconds));
+    const total = durations.reduce((a, b) => a + b, 0);
+    if (total > MAX_GROUP_SEC) {
+      toast(
+        t(
+          `Группа не может быть длиннее ${MAX_GROUP_SEC} секунд (вышло бы ${total})`,
+          `A shot group can't exceed ${MAX_GROUP_SEC} seconds (would be ${total})`,
+        ),
+      );
+      return;
+    }
+    setBeats(retimeWithDurations(beats, durations));
+    setDirty(true);
+  }
+
+  function addBeat() {
+    const durations = [...beats.map(beatSeconds), 2];
+    const total = durations.reduce((a, b) => a + b, 0);
+    if (total > MAX_GROUP_SEC) {
+      toast(
+        t(
+          `Нельзя добавить шот — группа не может быть длиннее ${MAX_GROUP_SEC} секунд`,
+          `Can't add a shot — a group can't exceed ${MAX_GROUP_SEC} seconds`,
+        ),
+      );
+      return;
+    }
+    const next: GroupShot[] = [
+      ...beats,
+      { order: beats.length + 1, time: "", framing: "", camera: "", action: "", dialogue: "", technique_id: "" },
+    ];
+    setBeats(retimeWithDurations(next, durations));
+    setEditing((prev) => new Set(prev).add(next.length - 1));
+    setDirty(true);
+  }
+
+  function removeBeat(i: number) {
+    if (beats.length <= 1) return;
+    const remaining = beats.filter((_, idx) => idx !== i);
+    const durations = remaining.map(beatSeconds);
+    setBeats(retimeWithDurations(remaining, durations));
+    setEditing((prev) => {
+      const next = new Set<number>();
+      for (const idx of prev) {
+        if (idx === i) continue;
+        next.add(idx > i ? idx - 1 : idx);
+      }
+      return next;
+    });
     setDirty(true);
   }
 
@@ -248,6 +395,24 @@ export default function GroupShotsEditor({
       className="relative flex flex-col gap-1.5"
       style={{ touchAction: drag ? "none" : undefined }}
     >
+      {/* Enhance: Opus через CLI переоценивает всю группу — шоты, тайминг, приёмы,
+          локацию/погоду/тон и «кто в кадре». Всегда подписка (не тратит $). */}
+      <button
+        onClick={onEnhance}
+        disabled={enhancing}
+        className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--violet-400)] bg-[rgba(139,95,176,.12)] text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-100 hover:bg-[rgba(139,95,176,.2)] disabled:opacity-60"
+        style={{ boxShadow: "var(--glow-violet-sm)" }}
+        title={t(
+          "Opus переоценит группу: перепишет шоты и тайминг, подберёт режиссёрские приёмы, заполнит локацию/погоду/тон и определит, кто в кадре",
+          "Opus re-evaluates the group: rewrites shots & timing, picks director techniques, fills location/weather/tone and detects who's in frame",
+        )}
+      >
+        {enhancing
+          ? t(`Opus улучшает… ${enhanceElapsed}с`, `Opus enhancing… ${enhanceElapsed}s`)
+          : t("✨ Enhance · Opus (CLI)", "✨ Enhance · Opus (CLI)")}
+      </button>
+      {error && !revising && <div className="text-[11px] text-danger">{error}</div>}
+
       {/* Локация сюжетной связки: одна на все группы сцены (до следующего scene_start);
           уходит в промпты Seedance всех связанных групп */}
       <div className="flex flex-col gap-1 rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-2.5">
@@ -332,6 +497,54 @@ export default function GroupShotsEditor({
         </div>
       </div>
 
+      {/* Эмоциональный тон — СВОЙ у группы (не на связку); задаёт настроение/атмосферу
+          именно этой группы в промпте, перекрывая общий тон сериала */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-2.5">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
+            🎭 {t("Эмоциональный тон", "Emotional tone")}
+          </span>
+          <span className="text-[9px] text-t400">
+            {t("свой у группы · настроение сцены", "per group · sets the group's mood")}
+          </span>
+          <span className="flex-1" />
+          {toneDirty && (
+            <button
+              disabled={savingTone}
+              onClick={() =>
+                startSaveTone(async () => {
+                  await updateGroupEmotionalTone(shotId, tone);
+                  toast(t("Тон группы сохранён", "Group tone saved"));
+                })
+              }
+              className="rounded-md bg-violet-500 px-2.5 py-1 text-[10px] font-semibold uppercase text-white hover:bg-violet-400 disabled:opacity-50"
+            >
+              {savingTone ? t("…", "…") : t("Сохранить", "Save")}
+            </button>
+          )}
+        </div>
+        <input
+          value={tone}
+          onChange={(e) => setTone(e.target.value)}
+          placeholder={t(
+            "Эмоциональный тон (напр.: спокойный, тёплый / напряжённый, зловещий)",
+            "Emotional tone (e.g.: calm, warm / tense, ominous)",
+          )}
+          className={`${fieldCls} text-[12px] text-t200`}
+        />
+        <div className="flex flex-wrap gap-1">
+          {TONE_PRESETS.map((p) => (
+            <button
+              key={p.en}
+              onClick={() => addTonePreset(p.en)}
+              className="rounded-full border border-[var(--border-subtle)] bg-ink-600 px-2 py-0.5 text-[10px] text-t300 hover:border-[var(--border-strong)] hover:text-t100"
+            >
+              {t(p.ru, p.en)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {beats.map((b, i) => {
         const isEditing = editing.has(i);
         const inRework = validRework.includes(b.order);
@@ -357,6 +570,17 @@ export default function GroupShotsEditor({
                 {t("Шот", "Shot")} {b.order}
                 {b.time ? ` · ${b.time}` : ""}
               </span>
+              {b.technique_id && (
+                <span
+                  title={t(
+                    `Закреплён режиссёрский приём ${b.technique_id} (Enhance)`,
+                    `Director technique ${b.technique_id} attached (Enhance)`,
+                  )}
+                  className="rounded bg-[rgba(139,95,176,.18)] px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200"
+                >
+                  🎥 {b.technique_id}
+                </span>
+              )}
               {inRework && (
                 <span className="rounded bg-[rgba(139,95,176,.18)] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200">
                   {t("в реворке", "in rework")}
@@ -387,10 +611,35 @@ export default function GroupShotsEditor({
               >
                 {isEditing ? "✓" : "✎"}
               </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeBeat(i);
+                }}
+                disabled={beats.length <= 1}
+                title={t("Удалить шот", "Delete shot")}
+                className="flex h-7 min-w-7 items-center justify-center rounded-md border border-[var(--border-subtle)] px-1.5 font-mono text-[10px] text-t400 hover:border-danger hover:text-danger disabled:opacity-30"
+              >
+                🗑
+              </button>
             </div>
 
             {isEditing ? (
               <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-t400">
+                    {t("Длительность, сек", "Duration, sec")}
+                  </span>
+                  <input
+                    type="number"
+                    min={MIN_BEAT_SEC}
+                    max={MAX_GROUP_SEC}
+                    step={1}
+                    value={beatSeconds(b)}
+                    onChange={(e) => setBeatDuration(i, Number(e.target.value))}
+                    className={`${fieldCls} w-20 font-mono text-[11px] text-t200`}
+                  />
+                </div>
                 <input
                   value={b.framing}
                   onChange={(e) => patch(i, { framing: e.target.value })}
@@ -439,6 +688,19 @@ export default function GroupShotsEditor({
           </div>
         );
       })}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={addBeat}
+          className="flex min-h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--border-default)] text-[11px] font-semibold text-t300 hover:border-[var(--border-strong)] hover:text-violet-200"
+        >
+          <span className="text-[14px] leading-none">+</span>
+          {t("Добавить шот", "Add shot")}
+        </button>
+        <span className="shrink-0 font-mono text-[9.5px] text-t400">
+          {beats.reduce((a, b) => a + beatSeconds(b), 0)}/{MAX_GROUP_SEC} {t("сек", "sec")}
+        </span>
+      </div>
 
       {dirty && (
         <button
@@ -523,10 +785,10 @@ export default function GroupShotsEditor({
             ? t(`Claude переделывает… ${elapsed}с`, `Claude is reworking… ${elapsed}s`)
             : validRework.length > 0
               ? t(
-                  `Переделать шоты ${validRework.join(", ")} · ~${reviseUsd}`,
-                  `Rework shots ${validRework.join(", ")} · ~${reviseUsd}`,
+                  `Переделать шоты ${validRework.join(", ")} · ${reviseCost}`,
+                  `Rework shots ${validRework.join(", ")} · ${reviseCost}`,
                 )
-              : t(`Переделать по замечанию · ~${reviseUsd}`, `Rework per feedback · ~${reviseUsd}`)}
+              : t(`Переделать по замечанию · ${reviseCost}`, `Rework per feedback · ${reviseCost}`)}
         </button>
       </div>
 

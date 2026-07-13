@@ -19,6 +19,7 @@ export default function EpisodeTabs({
   initialSynopsis,
   shots,
   breakdownModel,
+  useCli = false,
   storyboard,
 }: {
   episodeId: string;
@@ -27,6 +28,8 @@ export default function EpisodeTabs({
   initialSynopsis: string;
   shots: ShotListItem[];
   breakdownModel: string;
+  /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
+  useCli?: boolean;
   storyboard: StoryboardData;
 }) {
   const t = useT();
@@ -71,6 +74,7 @@ export default function EpisodeTabs({
           shotTitles={shots.map((s) => s.title)}
           breakdownModel={bdModel}
           onBreakdownModelChange={setBdModel}
+          useCli={useCli}
         />
       )}
 
@@ -79,7 +83,9 @@ export default function EpisodeTabs({
       )}
 
       {/* вставные группы создаются той же моделью, что выбрана для раскадровки */}
-      {tab === "Шоты" && <ShotsList episodeId={episodeId} shots={shots} defaultModel={bdModel} />}
+      {tab === "Шоты" && (
+        <ShotsList episodeId={episodeId} shots={shots} defaultModel={bdModel} useCli={useCli} />
+      )}
     </div>
   );
 }

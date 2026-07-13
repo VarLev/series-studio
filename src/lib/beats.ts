@@ -23,10 +23,44 @@ export function fmtTime(sec: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
+// разговорный темп ≈150 слов/мин (2.5 слова/сек) + доля секунды на интонацию/
+// стык с действием — та же формула, что дана модели в TIMING_RULES (templates.ts)
+const WORDS_PER_SEC = 2.5;
+const REACTION_PAD_SEC = 0.6;
+
+/**
+ * Точное время на произнесение реплики (сек) — считается программно по числу
+ * слов, а не оставляется на глазомер модели. Пустая реплика → 0.
+ */
+export function estimateSpeechSeconds(dialogue: string): number {
+  const words = dialogue.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 0;
+  return words.length / WORDS_PER_SEC + REACTION_PAD_SEC;
+}
+
+/**
+ * Сумма длительностей шотов группы, посчитанная из их time-диапазонов (сек).
+ * Источник истины для durationSec группы после ручной правки шотов (добавление/
+ * удаление/правка секунд одного шота) — считается программно, без участия ИИ.
+ */
+export function sumBeatsDurationSec(beats: GroupShot[]): number {
+  return beats.reduce((sum, b) => {
+    const r = parseTimeRange(b.time);
+    return sum + (r ? r[1] - r[0] : 0);
+  }, 0);
+}
+
 /**
  * Нормализовать шоты группы: длительности берём из времени модели (в любом
- * отсчёте), а сами метки перезаписываем от 00:00. Возвращает шоты и итоговую
- * длительность группы.
+ * отсчёте), а сами метки перезаписываем от 00:00. Длительность реплики —
+ * нижняя граница шота: считается программно по числу слов (estimateSpeechSeconds),
+ * а не берётся на веру из тайминга, который дала модель — подстраховка от
+ * шотов, где реплика длиннее выделенного модель времени. Возвращает шоты и
+ * итоговую длительность группы.
+ * Известное ограничение: если реплики реально не помещаются в 15 сек даже
+ * после подстраховки — durationSec всё равно клампится к 15 (сумма шотов
+ * теоретически может чуть превысить кламп); материал в такой сцене стоит
+ * разбивать на несколько групп — см. TIMING_RULES в lib/templates.ts.
  */
 export function normalizeBeats(
   rawBeats: GroupShot[],
@@ -39,9 +73,8 @@ export function normalizeBeats(
   const parsed = sorted.map((b) => parseTimeRange(b.time));
   const durations = sorted.map((b, i) => {
     const p = parsed[i];
-    if (p) return p[1] - p[0];
-    // время не распарсилось — делим заявленную длительность группы поровну
-    return Math.max(1, Math.round(fallbackDurationSec / sorted.length));
+    const base = p ? p[1] - p[0] : Math.max(1, Math.round(fallbackDurationSec / sorted.length));
+    return Math.max(base, estimateSpeechSeconds(b.dialogue));
   });
   let cursor = 0;
   const beats = sorted.map((b, i) => {
@@ -94,6 +127,23 @@ export function sceneChainOf<T extends { id: string; sceneStart: boolean; isInse
     }
   }
   return rows.slice(start, end).filter((r) => !r.isInsert);
+}
+
+/**
+ * Отображаемые номера групп серии: считают только НЕ вставные группы —
+ * вставки в нумерацию не входят и её не сдвигают (своя мини-сцена, own clock).
+ * 0 у вставки означает «номера нет» — UI показывает вместо него свою метку.
+ */
+export function displayGroupNumbers<T extends { id: string; isInsert: boolean }>(
+  rows: T[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  let n = 0;
+  for (const r of rows) {
+    if (!r.isInsert) n++;
+    map.set(r.id, r.isInsert ? 0 : n);
+  }
+  return map;
 }
 
 /** Значение поля для связки: стартовой группы сцены, иначе первой непустой в связке. */

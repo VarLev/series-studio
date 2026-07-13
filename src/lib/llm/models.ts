@@ -90,3 +90,14 @@ export function visionModelFrom(simpleModel: string): string {
   // незнакомый id: claude/gemini умеют vision, остальные — фолбэк
   return /^(claude|gemini)/i.test(simpleModel) ? simpleModel : CHEAPEST_LLM;
 }
+
+/**
+ * Та же проверка, что providerOf() в lib/llm/client.ts — дублируем локально,
+ * а не импортируем: там серверные зависимости (getDb и т.п.), недопустимые
+ * в клиентском бандле. Нужна для UI: если и модель Claude, и включён CLI
+ * (llm_use_cli на /costs), вызов пойдёт через подписку, а не по API-цене —
+ * кнопки показывают «(CLI)» вместо оценки в $.
+ */
+export function isClaudeModel(model: string): boolean {
+  return !/^(gpt|o\d|chatgpt|deepseek|gemini)/i.test(model);
+}

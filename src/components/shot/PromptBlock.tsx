@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
 import { generateShotPromptsFor, latestPromptVersion, deleteTrackPrompts } from "@/lib/actions/prompts";
-import { LLM_MODELS, PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
+import {
+  LLM_MODELS,
+  PROMPT_FAMILIES,
+  promptFamily,
+  isClaudeModel,
+  type PromptFamily,
+} from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { usePromptTrack } from "@/components/shot/PromptTrackContext";
 import { useT } from "@/components/I18nProvider";
@@ -40,6 +46,7 @@ export default function PromptBlock({
   tokenImages = {},
   llmModel,
   usedTechniquesByFamily = { seedance: [], kling: [] },
+  useCli = false,
 }: {
   shotId: string;
   episodeId: string;
@@ -50,6 +57,8 @@ export default function PromptBlock({
   llmModel: string;
   /** приёмы 🎥 текущей версии каждого трека */
   usedTechniquesByFamily?: Record<PromptFamily, UsedTechnique[]>;
+  /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
+  useCli?: boolean;
 }) {
   const router = useRouter();
   const t = useT();
@@ -119,6 +128,8 @@ export default function PromptBlock({
   // фабрика: ~4К входных токенов (шаблон+библия+приёмы) + типовой вывод; ×2 для обоих треков
   const genUsdOne = estTextUsd(factoryModel, 4000, OUT_TOKENS.prompt);
   const genUsd = genUsdOne == null ? null : genUsdOne * createFamilies.length;
+  // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
+  const genCost = useCli && isClaudeModel(factoryModel) ? "(CLI)" : `~${fmtUsd(genUsd)}`;
 
   function openEditor() {
     // редактор открываем на текущей версии активного трека
@@ -443,10 +454,7 @@ export default function PromptBlock({
             >
               {generating
                 ? t(`Фабрика работает… ${elapsed}с`, `Factory running… ${elapsed}s`)
-                : t(
-                    `Сгенерировать промпт · ~${fmtUsd(genUsd)}`,
-                    `Generate prompt · ~${fmtUsd(genUsd)}`,
-                  )}
+                : t(`Сгенерировать промпт · ${genCost}`, `Generate prompt · ${genCost}`)}
             </button>
           </div>
           {generating && (
