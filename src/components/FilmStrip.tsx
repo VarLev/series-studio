@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { SHOT_STATUS } from "@/lib/statuses";
 import { useT } from "@/components/I18nProvider";
+import LazyVideoThumb from "@/components/LazyVideoThumb";
 
 export interface StripShot {
   id: string;
@@ -58,14 +59,7 @@ export default function FilmStrip({
             >
               {s.thumbUrl ? (
                 s.thumbIsVideo ? (
-                  <video
-                    // #t=0.1 — браузер показывает стоп-кадр вместо пустого плеера
-                    src={`${s.thumbUrl}#t=0.1`}
-                    muted
-                    playsInline
-                    preload="metadata"
-                    className="h-full w-full object-cover"
-                  />
+                  <LazyVideoThumb src={s.thumbUrl} className="h-full w-full object-cover" />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={s.thumbUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />

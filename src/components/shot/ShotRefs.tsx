@@ -17,7 +17,7 @@ interface ShotRef {
   id: string;
   url: string;
   caption: string;
-  role: "start_frame" | "composition";
+  role: "start_frame" | "composition" | "layout";
   /** якорь в тексте промпта: @Start | @Comp1..N — связь картинки с промптом */
   anchor: string;
 }
@@ -32,6 +32,7 @@ interface PickerRef {
 const ROLE_LABEL = {
   start_frame: { ru: "start-frame", en: "start-frame" },
   composition: { ru: "композиция", en: "composition" },
+  layout: { ru: "layout", en: "layout" },
 } as const;
 
 /** Референсы шота (spec §2.3/§3.6): роли, прикрепление из референсов серии/библии, Nano Banana. */
@@ -84,9 +85,18 @@ export default function ShotRefs({
                 className="absolute left-0.5 top-0.5 rounded-[3px] border px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em]"
                 style={{
                   background: "rgba(6,5,9,.8)",
-                  color: r.role === "start_frame" ? "var(--warning)" : "var(--violet-200)",
+                  color:
+                    r.role === "start_frame"
+                      ? "var(--warning)"
+                      : r.role === "layout"
+                        ? "#6fc3d4"
+                        : "var(--violet-200)",
                   borderColor:
-                    r.role === "start_frame" ? "rgba(192,138,62,.5)" : "rgba(139,95,176,.5)",
+                    r.role === "start_frame"
+                      ? "rgba(192,138,62,.5)"
+                      : r.role === "layout"
+                        ? "rgba(111,195,212,.5)"
+                        : "rgba(139,95,176,.5)",
                 }}
               >
                 {roleLabel(r.role)}
@@ -156,6 +166,30 @@ export default function ShotRefs({
                 {t(
                   "кадрирование / свет / настроение — уходит моделям вместе с промптом",
                   "framing / light / mood — sent to the models along with the prompt",
+                )}
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                startTransition(async () => {
+                  await setShotReferenceRole(roleFor.id, "layout");
+                  toast(t("Роль — layout (только пространство)", "Role — layout (spatial only)"));
+                });
+                setRoleFor(null);
+              }}
+              className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
+              style={{
+                borderColor: roleFor.role === "layout" ? "#6fc3d4" : "var(--border-subtle)",
+                background: roleFor.role === "layout" ? "rgba(111,195,212,.08)" : "none",
+              }}
+            >
+              <span className="text-[12.5px] font-medium text-t100">
+                {t("Layout — только пространство", "Layout — spatial only")}
+              </span>
+              <span className="text-[10px] text-t400">
+                {t(
+                  "геометрия комнаты и расстановка — БЕЗ копирования ракурса; видео начнётся с нового угла (привязка к прошлому без стартового кадра)",
+                  "room layout & positions — WITHOUT copying the camera angle; the video starts from a new angle (ties to the previous shot without a start frame)",
                 )}
               </span>
             </button>
@@ -234,7 +268,12 @@ export default function ShotRefs({
           >
             {t("Нарисовать новый · Nano Banana", "Draw new · Nano Banana")}
           </button>
-          <UploadButton kind="reference" shotId={shotId} label={t("Загрузить файл с устройства", "Upload a file from device")} />
+          <UploadButton
+            kind="reference"
+            shotId={shotId}
+            episodeId={episodeId}
+            label={t("Загрузить файл с устройства", "Upload a file from device")}
+          />
         </div>
       </Sheet>
 

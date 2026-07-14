@@ -7,7 +7,7 @@
     "lens": "40mm",
     "lighting": "Dusk",
     "tags": "orbit, one-take, standoff",
-    "prompt": "A smooth 360-degree orbital shot circles two figures facing each other in [LOCATION: an empty intersection] at dusk. The camera maintains constant height and distance, revealing the surrounding empty city as it rotates. Long shadows, amber sky fading to blue, streetlights flickering on mid-orbit. 40mm lens, gimbal-smooth motion, no cuts. Wind and distant traffic ambience. Tense, operatic.",
+    "prompt": "A smooth 360-degree orbit at constant height and distance around [SUBJECT] (or, if the scene has two figures in confrontation, around both), the surrounding space revealed as the camera rotates. 40mm, gimbal-smooth, no cuts. Motion is the pressure — tense, operatic. Low light and long shadows only if the scene's time allows.",
     "negative": ""
   },
   {
@@ -18,7 +18,7 @@
     "lens": "Zoom 24–200mm",
     "lighting": "Overcast",
     "tags": "zoom, documentary, 70s",
-    "prompt": "Static wide shot of a gray coastline, waves rolling under an overcast sky. A sudden crash zoom punches in on a tiny figure standing at the waterline, holding something to their chest. Slight handheld instability after the zoom settles, as if the operator just spotted them. 1970s documentary zoom feel, muted desaturated grade, wind buffeting the microphone.",
+    "prompt": "Static wide of the scene, then a sudden crash zoom punches in on [SUBJECT] — a slight handheld instability after it settles, as if the operator just spotted them. 1970s documentary zoom feel, muted grade. The zoom itself is the discovery.",
     "negative": ""
   },
   {
@@ -29,7 +29,7 @@
     "lens": "28mm",
     "lighting": "Mixed practicals",
     "tags": "handheld, crowd, night",
-    "prompt": "Urgent handheld camera follows close behind [SUBJECT] as they push through [LOCATION: a crowded night market], weaving between vendors and strangers. The camera stays at shoulder height, occasionally bumped, lens flaring off hanging bulbs and neon signs. 28mm wide lens, shallow focus snapping between the subject and passing faces. Dense layered crowd audio, sizzling food, overlapping voices. Kinetic, immersive, anxious handheld street-cinema energy. Single continuous take unless a lens switch is written; characters stay consistent and singular; grounded, stable physics throughout.",
+    "prompt": "Urgent handheld follows close behind [SUBJECT] as they push through the scene's space, camera at shoulder height, occasionally bumped, lens flaring off practicals. 28mm wide, shallow focus snapping between the subject and passing faces. Kinetic, immersive, anxious street-cinema energy. Single continuous take; grounded, stable physics.",
     "negative": ""
   },
   {
@@ -40,7 +40,7 @@
     "lens": "24mm",
     "lighting": "Night streets",
     "tags": "snorricam, pov, panic",
-    "prompt": "Snorricam rig locked to [SUBJECT]'s chest as they stumble through a night street in panic — their face pinned steady in frame while the entire world lurches and spins behind them. Streetlights smear into streaks, passersby blur past. 24mm wide, slightly low angle up at their face. Disorienting, subjective, a psychological breakdown rendered in camera grammar. Heartbeat and muffled city under ragged breathing.",
+    "prompt": "Snorricam rig locked to [SUBJECT]'s chest as they move in panic — their face pinned steady in frame while the whole world lurches and spins behind them, lights smearing into streaks. 24mm wide, slightly low angle up at the face. Disorienting, subjective — a breakdown rendered in camera grammar.",
     "negative": ""
   },
   {
@@ -51,7 +51,7 @@
     "lens": "Zoom",
     "lighting": "Daylight",
     "tags": "dolly zoom, vertigo, realization",
-    "prompt": "Medium shot of [SUBJECT] standing at the end of a long pier as the camera performs a slow dolly zoom — physically pulling back while zooming in — so they stay the same size while the horizon and pier stretch sickeningly behind them. The world elongates as realization hits their face. The classic vertigo dolly-zoom effect, queasy and unhurried. The ambient sound thins out to a ringing tone.",
+    "prompt": "Medium on [SUBJECT] as the camera performs a slow dolly zoom — pulling back while zooming in — so they stay the same size while the background stretches sickeningly behind them. The world elongates as realization hits their face. Queasy and unhurried; ambient sound thins to a ringing tone.",
     "negative": ""
   },
   {
@@ -62,7 +62,7 @@
     "lens": "32mm",
     "lighting": "Rain night",
     "tags": "low angle, rain, tracking",
-    "prompt": "Camera skims an inch above wet asphalt, tracking alongside [SUBJECT]'s boots as they walk [LOCATION: a rainy street] at night — puddles ahead reflecting inverted neon signs, each footstep shattering a reflection as the camera glides through the spray. 32mm at gutter level, droplets occasionally hitting the lens. Moody, tactile, the city seen from below. Footsteps, rain, distant jazz from a doorway.",
+    "prompt": "Camera skims an inch above the ground, tracking alongside [SUBJECT]'s feet as they walk, the surface below catching reflected light and breaking it with each step. 32mm at gutter level. Moody, tactile — the space seen from below, every footstep the beat.",
     "negative": ""
   },
   {
@@ -73,7 +73,7 @@
     "lens": "50mm",
     "lighting": "Soft key",
     "tags": "ots, coverage, dialogue",
-    "prompt": "Textbook over-the-shoulder coverage: framing past [SUBJECT A]'s shoulder and jawline (soft, out of focus, anchoring the left third) onto [SUBJECT B]'s face in clean focus as they listen and respond. Eyeline just off-lens. 50mm at chest height, soft key wrapping the listener's face. The standard conversation building block, shot to cut seamlessly with its reverse.",
+    "prompt": "Over-the-shoulder coverage: if the shot has a second character, frame past their shoulder and jawline (soft, out of focus, anchoring one third) onto [SUBJECT]'s face in clean focus, eyeline just off-lens. 50mm at chest height, soft key on the near face; cut to match its reverse. If the shot is a single, treat it as a clean 50mm single instead.",
     "negative": ""
   },
   {
@@ -84,7 +84,7 @@
     "lens": "100mm macro",
     "lighting": "Motivated",
     "tags": "insert, hands, coverage",
-    "prompt": "Insert shot coverage: [SUBJECT]'s hands in close-up doing the scene's real storytelling — twisting a wedding ring, sliding a key across a table, hesitating over a phone contact, folding and refolding a note. Shallow macro focus, lighting matched to the master's source. The cutaway every editor begs for: emotion located in the hands when the face is holding its secret.",
+    "prompt": "Insert: [SUBJECT]'s hands in close-up carrying the real storytelling — turning an object, hesitating over a choice, a small repeated motion. Shallow macro focus, light matched to the scene. Emotion located in the hands while the face holds its secret.",
     "negative": ""
   },
   {
@@ -95,7 +95,7 @@
     "lens": "75mm",
     "lighting": "Matched key",
     "tags": "reaction, single, coverage",
-    "prompt": "Clean single for reaction coverage: [SUBJECT] framed chest-up against gentle bokeh, listening to off-screen dialogue — the performance entirely in micro-shifts: a blink held too long, jaw tension, the breath before deciding not to speak. 75mm, eyeline close to lens, key matched to the scene's master. Hold longer than feels natural; the edit will thank you.",
+    "prompt": "Clean reaction single: [SUBJECT] framed chest-up against gentle bokeh, reacting to what was just said — the performance entirely in micro-shifts: a blink held too long, jaw tension, the breath before deciding not to speak. 75mm, eyeline close to lens. Hold longer than feels natural.",
     "negative": ""
   },
   {
@@ -106,7 +106,7 @@
     "lens": "85mm",
     "lighting": "Practical depth",
     "tags": "rack focus, depth, subtext",
-    "prompt": "Static frame, two planes: [SUBJECT] sharp in the foreground saying one thing, while deep in the soft background a second figure does something that contradicts it. A deliberate rack focus trades the planes mid-line — the foreground melting, the background snapping into evidence. 85mm wide open. The cut that happens inside a single shot.",
+    "prompt": "Static frame on [SUBJECT] sharp in the foreground. If the scene places a meaningful element or second character deeper in the shot, a deliberate rack focus trades the planes mid-beat — foreground melting, background snapping into evidence — a cut that happens inside one shot. 85mm wide open. If there is nothing meaningful behind, hold the single instead.",
     "negative": ""
   },
   {
@@ -117,7 +117,7 @@
     "lens": "32mm",
     "lighting": "Scene practicals",
     "tags": "master, long take, blocking",
-    "prompt": "A single locked wide master that refuses to cut: the whole scene — entrance, argument, retreat, the slammed door, the long aftermath of one person alone in the frame — played out in real time at real distance. Furniture and doorways doing the blocking. 32mm, practical light only. Trust the geography and the performance; the audience edits with their eyes.",
+    "prompt": "A single locked wide master that refuses to cut: the whole beat played out in real time at real distance, the scene's own geography and doorways doing the blocking. 32mm, practical light. Trust the distance and the performance; the audience edits with their eyes.",
     "negative": ""
   },
   {
@@ -128,7 +128,7 @@
     "lens": "40mm",
     "lighting": "Vanity bulbs",
     "tags": "mirror, blocking, reflection",
-    "prompt": "A full dialogue scene played in a dressing-room mirror: both faces visible only as reflections, vanity bulbs framing them, the real bodies soft at frame's edge. Blocking choreographed so the camera never appears. When [SUBJECT] finally turns from the mirror to face the other directly, the shot cuts to reality for the first time — and the room feels colder there.",
+    "prompt": "The beat played through a mirror: faces visible mainly as reflections, the real bodies soft at frame's edge, blocking arranged so the camera never appears. When [SUBJECT] finally turns from the mirror to face directly, the shot cuts to reality for the first time — and the space feels colder there. 40mm.",
     "negative": ""
   },
   {
@@ -139,7 +139,7 @@
     "lens": "Zoom 50–85mm",
     "lighting": "Soft key",
     "tags": "zoom, lie, interrogation",
-    "prompt": "A near-imperceptible zoom during a single answer: [SUBJECT] explains where they were that night, calm and credible — while the lens creeps from medium to close over forty seconds, the tightening frame doing the interrogation no one in the room conducts. By the answer's end the eyes fill the frame, and one blink lands exactly where the truth would have a seam.",
+    "prompt": "A near-imperceptible zoom across a single answer: [SUBJECT] speaks, calm and credible, while the lens creeps from medium to close, the tightening frame doing the interrogation no one in the scene conducts. By the end the eyes fill the frame, and one blink lands where the truth would have a seam. 50-85mm.",
     "negative": ""
   },
   {
@@ -150,7 +150,7 @@
     "lens": "40mm",
     "lighting": "Late afternoon",
     "tags": "hold, absence, exit",
-    "prompt": "After the scene's last line, [SUBJECT] exits — and the camera doesn't follow. The locked frame holds on [LOCATION: the emptied porch], the screen door settling, their footsteps fading, a wind chime taking over the soundtrack. The hold runs ten seconds past comfortable: absence given screen time, the room remembering them. Cut only when the audience has finished feeling it.",
+    "prompt": "After the beat's last line, [SUBJECT] exits — and the camera does not follow. The locked 40mm frame holds on the emptied space, sound settling, footsteps fading. The hold runs past comfortable: absence given screen time. Cut only when the feeling has finished.",
     "negative": ""
   },
   {
@@ -161,7 +161,7 @@
     "lens": "40mm",
     "lighting": "Evening practical",
     "tags": "dialogue, two-shot, drama",
-    "prompt": "Static two-shot across a kitchen island at night: [SUBJECT A] says quietly, \"You knew. The whole time, you knew.\" [SUBJECT B] keeps drying the same plate, doesn't look up, replies \"It wasn't the whole time.\" Long silence held in the frame; their eyes meet once in the dark window's reflection and flick away. Warm under-cabinet practicals, the rest of the house dark behind them. 40mm, both faces in focus — no cutting, the distance between them is the shot. Refrigerator hum under the silence.",
+    "prompt": "If the shot has two characters mid-argument: static two-shot, both faces in focus, the distance between them as the shot — no cutting. One keeps at a small idle task and will not look up; their eyes meet once in a reflection and flick away. Long silence held in frame. 40mm, warm practical light if the scene allows. The scene's own lines carry it.",
     "negative": ""
   },
   {
@@ -172,7 +172,7 @@
     "lens": "50mm",
     "lighting": "Single overhead",
     "tags": "interrogation, top-light, thriller",
-    "prompt": "A bare room, one overhead lamp over a steel table. The camera slowly tracks side to side behind the detective's shoulder as they ask, \"Walk me through the hour you can't account for.\" [SUBJECT] leans into the light, holding the detective's stare two beats too long before answering, eyes flat and unhurried: \"I already did. You just didn't like it.\" Smoke hangs in the lamp cone. Hard top-light carving both faces, walls in blackness. 50mm, tension carried in pauses, chair creak, fluorescent buzz beyond the door.",
+    "prompt": "Slow oscillating track behind the questioner's shoulder as they press [SUBJECT], who leans into the light and holds the stare a beat too long before answering, eyes flat and unhurried. Hard top-light carving the faces, surroundings falling to black if the scene allows. 50mm; tension carried in the pauses. Needs two characters and the scene's own questions and answers.",
     "negative": ""
   },
   {
@@ -183,7 +183,7 @@
     "lens": "75mm",
     "lighting": "Stained glass",
     "tags": "whisper, church, atmosphere",
-    "prompt": "Slow push toward two figures in an empty church pew, shot from the row behind. Colored light from stained glass pools across them. [SUBJECT] whispers without turning: \"If I tell you, you can't un-know it.\" The other simply nods once. Voices barely above breath, the vast reverberant space swallowing the words. 75mm, heads framed against blurred candle banks. Echoing stillness, distant door closing somewhere.",
+    "prompt": "Slow push toward [SUBJECT] from behind. They speak barely above breath without turning; the other, if one is present, simply nods once. The space swallows the words. 75mm, heads against a blurred background. Echoing stillness.",
     "negative": ""
   },
   {
@@ -194,7 +194,7 @@
     "lens": "40mm",
     "lighting": "Hall vs interior",
     "tags": "breakup, threshold, staging",
-    "prompt": "The breakup staged on a threshold: [SUBJECT A] inside the apartment, [SUBJECT B] in the hallway, the doorframe splitting the frame and the lighting — warm interior against cold corridor. \"Just say it here, then.\" — said to the floor, eyes lifting only for the answer. The door's edge under one hand the whole scene, the architecture asking the question before anyone answers it. 40mm static. The close is a door, slow, no slam.",
+    "prompt": "If the scene has two characters, stage the beat on a threshold: one inside, one in the doorway, the doorframe splitting the frame and the light — warm interior against a colder beyond. Eyes to the floor, lifting only for the answer; a hand rests on the door's edge throughout. 40mm static. The close is a door, slow, no slam.",
     "negative": ""
   },
   {
@@ -205,7 +205,7 @@
     "lens": "65mm pair",
     "lighting": "Matched soft keys",
     "tags": "close-up, shot reverse, eyelines",
-    "prompt": "The intimacy workhorse: matching close-up coverage, 65mm, eyelines tight to the lens on both sides so the audience sits inside the conversation. [SUBJECT A]'s eyes searching [SUBJECT B]'s face line by line; [SUBJECT B]'s reverse catching the exact moment a defense fails — a blink rate change, the mouth's small surrender before the words agree. Cut on the looks, not the lines. Backgrounds melted to nothing; only faces remain.",
+    "prompt": "Matching close-up coverage, 65mm, eyelines tight to the lens on both sides so the audience sits inside the conversation — [SUBJECT]'s eyes searching the other's face, the reverse catching the exact moment a defense fails: a blink-rate change, the mouth's small surrender before the words agree. Cut on the looks, not the lines. Backgrounds melted to nothing. Needs two characters.",
     "negative": ""
   },
   {
@@ -216,7 +216,7 @@
     "lens": "75mm",
     "lighting": "Conference glass",
     "tags": "dirty single, negotiation, tells",
-    "prompt": "Negotiation coverage in dirty singles — each close-up keeping the rival's blurred shoulder in frame so neither face is ever alone. [SUBJECT A] reads a number off a page and watches it land: [SUBJECT B]'s eyes hold steady but the pen stops moving — the tell. Counter-offer delivered with a small accommodating smile that the eyes decline to join. The pauses negotiated as hard as the figures. [LOCATION: Glass conference walls, city behind], everything reflective.",
+    "prompt": "Negotiation coverage in dirty singles — each close-up keeps the rival's blurred shoulder in frame so neither face is ever alone. Watch for the tell: a held gaze while the hand stops moving; a small accommodating smile the eyes decline to join. Pauses negotiated as hard as the words. 75mm, reflective surroundings if the scene has them. Needs two characters.",
     "negative": ""
   },
   {
@@ -227,7 +227,7 @@
     "lens": "40mm",
     "lighting": "Vending machine + fluorescent",
     "tags": "hospital, waiting, hands",
-    "prompt": "Hospital waiting room two-shot, locked: [SUBJECT A] and [SUBJECT B] in plastic chairs under flat fluorescent, a vending machine humming color into the corner. Dialogue arrives in fragments with whole minutes between — eyes on the doors every time they swing, hope and dread doing the same face. One reaches over without looking and takes the other's hand; the conversation continues through the grip more than the words. The doors swing. Both stand.",
+    "prompt": "Locked two-shot of two characters waiting side by side under flat, unflattering light. Dialogue arrives in fragments with long gaps; eyes lift toward a door every time something moves, hope and dread the same face. One takes the other's hand without looking; the beat continues through the grip more than the words. 40mm. Needs two characters.",
     "negative": ""
   },
   {
@@ -238,7 +238,7 @@
     "lens": "65mm",
     "lighting": "Window side-light",
     "tags": "monologue, push-in, performance",
-    "prompt": "Slow dolly-in on [SUBJECT] seated against a window in soft gray side-light, delivering a confession directly to an unseen listener off-frame: \"I tell people I don't remember it. That's the lie I'm best at.\" Their voice stays level but their hands betray them; their eyes hold the listener's until the hardest phrase, drop for it, and climb back up after. The push-in lands at a tight close-up exactly as the last line ends. 65mm, shallow focus, dust motes in the window light. No score — room tone only.",
+    "prompt": "Slow dolly-in on [SUBJECT] delivering a confession to an unseen listener off-frame, or into the space if none. The voice stays level but the hands betray them; the eyes hold, drop for the hardest phrase, and climb back after. The push lands at a tight close-up exactly as the last line ends. 65mm, shallow focus. Room tone only.",
     "negative": ""
   },
   {
@@ -249,7 +249,7 @@
     "lens": "85mm",
     "lighting": "Soft key",
     "tags": "reaction, close-up, no dialogue",
-    "prompt": "Locked-off close-up of [SUBJECT] reading a short handwritten note. No dialogue. The performance is everything: a small exhale, a swallow, eyes returning to the top of the note to read it again, jaw setting. The shot holds well past comfortable. 85mm, soft single key with gentle falloff, [LOCATION: a neutral background]. Paper rustle and breath are the only sounds. Restraint over melodrama.",
+    "prompt": "Locked-off close-up of [SUBJECT] taking something in silently — a small exhale, a swallow, the eyes going back to re-read, the jaw setting. No dialogue. The shot holds well past comfortable. 85mm, soft single key with gentle falloff. Restraint over melodrama.",
     "negative": ""
   },
   {
@@ -260,7 +260,7 @@
     "lens": "50mm",
     "lighting": "Desk lamp pool",
     "tags": "villain, quiet menace, unblinking",
-    "prompt": "A villain's monologue played quiet: [SUBJECT] seated in [LOCATION: a dim study], hands folded, explaining exactly what is going to happen and why — no raised voice, eyes warm and absolutely unblinking, the menace living in how reasonable it all sounds. A small genuine smile at their own logic. Once, only once, the eyes go cold mid-sentence and return to warm so fast the listener doubts they saw it. The push stops just inside too close.",
+    "prompt": "Menace played quiet: a 50mm slow push-in that stops just past comfortable. [SUBJECT] speaks without raising their voice — eyes warm and unblinking, the threat living in how reasonable it sounds; a small genuine smile at their own logic; once, mid-sentence, the eyes go cold and snap back to warm so fast it is barely caught. Let the push do the pressure.",
     "negative": ""
   },
   {
@@ -271,7 +271,7 @@
     "lens": "85mm",
     "lighting": "Candle",
     "tags": "candlelight, period, chiaroscuro",
-    "prompt": "Locked-off medium close-up of [SUBJECT] writing a letter by a single candle in a dark stone room. The candle is the only light source — deep Rembrandt shadows, warm flickering highlights on skin and paper, the background falling to pure black. 85mm lens, very shallow focus. The flame trembles when they exhale. Shot like an 18th-century oil painting lit only by its own flame, painterly, quiet scratching of pen on paper.",
+    "prompt": "Locked-off medium close-up of [SUBJECT] lit by a single candle, the flame the only source — deep Rembrandt shadows, warm flickering highlights on skin, the background falling to black. 85mm, very shallow focus; the flame trembles when they exhale. Painterly and quiet.",
     "negative": ""
   },
   {
@@ -282,7 +282,7 @@
     "lens": "32mm",
     "lighting": "Fluorescent",
     "tags": "horror, corridor, fluorescent",
-    "prompt": "Slow push down an empty office corridor at 3 AM, lit by flat green-tinted fluorescent tubes, one fixture strobing irregularly at the far end. Symmetrical one-point perspective, every door closed. The hum of the ballasts is the only sound until a phone starts ringing in a distant room. 32mm lens, clinical sterile grade, cold one-point-perspective symmetry. Mounting unease without showing anything.",
+    "prompt": "Slow push down an empty corridor lit by flat, cold fluorescent, one fixture strobing irregularly at the far end. Symmetrical one-point perspective, every door closed. The ballast hum is the only sound. 32mm, clinical sterile grade. Mounting unease without showing anything.",
     "negative": ""
   },
   {
@@ -293,7 +293,7 @@
     "lens": "65mm",
     "lighting": "Neon",
     "tags": "neon, rain, anamorphic",
-    "prompt": "Tight slow-orbiting close-up of [SUBJECT]'s face at night in heavy rain, lit entirely by an unseen animated neon sign — the colors cycling magenta, cyan, magenta across wet skin. Raindrops on eyelashes in razor-thin focus. 65mm lens, anamorphic oval bokeh of blurred signage behind. Rain hiss and the electric buzz of the sign. Saturated romantic neon melancholy, time slowed by longing.",
+    "prompt": "Tight slow-orbiting close-up of [SUBJECT]'s face at night, lit entirely by unseen cycling neon — magenta, cyan across the skin; droplets on the eyelashes in razor focus if rain fits the scene. 65mm, anamorphic oval bokeh of blurred signage. Saturated, romantic melancholy, time slowed by longing.",
     "negative": ""
   },
   {
@@ -304,7 +304,7 @@
     "lens": "50mm",
     "lighting": "Blue window light",
     "tags": "moonlight, bedroom, night",
-    "prompt": "Night bedroom in believable moonlight: one soft blue-white source raking through the window, sculpting the bed in cool half-tones, everything else falling to readable darkness — not video-game blue, just cold and quiet. [SUBJECT] awake, eyes open to the ceiling. A passing car's headlights sweep the wall once and leave. 50mm slow push. Insomnia's official lighting plan.",
+    "prompt": "Night interior in believable moonlight: one soft blue-white source raking through a window, sculpting [SUBJECT] in cool half-tones, everything else in readable darkness — not video-game blue, just cold and quiet. A passing car's headlights sweep the wall once and leave. 50mm slow push.",
     "negative": ""
   },
   {
@@ -315,7 +315,7 @@
     "lens": "65mm",
     "lighting": "Screen underglow",
     "tags": "phone, underglow, night",
-    "prompt": "Close shot of [SUBJECT] in [LOCATION: a dark room] lit solely by their phone — cold under-glow modeling the face from below, screen light shifting as they scroll, the message they stop on visible only as a change in their eyes and a brightness tick on their skin. The rest of the world fully black. 65mm. The contemporary candle: intimate, isolating, story-loaded.",
+    "prompt": "Close shot of [SUBJECT] lit solely by their phone — cold under-glow modeling the face from below, the light shifting as they scroll; the thing they stop on visible only as a change in the eyes and a brightness tick on the skin. The rest of the frame black. 65mm. Intimate, isolating.",
     "negative": ""
   },
   {
@@ -326,7 +326,7 @@
     "lens": "50mm",
     "lighting": "Red-blue pulse",
     "tags": "police lights, curtains, dread",
-    "prompt": "Interior night: red and blue pulses wash through the curtains of [LOCATION: a quiet living room], sweeping the walls in alternation, no siren — just the silent lights painting the family photos in turns of alarm. [SUBJECT] at the window's edge, one finger parting the fabric, face strobing between the two colors and the dark, deciding whether tonight is about them.",
+    "prompt": "Interior night: red and blue pulses wash through a window or curtains, sweeping the walls in alternation, no siren — silent lights painting the room in turns of alarm. [SUBJECT] at the window's edge, face strobing between the two colors and the dark, deciding whether tonight is about them. 50mm slow push.",
     "negative": ""
   },
   {
@@ -337,7 +337,7 @@
     "lens": "50mm",
     "lighting": "Skylight through steam",
     "tags": "steam, shafts, silhouette",
-    "prompt": "Inside [LOCATION: a tiled bathhouse]: skylight shafts dropping through dense steam, bodies as soft silhouettes appearing and dissolving in the white, water sounds mapping a space the eye can't. The push drifts until [SUBJECT] resolves from the haze, seated, head back, a sculpture being rinsed back into existence. Light made physical; air you can grade.",
+    "prompt": "Hard shafts of light dropping through dense steam or haze, figures as soft silhouettes appearing and dissolving in the white, sound mapping a space the eye cannot. The push drifts until [SUBJECT] resolves from the haze. 50mm. Light made physical, air you can grade.",
     "negative": ""
   },
   {
@@ -348,7 +348,7 @@
     "lens": "50mm",
     "lighting": "Bathroom bulb",
     "tags": "mirror, subtle, dread",
-    "prompt": "Locked bathroom shot framing [SUBJECT] and their reflection at the sink. They lean down to splash water — the camera holds on the mirror — and when they rise, everything is normal. They leave; the reflection lingers one extra beat before following. No sting, no zoom, nothing underlined. A single bare bulb, dripping tap. The scare planted quietly for the viewer who was paying attention.",
+    "prompt": "Locked shot framing [SUBJECT] and their reflection at a mirror. They lean down, the camera holds on the mirror, and when they rise everything is normal — they leave, and the reflection lingers one extra beat before following. No sting, no zoom, nothing underlined. 50mm, a single bare bulb. The scare planted quietly for whoever was paying attention.",
     "negative": ""
   },
   {
@@ -359,7 +359,7 @@
     "lens": "85mm",
     "lighting": "Dim apartment",
     "tags": "rack focus, figure, apartment",
-    "prompt": "Static shot of [SUBJECT] in sharp foreground reading on the couch, [LOCATION: the dark hallway] behind them a soft blur. Slowly, the focus racks back: a pale figure stands at the hallway's end, perfectly still. Focus returns to [SUBJECT], unaware. When it racks back again, the hallway is empty. 85mm shallow depth as the weapon. Page turns, a clock, and the awful patience of the frame.",
+    "prompt": "Static shot of [SUBJECT] sharp in the foreground, the space behind them a soft blur. The focus racks back: a pale figure stands deep in frame, perfectly still. Focus returns to [SUBJECT], unaware; when it racks back again, the space is empty. 85mm shallow depth as the weapon. The awful patience of the frame.",
     "negative": ""
   },
   {
@@ -370,7 +370,7 @@
     "lens": "28mm",
     "lighting": "Room beyond",
     "tags": "pov, door, reveal",
-    "prompt": "First-person POV coverage: a hand (the viewer's own) enters frame low, turns a door handle, and pushes — [LOCATION: the room beyond] revealed exactly as the character discovers it, the camera making the small human adjustments of a real head: a settle, a scan left-to-right, a held beat of hesitation on the threshold, then a fix on the one detail that matters — the gaze tightening like a breath caught. 28mm, natural sway. Discovery shot from inside the discovering.",
+    "prompt": "First-person POV: a hand enters frame low, turns a handle, and pushes — the space beyond revealed exactly as [SUBJECT] discovers it, the camera making a real head's small adjustments: a settle, a left-to-right scan, a held beat of hesitation, then a fix on the one detail that matters, the gaze tightening like a caught breath. 28mm, natural sway.",
     "negative": ""
   },
   {
@@ -381,7 +381,7 @@
     "lens": "35mm POV",
     "lighting": "Ward daylight",
     "tags": "pov, hospital, waking",
-    "prompt": "First-person waking: black, then a slow blink-open — ceiling tiles soft, doubling, resolving. The POV's focus hunts like real waking eyes: a hanging IV line, a window too bright to hold, then a face leaning in from the side that takes three blinks to become someone loved. Their relief breaks as the POV steadies on them. A hand squeezes — felt at frame's edge — and the eyes (the camera) go glassy, the world swimming once more, this time not from the drugs.",
+    "prompt": "First-person waking: black, then a slow blink-open — the ceiling soft, doubling, resolving. The POV's focus hunts like real waking eyes across the space, then finds a face leaning in from the side that takes three blinks to become someone known. Their relief breaks as the POV steadies on them. A hand squeezes, felt at frame's edge, and the eyes go glassy, the world swimming once more. 35mm POV.",
     "negative": ""
   },
   {
@@ -392,7 +392,7 @@
     "lens": "24mm POV",
     "lighting": "Ring lights spinning",
     "tags": "pov, boxing, knockdown",
-    "prompt": "Boxer's POV taking the shot that drops you: the world snaps sideways — ring lights wheeling, canvas arriving huge, sound dropping into deep water. The referee's face leaning in upside-down, his count arriving on delay, fingers blurred to bunches. The POV's choice rendered visually: corner shouting in silence, the rope within reach, the gym at fourteen, your own breath the loudest thing alive. The frame steadies by force of will. The canvas pushes back through the gloves. Up at eight. Single continuous take unless a lens switch is written; characters stay consistent and singular; grounded, stable physics throughout.",
+    "prompt": "POV of taking the blow that drops you: the world snaps sideways, lights wheeling overhead, the ground arriving huge, sound dropping into deep water. A face leans in upside-down, its words arriving on delay. The will to rise rendered visually — your own breath the loudest thing alive — and the frame steadies by force of will. 24mm POV. Single continuous take; grounded, stable physics.",
     "negative": ""
   },
   {
@@ -403,7 +403,7 @@
     "lens": "32mm",
     "lighting": "Storm + lightning",
     "tags": "mansion, gothic, storm",
-    "prompt": "Establishing shot of an isolated gothic manor on a hill against a churning storm sky — bare trees thrashing along the drive, a single lit window in the east wing, iron gates swinging unlatched. A slow low push up the driveway as lightning silhouettes the rooflines and gargoyles. Rain starting in fat drops on the lens. The house introduced as a character with intentions.",
+    "prompt": "Establishing shot that introduces the scene's key building as a character with intentions: a slow low push toward it, the sky and weather taken from the scene, one lit window, small unsettling details along the approach. 32mm; first drops on the lens if rain fits.",
     "negative": ""
   },
   {
@@ -414,7 +414,7 @@
     "lens": "50mm",
     "lighting": "Suburban night",
     "tags": "suburbia, night, window",
-    "prompt": "Night establishing shot of a quiet suburban street — identical dark houses, sprinkler mist drifting through a streetlamp cone — except one house with a single upstairs window lit. A slow push down the street toward that window, a silhouette crossing behind the curtain once. Cicadas, a dog barking two yards over, a car passing somewhere parallel. Suburbia asleep, except for whoever's story this is.",
+    "prompt": "Night establishing of the scene's street or exterior — dark and still except one lit window; a slow push toward it, a silhouette crossing behind the curtain once. Ambient night sound. Everything asleep except whoever's story this is. 50mm.",
     "negative": ""
   },
   {
@@ -425,7 +425,7 @@
     "lens": "35mm aerial",
     "lighting": "Autumn gold",
     "tags": "campus, autumn, collegiate",
-    "prompt": "Aerial drift establishing a university quad in October: brick halls framing a lawn crisscrossed by walkers on the diagonal paths, maples gone fully gold and shedding with each gust, a clocktower throwing a long shadow across frisbee players and study blankets, the carillon striking the hour mid-shot. Leaves chasing each other in spirals. Institutional permanence wearing its prettiest month. Bells, leaf rustle, a marching band practicing far off.",
+    "prompt": "Aerial drift establishing a campus or open space: paths crossing a lawn, trees in their season shedding with each gust, a tower throwing a long shadow, bells striking the hour mid-shot. Institutional permanence in its prettiest month. 35mm aerial; leaf rustle and distant sound.",
     "negative": ""
   },
   {
@@ -436,7 +436,7 @@
     "lens": "28mm",
     "lighting": "Warehouse rig",
     "tags": "one-take, performance, build",
-    "prompt": "Single-take music video: the camera orbits [ARTIST] performing in [LOCATION: an empty warehouse] while the world assembles around them in real time — crew rolling in lights that flare on as they pass, dancers stepping into formation mid-orbit, a band materializing piece by piece — until the final revolution reveals a full show in progress. 28mm continuous orbit synced to the track's build. The video constructs itself.",
+    "prompt": "Single-take music video: the camera orbits [ARTIST] performing while the world assembles around them in real time — lights flaring on as it passes, dancers stepping into formation, a band materializing piece by piece — until the final revolution reveals a full show in progress. 28mm continuous orbit synced to the track's build.",
     "negative": ""
   },
   {
@@ -447,7 +447,7 @@
     "lens": "50mm",
     "lighting": "Strobe",
     "tags": "strobe, fashion, beat-sync",
-    "prompt": "Performance video built on strobe logic: pitch black, then a single strobe flash freezes [ARTIST] mid-move against a colored seamless — each flash a new pose, new outfit, new background color, cut exactly on the kick drum. The blackness between flashes carries the bass. Crisp fashion-lighting in each frozen frame, motion implied entirely through the jumps. Relentless, graphic, kinetic.",
+    "prompt": "Performance built on strobe logic: pitch black, then a single strobe freezes [ARTIST] mid-move against a colored seamless — each flash a new pose, background color, cut exactly on the kick drum. The black between flashes carries the bass. Crisp fashion lighting in each frozen frame. 50mm. Relentless, graphic, kinetic.",
     "negative": ""
   },
   {
@@ -458,7 +458,7 @@
     "lens": "65mm",
     "lighting": "Projection",
     "tags": "projection, intimate, texture",
-    "prompt": "Intimate performance against black: [ARTIST] sung in close-up while projected imagery plays directly across their face and shoulders — home-video memories, rushing clouds, handwritten lyrics scrolling — the projection the only light source, conforming to every contour. The camera pushes slowly through the beam, catching dust drifting in the projector cone. Confessional verses, the imagery turning to static at the bridge.",
+    "prompt": "Intimate performance against black: [ARTIST] in close-up while projected imagery plays across their face and shoulders — memories, rushing clouds, scrolling lyrics — the projection the only light source, conforming to every contour. The camera pushes slowly through the beam, catching dust in the cone. 65mm. Confessional.",
     "negative": ""
   },
   {
@@ -469,7 +469,7 @@
     "lens": "85mm",
     "lighting": "One spot",
     "tags": "ballad, spotlight, minimal",
-    "prompt": "Ballad staging at its most stripped: [ARTIST] on a stool in a void of black, one overhead spotlight, one microphone, dust drifting through the cone. The camera's slow orbit is the only motion for the whole first verse. At the bridge, the spot dims almost to nothing — the silhouette carries the climax — and blooms back for the final line. Voice, light, restraint.",
+    "prompt": "Stripped ballad staging: [ARTIST] on a stool in a black void, one overhead spotlight, dust drifting in the cone. A slow 85mm orbit is the only motion through the first verse; at the bridge the spot dims almost to nothing, the silhouette carrying the climax, then blooms back for the final line. Voice, light, restraint.",
     "negative": ""
   },
   {
@@ -480,7 +480,7 @@
     "lens": "50mm",
     "lighting": "Single swinging bulb",
     "tags": "bulb, swing, rhythm",
-    "prompt": "Performance lit by one swinging bulb in [LOCATION: a bare concrete room]: [ARTIST] stays planted while the bulb's arc drags light and shadow across them in rhythm — face appearing and vanishing on the downbeats, eyes catching the filament at each pass. The swing decays through the verse and is shoved back into motion for the chorus. Choreography for a light fixture; the performer as the constant.",
+    "prompt": "Performance lit by one swinging bulb: [ARTIST] stays planted while the bulb's arc drags light and shadow across them in rhythm — face appearing and vanishing on the downbeats, eyes catching the filament at each pass. The swing decays through the verse and is shoved back into motion for the chorus. 50mm. The performer as the constant.",
     "negative": ""
   },
   {
@@ -491,7 +491,7 @@
     "lens": "32mm",
     "lighting": "Day → interior",
     "tags": "invisible cut, oner, interior",
-    "prompt": "The camera pushes across a courtyard toward a lit apartment window at dusk, and passes seamlessly through the glass without a visible cut, continuing into the room where a family is setting a table for dinner — conversation mid-flow, as if we were always inside. Exterior cool blue gives way to warm interior tungsten as the camera crosses the threshold. Muffled street sound swells into room audio at the pass-through.",
+    "prompt": "The camera pushes toward a lit window and passes seamlessly through the glass without a visible cut, continuing into the interior mid-scene, as if we were always inside. Cool exterior gives way to warm interior as it crosses the threshold; muffled outside sound swells into room audio at the pass-through. 32mm.",
     "negative": ""
   },
   {
@@ -502,7 +502,7 @@
     "lens": "40mm",
     "lighting": "Shifting",
     "tags": "dream, dissolve, surreal",
-    "prompt": "A floating, slightly slow camera drifts through a chain of dissolves with dream logic: a hallway of fluttering curtains dissolves into a forest where the same curtains hang from the trees, which dissolves into a flooded ballroom where the trees stand in shallow mirror-water. [SUBJECT] appears in each space, always a little farther away. Soft diffusion, long dissolves that overlap movement, sound smearing between spaces like a memory.",
+    "prompt": "A floating, slightly slow camera drifts through a chain of dissolves with dream logic — each space bleeding a motif into the next, [SUBJECT] appearing in each, always a little farther away. Soft diffusion, long dissolves overlapping movement, sound smearing between spaces like memory. 40mm.",
     "negative": ""
   }
 ]

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
-import { getDb, entities, episodes, generations, prompts, shots } from "@/lib/db";
+import { getDb, episodes, generations, prompts, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import ReviewPlayer from "@/components/review/ReviewPlayer";
 
@@ -55,12 +55,6 @@ export default async function ReviewPage(ctx: {
       })),
   );
 
-  const allEntities = await db
-    .select()
-    .from(entities)
-    .where(eq(entities.archived, false))
-    .orderBy(asc(entities.name));
-
   const siblings = await db
     .select()
     .from(shots)
@@ -80,7 +74,6 @@ export default async function ReviewPage(ctx: {
       shotStatus={shot.status}
       candidates={candidates}
       initialId={g ?? null}
-      entities={allEntities.map((e) => ({ id: e.id, name: e.name }))}
       nextShot={next ? { id: next.id, label: String(next.orderIndex).padStart(2, "0") } : null}
       latestPromptId={latest?.id ?? null}
       latestVersion={latest?.version ?? 0}

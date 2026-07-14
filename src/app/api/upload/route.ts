@@ -88,7 +88,46 @@ export async function POST(req: NextRequest) {
   // референс серии (без сущности и шота) получает токен REF_NN и размеры (spec §1)
   const isSeriesRef = Boolean(episodeId && !entityId && !shotId);
   const { width, height } = await probeImageSize(buffer);
-  const normalizedRole = role === "start_frame" || role === "composition" ? role : null;
+  const normalizedRole =
+    role === "start_frame" || role === "composition" || role === "layout" ? role : null;
+
+  // Загрузка со страницы шота (есть и episodeId, и shotId, без сущности): референс
+  // ложится И в список референсов серии (источник, shotId=null), И прикрепляется
+  // копией к шоту (общий файл) — как attachReferenceToShot. Иначе он оставался бы
+  // только на шоте и не появлялся в списке референсов эпизода.
+  if (episodeId && shotId && !entityId) {
+    const caption = String(form.get("caption") ?? "");
+    await db.insert(references).values({
+      id, // источник в списке серии
+      episodeId,
+      shotId: null,
+      entityId: null,
+      storagePath,
+      caption,
+      source,
+      role: null,
+      token: await nextRefToken(episodeId),
+      width,
+      height,
+    });
+    await db.insert(references).values({
+      id: crypto.randomUUID(), // копия, прикреплённая к шоту
+      shotId,
+      episodeId: null,
+      entityId: null,
+      storagePath,
+      caption,
+      source,
+      role: normalizedRole ?? "composition",
+      width,
+      height,
+    });
+    revalidatePath(`/episodes/${episodeId}/refs`);
+    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+    if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
+    return NextResponse.json({ ok: true, id, storagePath });
+  }
+
   if (shotId && normalizedRole === "start_frame") {
     // start-frame один на шот — прежний становится композицией (spec §3.6)
     await db

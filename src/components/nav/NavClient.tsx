@@ -13,27 +13,25 @@ const ITEMS = [
 ];
 
 /**
- * Таб-бар живёт только на верхних экранах: на вложенных (карточка шота,
- * серия, референсы) у экранов свои нижние панели — таб-бар их перекрывал.
+ * Таб-бар виден на ВСЕХ экранах (кроме /login) — это главная навигация.
+ * Экраны со своими нижними панелями (ActionBar шота) поднимают их НАД
+ * таб-баром (bottom: var(--tabbar-h)), а не прячут его.
  * «Затраты» (/costs) переехали внутрь Настроек — своего таба у них больше нет.
  */
-const TOP_LEVEL = ["/episodes", "/bible", "/queue", "/console", "/settings"];
 
 /** Нижний таб-бар (мобайл, spec §2.1) + сайдбар (десктоп, spec §4). */
 export default function NavClient({ activeJobs }: { activeJobs: number }) {
   const pathname = usePathname();
   const t = useT();
   if (pathname === "/login") return null;
-  const showTabBar = TOP_LEVEL.includes(pathname);
 
   const isActive = (href: string) =>
     href === "/episodes" ? pathname === "/episodes" || pathname.startsWith("/episodes/") : pathname.startsWith(href);
 
   return (
     <>
-      {/* мобильный таб-бар */}
-      {showTabBar && (
-        <nav
+      {/* мобильный таб-бар — всегда */}
+      <nav
           className="fixed inset-x-0 bottom-0 z-40 flex border-t border-[var(--border-default)] lg:hidden"
           style={{
             background: "linear-gradient(180deg, rgba(15,12,22,.96), rgba(6,5,9,.99))",
@@ -62,8 +60,7 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
               </Link>
             );
           })}
-        </nav>
-      )}
+      </nav>
 
       {/* десктопный сайдбар */}
       <aside
@@ -104,12 +101,13 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
   );
 }
 
-/** Обёртка контента: отступ под сайдбар/таб-бар (таб-бар — только на верхних экранах). */
+/**
+ * Обёртка контента: отступ под сайдбар (десктоп) и таб-бар (мобайл, все экраны).
+ * Класс content-shell используется в globals.css, чтобы min-h-dvh страниц не
+ * складывался с высотой таб-бара — иначе пустые экраны скроллятся на его высоту.
+ */
 export function ContentShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   if (pathname === "/login") return <>{children}</>;
-  const showTabBar = TOP_LEVEL.includes(pathname);
-  return (
-    <div className={`lg:pl-56 ${showTabBar ? "pb-16 lg:pb-0" : ""}`}>{children}</div>
-  );
+  return <div className="content-shell pb-16 lg:pb-0 lg:pl-56">{children}</div>;
 }

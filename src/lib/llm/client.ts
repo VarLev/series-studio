@@ -344,9 +344,69 @@ async function runOpenAiText(call: LlmCall, provider: Provider): Promise<TextRes
   }
 }
 
+function isParsableJson(s: string): boolean {
+  try {
+    JSON.parse(s);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Сбалансированные {...}-подстроки верхнего уровня (с учётом строк и эскейпов).
+ * Многословный ответ модели (план → JSON → пояснение) содержит несколько
+ * кандидатов — вернём их все, выберет вызывающий.
+ */
+function balancedObjects(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      if (depth > 0) inStr = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0 && --depth === 0 && start !== -1) {
+        out.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Достать JSON из ответа модели. Модель может писать прозу/план ВОКРУГ JSON
+ * (инцидент Enhance на Opus: первый code-fence — не JSON, а после JSON — текст,
+ * из-за чего старый парсер «первый fence или от первой скобки до конца» падал
+ * оба раза и runJson делал бесполезный дорогой ретрай). Порядок попыток:
+ *  1) валидный JSON среди ВСЕХ fenced-блоков;
+ *  2) крупнейший сбалансированный {...} в тексте, который парсится;
+ *  3) старое поведение — от первой скобки до конца (последний шанс).
+ */
 function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
+  const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1].trim());
+  for (const f of fences) {
+    if (isParsableJson(f)) return f;
+  }
+  const balanced = balancedObjects(text)
+    .filter(isParsableJson)
+    .sort((a, b) => b.length - a.length);
+  if (balanced[0]) return balanced[0];
   const start = text.search(/[[{]/);
   if (start === -1) throw new Error("Ответ модели не содержит JSON");
   return text.slice(start).trim();

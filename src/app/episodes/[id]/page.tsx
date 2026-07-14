@@ -10,7 +10,6 @@ import { getFileUrl } from "@/lib/storage";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
 import EpisodeTabs from "@/components/episode/EpisodeTabs";
-import QueuePill from "@/components/QueuePill";
 import GenPoller from "@/components/GenPoller";
 import type { ShotListItem } from "@/components/episode/ShotsList";
 import type { StoryboardData, StoryboardSheetData } from "@/components/episode/StoryboardTab";
@@ -83,9 +82,12 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         action?: string;
         camera?: string;
         framing?: string;
+        draft?: boolean;
       }>;
       if (Array.isArray(parsed)) {
+        // черновые шоты (Draft Shots) в лист раскадровки не идут — только основные
         beats = parsed
+          .filter((b) => !b.draft)
           .map((b) => (b.action || b.camera || b.framing || "").trim())
           .filter(Boolean);
       }
@@ -220,6 +222,8 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         eyebrow={`${t("Серия", "Episode")} ${epNumber}`}
         title={episode.title || t("Без названия", "Untitled")}
         right={
+          // очередь убрана (нижний таб-бар теперь на всех экранах); REF и Галерея
+          // открываются правым слайдером поверх экрана (intercepting @drawer)
           <div className="flex items-center gap-1.5">
             <Link
               href={`/episodes/${episode.id}/refs`}
@@ -236,7 +240,6 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
               <span className="text-[13px] leading-none">🎞</span>
               <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
             </Link>
-            <QueuePill />
           </div>
         }
       />

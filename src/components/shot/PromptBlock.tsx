@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
-import { generateShotPromptsFor, latestPromptVersion, deleteTrackPrompts } from "@/lib/actions/prompts";
+import { generateShotPromptsFor, latestPromptVersion, deletePromptVersion } from "@/lib/actions/prompts";
 import {
   LLM_MODELS,
   PROMPT_FAMILIES,
@@ -89,8 +89,12 @@ export default function PromptBlock({
   const { family, setFamily, openByFamily, setOpen } = usePromptTrack();
   // что создавать кнопкой: один трек или оба
   const [createChoice, setCreateChoice] = useState<PromptFamily | "both">("seedance");
-  // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт)
-  const [factoryModel, setFactoryModel] = useState(llmModel);
+  // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт). Дефолт — Sonnet
+  // через подписку: если глобальная модель промптов выставлена на не-Claude (GPT),
+  // не наследуем её здесь; явный выбор Claude (Opus/Haiku) уважаем.
+  const [factoryModel, setFactoryModel] = useState(
+    isClaudeModel(llmModel) ? llmModel : "claude-sonnet-4-6",
+  );
   const [error, setError] = useState("");
   // своя машина состояний вместо useTransition: нужен таймер и поллинг-подхват
   // результата, если ответ долгого запроса потеряется в туннеле. При возобновлении
@@ -125,6 +129,8 @@ export default function PromptBlock({
   const usedTechniques = usedTechniquesByFamily[family] ?? [];
   const createFamilies: PromptFamily[] =
     createChoice === "both" ? ["seedance", "kling"] : [createChoice];
+  // у выбранного трека промпт уже есть → кнопка добавит НОВУЮ версию (не первую)
+  const targetHasPrompt = createFamilies.some((f) => hasByFamily[f]);
   // фабрика: ~4К входных токенов (шаблон+библия+приёмы) + типовой вывод; ×2 для обоих треков
   const genUsdOne = estTextUsd(factoryModel, 4000, OUT_TOKENS.prompt);
   const genUsd = genUsdOne == null ? null : genUsdOne * createFamilies.length;
@@ -258,7 +264,7 @@ export default function PromptBlock({
   // на размонтирование — гасим таймер взвода
   useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
 
-  async function onDeleteTrack() {
+  async function onDeleteVersion() {
     if (!current) return;
     if (!armDelete) {
       setArmDelete(true);
@@ -268,14 +274,18 @@ export default function PromptBlock({
     if (armTimer.current) clearTimeout(armTimer.current);
     setArmDelete(false);
     setDeleting(true);
-    await deleteTrackPrompts(shotId, family);
+    await deletePromptVersion(current.id); // удаляем ТОЛЬКО открытую версию
     setDeleting(false);
     setExpanded(false);
-    router.refresh(); // промпт трека исчез → появится форма «Сгенерировать»
+    setOpen(family, undefined); // открытой станет последняя из оставшихся версий
+    router.refresh(); // если версий больше нет — появится форма «Сгенерировать»
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-700">
+    // shrink-0 обязателен: колонка страницы шота на десктопе — flex фиксированной
+    // высоты (lg:h-dvh), а flex-ребёнок с overflow-hidden получает min-height:0 и
+    // при переполнении сжимается В НОЛЬ — блок «исчезал» со страницы (инцидент)
+    <div className="shrink-0 overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-700">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         <span className="section-label">{t("Промпт · Claude → видеомодель", "Prompt · Claude → video model")}</span>
         {current && (
@@ -304,11 +314,11 @@ export default function PromptBlock({
               ✎
             </button>
             <button
-              onClick={onDeleteTrack}
+              onClick={onDeleteVersion}
               disabled={deleting}
               title={t(
-                `Удалить промпт ${family === "kling" ? "Kling" : "Seedance"} и сгенерировать заново`,
-                `Delete the ${family === "kling" ? "Kling" : "Seedance"} prompt to regenerate`,
+                `Удалить открытую версию v${current.version} (остальные версии останутся)`,
+                `Delete the open version v${current.version} (other versions stay)`,
               )}
               className="flex h-7 items-center justify-center rounded-md px-1.5 text-[12px] disabled:opacity-50"
               style={{
@@ -356,7 +366,7 @@ export default function PromptBlock({
         })}
       </div>
 
-      {current ? (
+      {current && (
         <>
         {/* клик по тексту — раскрыть/свернуть (не открывать редактор; правка по ✎) */}
         <div
@@ -399,8 +409,20 @@ export default function PromptBlock({
           </div>
         )}
         </>
-      ) : (
-        <div className="flex flex-col items-start gap-2.5 p-4">
+      )}
+
+      {/* Генерация промпта доступна ВСЕГДА: если промпт уже есть — добавит новую
+          версию выбранного трека, старые версии сохраняются (видны в истории v). */}
+      <div
+        className={`flex flex-col items-start gap-2.5 p-4${
+          current ? " border-t border-[var(--border-subtle)]" : ""
+        }`}
+      >
+        {current ? (
+          <div className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-t400">
+            {t("Новая версия промпта", "New prompt version")}
+          </div>
+        ) : (
           <div className="text-[12px] leading-relaxed text-t300">
             <span className="text-violet-600">✦</span>&nbsp;{" "}
             {t(
@@ -408,66 +430,68 @@ export default function PromptBlock({
               `No ${family === "kling" ? "Kling" : "Seedance"} prompt yet. Claude will build it from this track's template, the story fragment, entities and knowledge base.`,
             )}
           </div>
-          <div className="flex w-full flex-col gap-2">
-            <label className="flex items-center gap-2">
-              <span className="w-24 shrink-0 text-[10px] text-t400">{t("Создать для:", "Create for:")}</span>
-              <select
-                value={createChoice}
-                onChange={(e) => setCreateChoice(e.target.value as PromptFamily | "both")}
-                disabled={generating}
-                className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none disabled:opacity-60"
-              >
-                <option value="seedance">Seedance</option>
-                <option value="kling">Kling</option>
-                <option value="both">Seedance & Kling ({t("2 промпта", "2 prompts")})</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2">
-              <span className="w-24 shrink-0 text-[10px] text-t400">{t("ИИ для промпта:", "Prompt AI:")}</span>
-              <select
-                value={factoryModel}
-                onChange={(e) => setFactoryModel(e.target.value)}
-                disabled={generating}
-                className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none disabled:opacity-60"
-              >
-                {LLM_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label} — {en ? m.hintEn : m.hint}
-                  </option>
-                ))}
-                {!LLM_MODELS.some((m) => m.id === factoryModel) && (
-                  <option value={factoryModel}>{factoryModel}</option>
-                )}
-              </select>
-            </label>
-            <div className="text-[9.5px] leading-snug text-t400">
-              {t(
-                "Haiku — самый быстрый (~10–20 с), Opus — умнее, но думает дольше (до 1–2 мин).",
-                "Haiku is fastest (~10–20 s), Opus is smarter but slower (up to 1–2 min).",
-              )}
-            </div>
-            <button
-              onClick={onGenerate}
+        )}
+        <div className="flex w-full flex-col gap-2">
+          <label className="flex items-center gap-2">
+            <span className="w-24 shrink-0 text-[10px] text-t400">{t("Создать для:", "Create for:")}</span>
+            <select
+              value={createChoice}
+              onChange={(e) => setCreateChoice(e.target.value as PromptFamily | "both")}
               disabled={generating}
-              className="min-h-11 w-full rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-60"
-              style={{ boxShadow: "var(--glow-violet-sm)" }}
+              className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none disabled:opacity-60"
             >
-              {generating
-                ? t(`Фабрика работает… ${elapsed}с`, `Factory running… ${elapsed}s`)
-                : t(`Сгенерировать промпт · ${genCost}`, `Generate prompt · ${genCost}`)}
-            </button>
-          </div>
-          {generating && (
-            <div className="text-[10px] leading-snug text-t400">
-              {t(
-                "Идёт генерация. Можно не ждать на экране — промпт сохранится даже при обрыве связи и подхватится сам.",
-                "Generating. You don't have to wait here — the prompt is saved even if the connection drops and will be picked up automatically.",
+              <option value="seedance">Seedance</option>
+              <option value="kling">Kling</option>
+              <option value="both">Seedance & Kling ({t("2 промпта", "2 prompts")})</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="w-24 shrink-0 text-[10px] text-t400">{t("ИИ для промпта:", "Prompt AI:")}</span>
+            <select
+              value={factoryModel}
+              onChange={(e) => setFactoryModel(e.target.value)}
+              disabled={generating}
+              className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-ink-600 px-2 font-mono text-[11px] text-t100 outline-none disabled:opacity-60"
+            >
+              {LLM_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} — {en ? m.hintEn : m.hint}
+                </option>
+              ))}
+              {!LLM_MODELS.some((m) => m.id === factoryModel) && (
+                <option value={factoryModel}>{factoryModel}</option>
               )}
-            </div>
-          )}
-          {error && <div className="text-[11px] text-danger">{error}</div>}
+            </select>
+          </label>
+          <div className="text-[9.5px] leading-snug text-t400">
+            {t(
+              "Haiku — самый быстрый (~10–20 с), Opus — умнее, но думает дольше (до 1–2 мин).",
+              "Haiku is fastest (~10–20 s), Opus is smarter but slower (up to 1–2 min).",
+            )}
+          </div>
+          <button
+            onClick={onGenerate}
+            disabled={generating}
+            className="min-h-11 w-full rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-60"
+            style={{ boxShadow: "var(--glow-violet-sm)" }}
+          >
+            {generating
+              ? t(`Фабрика работает… ${elapsed}с`, `Factory running… ${elapsed}s`)
+              : targetHasPrompt
+                ? t(`Новая версия промпта · ${genCost}`, `New prompt version · ${genCost}`)
+                : t(`Сгенерировать промпт · ${genCost}`, `Generate prompt · ${genCost}`)}
+          </button>
         </div>
-      )}
+        {generating && (
+          <div className="text-[10px] leading-snug text-t400">
+            {t(
+              "Идёт генерация. Можно не ждать на экране — промпт сохранится даже при обрыве связи и подхватится сам.",
+              "Generating. You don't have to wait here — the prompt is saved even if the connection drops and will be picked up automatically.",
+            )}
+          </div>
+        )}
+        {error && <div className="text-[11px] text-danger">{error}</div>}
+      </div>
 
       {/* Окно режиссёрского приёма */}
       <Sheet open={Boolean(technique)} onClose={() => setTechnique(null)} title={technique?.title ?? ""}>

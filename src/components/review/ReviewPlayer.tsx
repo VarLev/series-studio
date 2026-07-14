@@ -45,7 +45,6 @@ export default function ReviewPlayer({
   shotStatus,
   candidates,
   initialId,
-  entities,
   nextShot,
   latestPromptId,
   latestVersion,
@@ -59,7 +58,6 @@ export default function ReviewPlayer({
   shotStatus: string;
   candidates: Candidate[];
   initialId: string | null;
-  entities: Array<{ id: string; name: string }>;
   nextShot: { id: string; label: string } | null;
   latestPromptId: string | null;
   latestVersion: number;
@@ -235,13 +233,14 @@ export default function ReviewPlayer({
     form.set("kind", "reference");
     form.set("source", "frame-grab");
     form.set("caption", t(`кадр ${timecode(grabTime)} · ${shotLabel}`, `frame ${timecode(grabTime)} · ${shotLabel}`));
+    // сохранение кадра в сущность убрано (замечание заказчика) — только серия/start-frame
     if (grabTarget === "series") {
       form.set("episodeId", episodeId);
     } else if (grabTarget === "next-shot" && nextShot) {
       form.set("shotId", nextShot.id);
       form.set("role", "start_frame");
     } else {
-      form.set("entityId", grabTarget);
+      return;
     }
     const res = await fetch("/api/upload", { method: "POST", body: form });
     if (res.ok) {
@@ -249,9 +248,7 @@ export default function ReviewPlayer({
       toast(
         grabTarget === "series"
           ? t("Кадр сохранён в референсы серии", "Frame saved to episode references")
-          : grabTarget === "next-shot"
-            ? t(`Кадр — start-frame шота (${nextShot?.label})`, `Frame set as start-frame of shot (${nextShot?.label})`)
-            : t("Кадр сохранён в библию", "Frame saved to the bible"),
+          : t(`Кадр — start-frame шота (${nextShot?.label})`, `Frame set as start-frame of shot (${nextShot?.label})`),
       );
       router.refresh();
     } else {
@@ -641,26 +638,7 @@ export default function ReviewPlayer({
               </span>
             </label>
           )}
-          <div className="section-label mt-2">{t("Референс к сущности", "Reference for an entity")}</div>
-          {entities.map((e) => (
-            <label
-              key={e.id}
-              className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border px-3"
-              style={{
-                borderColor: grabTarget === e.id ? "var(--border-strong)" : "var(--border-subtle)",
-                background: grabTarget === e.id ? "var(--ink-600)" : "none",
-              }}
-            >
-              <input
-                type="radio"
-                name="grab-target"
-                checked={grabTarget === e.id}
-                onChange={() => setGrabTarget(e.id)}
-                className="accent-[var(--violet-400)]"
-              />
-              <span className="text-[12.5px] text-t200">{e.name}</span>
-            </label>
-          ))}
+          {/* «Референс к сущности» убран — кадры сохраняются только в серию/start-frame */}
         </div>
         <button
           onClick={saveFrame}

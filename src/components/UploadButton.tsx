@@ -20,7 +20,7 @@ export default function UploadButton({
   shotId?: string;
   episodeId?: string;
   promptId?: string;
-  role?: "start_frame" | "composition";
+  role?: "start_frame" | "composition" | "layout";
   label: string;
   className?: string;
 }) {

@@ -20,35 +20,40 @@ export interface TechniqueRow {
   custom: boolean;
 }
 
-let seeded = false;
+// Версия заводского вольта. Бампится, когда переписываем библиотеку (напр.
+// чистка зашитой мизансцены 2026-07-13) — тогда на первом обращении заводские
+// карточки пересеиваются в уже существующих БД, а не остаются старыми.
+const SEED_VERSION = "2";
+let ensured = false;
 
-/** Флаг «сид уже был»: после «удалить все» пустая таблица НЕ пересеивается. */
-async function markSeeded(): Promise<void> {
+/** Запомнить версию сида (после «удалить все» — тоже: чтобы не пересеять). */
+async function setSeedVersion(value: string): Promise<void> {
   const db = await getDb();
   await db
     .insert(settings)
-    .values({ key: "techniques_seeded", value: "1" })
-    .onConflictDoNothing();
+    .values({ key: "techniques_seed_version", value })
+    .onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
-/** Первый запуск: заливаем вольт в БД (после — только пользовательские правки). */
+/**
+ * Сид/пересид заводской библиотеки. При смене SEED_VERSION пересеиваем ТОЛЬКО
+ * заводские карточки (custom=false): удаляем старые и заливаем актуальный вольт;
+ * пользовательские приёмы (custom=true) НЕ трогаем. «Удалить все» ставит текущую
+ * версию — очищенная библиотека не воскресает.
+ */
 export async function ensureTechniques(): Promise<void> {
-  if (seeded) return;
+  if (ensured) return;
   const db = await getDb();
-  const [flag] = await db.select().from(settings).where(eq(settings.key, "techniques_seeded"));
-  if (flag) {
-    seeded = true;
-    return;
-  }
-  const [first] = await db.select().from(techniques).limit(1);
-  if (first) {
-    seeded = true;
-    await markSeeded();
+  const [ver] = await db.select().from(settings).where(eq(settings.key, "techniques_seed_version"));
+  if (ver?.value === SEED_VERSION) {
+    ensured = true;
     return;
   }
   const { default: vault } = (await import("./director/vault2.json")) as {
     default: Array<Omit<TechniqueRow, "custom">>;
   };
+  // заводские карточки заменяем на актуальный вольт; при первом запуске delete — no-op
+  await db.delete(techniques).where(eq(techniques.custom, false));
   // пакетами — одиночные insert'ы в PGlite заметно медленнее;
   // onConflictDoNothing: два параллельных запроса могут сеять одновременно
   for (let i = 0; i < vault.length; i += 50) {
@@ -57,16 +62,16 @@ export async function ensureTechniques(): Promise<void> {
       .values(vault.slice(i, i + 50).map((t) => ({ ...t, custom: false })))
       .onConflictDoNothing();
   }
-  seeded = true;
-  await markSeeded();
+  await setSeedVersion(SEED_VERSION);
+  ensured = true;
 }
 
 /** Очистить библиотеку целиком (замечание заказчика: «удали пока все приёмы»). */
 export async function deleteAllTechniqueRows(): Promise<void> {
   const db = await getDb();
   await db.delete(techniques);
-  await markSeeded(); // пустая библиотека не пересеивается вольтом
-  seeded = true;
+  await setSeedVersion(SEED_VERSION); // очищенная библиотека не пересеивается вольтом
+  ensured = true;
 }
 
 export async function listTechniques(): Promise<TechniqueRow[]> {

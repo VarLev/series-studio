@@ -17,10 +17,11 @@
  *  - --strict-mcp-config: не грузить MCP-серверы пользователя (медленно и не нужно);
  *  - инструменты запрещены — это чисто текстовая генерация;
  *  - требуется разовый вход: `claude`, затем `/login` (аккаунт с подпиской);
- *  - бинарь ищем по АБСОЛЮТНОМУ пути (см. resolveCliBinary), а не полагаемся
- *    на PATH дочернего процесса: сервер (`npm run start`) мог стартовать в
- *    окружении, где npm-глобальный bin ещё не был в PATH на момент запуска —
- *    тогда bare "claude" падает с "не является внутренней или внешней командой".
+ *  - запускаем НАТИВНЫЙ claude.exe напрямую по абсолютному пути, shell:false
+ *    (см. resolveCli). Так вызов не зависит ни от PATH серверного процесса, ни
+ *    от кодировки cmd.exe — это две грабли, на которых падал прежний .cmd-путь.
+ *    `claude` в %APPDATA%\npm — это .cmd-шим, зовущий тот .exe; мы находим .exe
+ *    напрямую (…/node_modules/@anthropic-ai/claude-code/bin/claude.exe).
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -56,6 +57,8 @@ const DISALLOWED_TOOLS =
 interface ResolvedCli {
   bin: string;
   useShell: boolean;
+  /** какие пути реально проверялись — уходит в текст ошибки для диагностики */
+  tried: string[];
 }
 // кэш на процесс: undefined = ещё не резолвили, объект = результат
 let cachedCli: ResolvedCli | undefined;
@@ -73,12 +76,16 @@ async function resolveCli(): Promise<ResolvedCli> {
   // явное переопределение путём: доверяем как есть (shell — только для .cmd/.bat)
   const override = process.env.CLAUDE_CLI_PATH;
   if (override) {
-    return { bin: override, useShell: /\.(cmd|bat)$/i.test(override) };
+    return { bin: override, useShell: /\.(cmd|bat)$/i.test(override), tried: [override] };
   }
   if (cachedCli) return cachedCli;
 
-  // приоритет — нативный .exe (spawn без shell), затем .cmd-шим (spawn с shell)
-  const nativeExe: string[] = [];
+  // приоритет №1 — ЛОКАЛЬНАЯ установка в node_modules проекта (devDependency):
+  // путь от cwd серверного процесса, не зависит ни от PATH, ни от APPDATA, ни от
+  // того, под каким пользователем Windows запущен сервер. Глобальные места — фолбэк.
+  const nativeExe: string[] = [
+    path.join(process.cwd(), "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+  ];
   const shimmed: string[] = [];
   if (process.platform === "win32") {
     const roots = [process.env.APPDATA, process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(
@@ -92,29 +99,31 @@ async function resolveCli(): Promise<ResolvedCli> {
       shimmed.push(path.join(root, "npm", "claude.cmd"));
     }
   } else {
+    // на *nix локальный бинарь пакета — исполняемый файл bin/claude
+    nativeExe[0] = path.join(process.cwd(), "node_modules", "@anthropic-ai", "claude-code", "bin", "claude");
     const homeBins = process.env.HOME
       ? [path.join(process.env.HOME, ".npm-global", "bin"), path.join(process.env.HOME, ".local", "bin")]
       : [];
     for (const b of [...homeBins, "/usr/local/bin", "/usr/bin"]) {
-      // на *nix глобальный bin — исполняемый файл/симлинк, spawn без shell
       nativeExe.push(path.join(b, "claude"));
     }
   }
 
+  const tried = [...nativeExe, ...shimmed];
   for (const c of nativeExe) {
     if (await fileExists(c)) {
-      cachedCli = { bin: c, useShell: false };
+      cachedCli = { bin: c, useShell: false, tried };
       return cachedCli;
     }
   }
   for (const c of shimmed) {
     if (await fileExists(c)) {
-      cachedCli = { bin: c, useShell: true };
+      cachedCli = { bin: c, useShell: true, tried };
       return cachedCli;
     }
   }
   // последний фолбэк — голое имя через PATH (вдруг PATH исправен)
-  cachedCli = { bin: "claude", useShell: process.platform === "win32" };
+  cachedCli = { bin: "claude", useShell: process.platform === "win32", tried };
   return cachedCli;
 }
 
@@ -161,7 +170,9 @@ export async function runClaudeCliText(
   const systemText =
     `${fullSystem}\n\n` +
     "Отвечай только по заданию в пользовательском сообщении. Не задавай встречных " +
-    "вопросов, не добавляй преамбул и пояснений от себя, не используй инструменты.";
+    "вопросов, не добавляй преамбул и пояснений от себя, не используй инструменты. " +
+    "Если задание требует JSON — ответ СТРОГО один JSON-объект: первый символ «{», " +
+    "последний «}», никакого текста, плана или пояснений до и после.";
 
   // отдельный файл на каждый вызов (могут идти параллельно) — чистим за собой
   const sysPath = path.join(cwd, `sys-${crypto.randomUUID()}.txt`);
@@ -180,25 +191,27 @@ export async function runClaudeCliText(
     DISALLOWED_TOOLS,
   ];
 
-  const bin = await resolveCliBinary();
-  // shell:true на Windows НЕ экранирует аргументы (только конкатенирует —
-  // см. предупреждение Node про эту опцию), поэтому вручную кавычим то, что
-  // может содержать пробел (путь к бинарю, путь к файлу системного промпта)
-  const winQuote = (s: string): string =>
-    process.platform === "win32" && /\s/.test(s) ? `"${s}"` : s;
+  const { bin, useShell, tried } = await resolveCli();
+  // диагностика для сообщений об ошибках: что именно проверяли и что выбрали
+  const triedInfo = `выбран: ${bin}; проверялись: ${tried.join("; ")}`;
+  // shell:true (только фолбэк .cmd) НЕ экранирует аргументы — вручную кавычим
+  // пути с пробелами; при прямом .exe (useShell:false) Node сам корректно
+  // экранирует массив args, ничего не трогаем
+  const q = (s: string): string => (useShell && /\s/.test(s) ? `"${s}"` : s);
 
   try {
     return await new Promise((resolve, reject) => {
-      // claude.cmd (npm) на Windows запускается только через shell; крупный
-      // контент (система/задание) идёт через файл/stdin, а не аргументом —
-      // в аргументах командной строки только короткий путь к файлу и id модели
+      // нативный claude.exe спауним НАПРЯМУЮ (useShell:false) — не зависим ни от
+      // PATH серверного процесса, ни от кодировки cmd.exe. Крупный контент
+      // (система/задание) идёт через файл/stdin, в аргументах — только короткие
+      // токены (путь к файлу, id модели)
       const proc = spawn(
-        winQuote(bin),
-        args.map((a) => (a === sysPath ? winQuote(a) : a)),
+        useShell ? q(bin) : bin,
+        useShell ? args.map((a) => (a === sysPath ? q(a) : a)) : args,
         {
           cwd,
           env,
-          shell: process.platform === "win32",
+          shell: useShell,
           windowsHide: true,
         },
       );
@@ -223,8 +236,8 @@ export async function runClaudeCliText(
         if (e.code === "ENOENT") {
           reject(
             new Error(
-              "Claude CLI не найден. Установите его (npm install -g @anthropic-ai/claude-code) " +
-                "или выключите «через CLI» в настройках на /costs.",
+              `Claude CLI не найден (${triedInfo}). Выполните npm install в папке проекта ` +
+                "(CLI ставится локально в node_modules) и перезапустите сервер — либо выключите «через CLI» на /costs.",
             ),
           );
         } else reject(e);
@@ -251,21 +264,16 @@ export async function runClaudeCliText(
 
         if (!parsed) {
           const raw = (stderr || stdout || "пустой вывод").slice(0, 300);
-          // cmd.exe печатает системные сообщения в родной кодировке (cp866 в
-          // ru-RU Windows), а Node декодирует stderr как UTF-8 — невалидные
-          // байты превращаются в U+FFFD. Кракозябры = это сообщение ОС
-          // ("не является внутренней или внешней командой"), а не ответ
-          // самого Claude CLI (он всегда пишет валидный UTF-8/JSON) — значит
-          // бинарь не нашёлся ни по резолву, ни по PATH дочернего процесса
+          // фолбэк через .cmd/PATH мог упереться в cmd.exe «не является командой»
+          // в родной кодировке консоли (кракозябры U+FFFD). При прямом .exe этого
+          // уже не бывает, но признак оставляем на случай фолбэк-пути
           const looksLikeCmdError = raw.includes("�");
           reject(
             new Error(
               looksLikeCmdError
-                ? "Claude CLI не найден в PATH серверного процесса (сообщение системы вышло " +
-                  "кракозябрами — это его признак: другая кодировка консоли). Укажите точный путь " +
-                  "через переменную окружения CLAUDE_CLI_PATH (например, " +
-                  "CLAUDE_CLI_PATH=C:\\Users\\<вы>\\AppData\\Roaming\\npm\\claude.cmd в .env.local) " +
-                  "и перезапустите сервер — либо выключите «через CLI» на /costs."
+                ? `Claude CLI не удалось запустить (${triedInfo}). Выполните npm install в папке ` +
+                  "проекта (CLI ставится локально в node_modules) и перезапустите сервер — " +
+                  "либо выключите «через CLI» на /costs."
                 : `Claude CLI завершился с кодом ${code ?? "?"} без JSON-ответа: ${raw}`,
             ),
           );

@@ -5,7 +5,6 @@ import { deleteEpisode, deleteAllEpisodes } from "@/lib/actions/deletes";
 import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
 import { EmptyState } from "@/components/ui";
-import QueuePill from "@/components/QueuePill";
 import ConfirmButton from "@/components/ConfirmButton";
 import LongPressMenu from "@/components/LongPressMenu";
 
@@ -31,19 +30,8 @@ export default async function EpisodesPage() {
         </p>
       </div>
 
-      {/* быстрые входы в шапке (spec §2.1); основная навигация — таб-бар/сайдбар */}
-      <nav className="flex gap-2 px-4 pb-4">
-        <Link
-          href="/bible"
-          title={t("Библия сущностей", "Entity bible")}
-          className="shrink-0 rounded-md border border-[var(--border-default)] bg-ink-600 px-3.5 py-2.5 font-mono text-[11px] font-semibold text-violet-100 hover:border-[var(--border-strong)] hover:bg-ink-500"
-        >
-          ❖ {t("Библия", "Bible")}
-        </Link>
-        <span className="flex-1" />
-        <QueuePill />
-      </nav>
-
+      {/* быстрые входы убраны: Библия и Очередь дублировали нижний таб-бар,
+          который теперь виден на всех экранах */}
       <div className="flex flex-col gap-2.5 px-4 pb-10">
         {episodes.map((ep) => (
           <LongPressMenu

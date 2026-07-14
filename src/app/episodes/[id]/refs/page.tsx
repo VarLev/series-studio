@@ -1,51 +1,24 @@
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
-import { getDb, episodes, generations, references } from "@/lib/db";
-import { getFileUrl } from "@/lib/storage";
-import { availableImageModels } from "@/lib/generation";
+import { getDb, episodes } from "@/lib/db";
 import { ScreenHeader } from "@/components/ui";
 import { getT } from "@/lib/i18n-server";
-import QueuePill from "@/components/QueuePill";
-import GenPoller from "@/components/GenPoller";
-import SeriesRefs from "@/components/refs/SeriesRefs";
+import RefsContent from "./RefsContent";
 
 export const dynamic = "force-dynamic";
 
-/** Референсы серии (spec §2.6): один список на серию, токены REF_NN. */
+/**
+ * Референсы серии (spec §2.6): один список на серию, токены REF_NN.
+ * Полная страница — только по прямому URL/перезагрузке; при навигации с экрана
+ * эпизода этот маршрут перехватывается правым слайдером (@drawer/(.)refs).
+ */
 export default async function RefsPage(ctx: { params: Promise<{ id: string }> }) {
   await requireAuth();
   const { id } = await ctx.params;
   const db = await getDb();
   const [episode] = await db.select().from(episodes).where(eq(episodes.id, id));
   if (!episode) notFound();
-
-  const rows = await db
-    .select()
-    .from(references)
-    .where(and(eq(references.episodeId, id), isNull(references.shotId), isNull(references.entityId)))
-    .orderBy(asc(references.createdAt));
-
-  const refs = await Promise.all(
-    rows.map(async (r) => ({
-      id: r.id,
-      url: await getFileUrl(r.storagePath),
-      token: r.token ?? "",
-      caption: r.caption,
-      source: r.source,
-      width: r.width,
-      height: r.height,
-    })),
-  );
-
-  // активные задачи-референсы этой серии — пульсирующие плейсхолдеры в сетке
-  const activeJobs = (
-    await db
-      .select()
-      .from(generations)
-      .where(and(eq(generations.kind, "reference"), inArray(generations.status, ["queued", "running"])))
-      .orderBy(desc(generations.createdAt))
-  ).filter((g) => g.episodeId === id);
 
   const epN = String(episode.number).padStart(2, "0");
   const t = await getT();
@@ -55,16 +28,9 @@ export default async function RefsPage(ctx: { params: Promise<{ id: string }> })
       <ScreenHeader
         backHref={`/episodes/${id}`}
         eyebrow={`${t("Серия", "Episode")} ${epN}`}
-        title={`${t("Референсы", "References")} · ${refs.length}`}
-        right={<QueuePill />}
+        title={t("Референсы серии", "Episode references")}
       />
-      <GenPoller activeCount={activeJobs.length} />
-      <SeriesRefs
-        episodeId={id}
-        refs={refs}
-        pendingJobs={activeJobs.map((g) => ({ id: g.id, model: g.model }))}
-        imageModels={await availableImageModels()}
-      />
+      <RefsContent episodeId={id} />
     </main>
   );
 }

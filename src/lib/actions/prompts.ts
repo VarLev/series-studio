@@ -183,6 +183,28 @@ export async function deleteTrackPrompts(
   return { ok: true };
 }
 
+/** Удалить ОДНУ версию промпта (открытую), остальные версии трека сохраняются. */
+export async function deletePromptVersion(
+  promptId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAuth();
+  const db = await getDb();
+  const [row] = await db.select().from(prompts).where(eq(prompts.id, promptId));
+  if (!row) return { ok: false, error: "Промпт не найден" };
+  // не оставляем мёртвых ссылок: генерации этой версии отвязываем (видео живут)
+  await db.update(generations).set({ promptId: null }).where(eq(generations.promptId, promptId));
+  await db.delete(prompts).where(eq(prompts.id, promptId));
+  const [shot] = await db.select().from(shots).where(eq(shots.id, row.shotId));
+  if (shot) {
+    // статус вернётся к draft, если промптов и результатов больше не осталось
+    const { recalcShotStatus } = await import("@/lib/generation");
+    await recalcShotStatus(row.shotId);
+    revalidatePath(`/episodes/${shot.episodeId}/shots/${row.shotId}`);
+    revalidatePath(`/episodes/${shot.episodeId}`);
+  }
+  return { ok: true };
+}
+
 /** U4 — замечание → версия N+1 через промпт-фабрику. */
 export async function revisePrompt(promptId: string, feedback: string): Promise<Result> {
   await requireAuth();

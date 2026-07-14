@@ -8,6 +8,7 @@ import { StatusPill, EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import LongPressMenu from "@/components/LongPressMenu";
 import InsertGroupSheet from "./InsertGroupSheet";
+import LazyVideoThumb from "@/components/LazyVideoThumb";
 import { useT } from "@/components/I18nProvider";
 
 export interface ShotListItem {
@@ -127,12 +128,8 @@ export default function ShotsList({
             <div className="relative flex aspect-[9/16] w-[42px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600">
               {shot.thumbUrl ? (
                 shot.thumbIsVideo ? (
-                  <video
-                    // #t=0.1 — браузер показывает стоп-кадр вместо пустого плеера
-                    src={`${shot.thumbUrl}#t=0.1`}
-                    muted
-                    playsInline
-                    preload="metadata"
+                  <LazyVideoThumb
+                    src={shot.thumbUrl}
                     className="absolute inset-0 h-full w-full object-cover"
                   />
                 ) : (

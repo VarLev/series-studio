@@ -28,6 +28,7 @@ import {
 import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
+import { toProviderJpeg } from "@/lib/image";
 import { imageModelMeta, type ImageModelMeta } from "@/lib/imageModels";
 import { promptFamily } from "@/lib/llm/models";
 import { logModelCall } from "@/lib/modelLog";
@@ -127,29 +128,46 @@ function qualitiesFor(id: string, paramsJson: string): string[] {
   return ["480p", "720p", "1080p"];
 }
 
+// Проверка актуальности каталога трогает СЕТЬ (klingConnected + возможный
+// refreshCatalog, который ходит listModels в Higgsfield/Kling MCP). Раньше она
+// шла на КАЖДЫЙ getCatalog, а он вызывается на каждый рендер шота дважды — при
+// недоступном провайдере каждое переключение группы висело на сетевых ретраях.
+// Держим проверку не чаще раза в минуту; между ними — чистое чтение из БД.
+let lastCatalogCheckAt = 0;
+const CATALOG_CHECK_TTL_MS = 60_000;
+
 export async function getCatalog(kind?: "video" | "image"): Promise<CatalogModel[]> {
   const db = await getDb();
-  let rows = await db
-    .select()
-    .from(videoModels)
-    .where(eq(videoModels.active, true))
-    .orderBy(asc(videoModels.sortIndex));
-  // пустой каталог или каталог, засеянный до появления виртуальных моделей → пересеять
-  const missingVirtual = Object.keys(VIRTUAL_MODELS).some((id) => !rows.some((r) => r.id === id));
-  // image-провайдер сменился (появился/убрали GEMINI_API_KEY) → пересеять image-строки
-  const google = googleImageConfigured();
-  const hasGoogleRows = rows.some((r) => r.id === "nano_banana_pro");
-  const imageProviderChanged = google !== hasGoogleRows;
-  // подключили/отключили Kling MCP → его модели должны появиться/уйти из каталога
-  const { isConnected: klingConnected } = await import("@/lib/klingMcp");
-  const klingChanged = (await klingConnected()) !== rows.some((r) => r.provider === "kling-mcp");
-  if (!rows.length || missingVirtual || imageProviderChanged || klingChanged) {
-    await refreshCatalog();
-    rows = await db
+  const readRows = () =>
+    db
       .select()
       .from(videoModels)
       .where(eq(videoModels.active, true))
       .orderBy(asc(videoModels.sortIndex));
+  let rows = await readRows();
+  const now = Date.now();
+  // пустой каталог — проверяем всегда (бутстрап); иначе не чаще TTL
+  if (!rows.length || now - lastCatalogCheckAt > CATALOG_CHECK_TTL_MS) {
+    lastCatalogCheckAt = now;
+    // засеян до появления виртуальных моделей → пересеять
+    const missingVirtual = Object.keys(VIRTUAL_MODELS).some((id) => !rows.some((r) => r.id === id));
+    // image-провайдер сменился (появился/убрали GEMINI_API_KEY) → пересеять image-строки
+    const google = googleImageConfigured();
+    const hasGoogleRows = rows.some((r) => r.id === "nano_banana_pro");
+    const imageProviderChanged = google !== hasGoogleRows;
+    // подключили/отключили Kling MCP → его модели должны появиться/уйти из каталога
+    const { isConnected: klingConnected } = await import("@/lib/klingMcp");
+    const klingChanged = (await klingConnected().catch(() => false)) !== rows.some((r) => r.provider === "kling-mcp");
+    if (!rows.length || missingVirtual || imageProviderChanged || klingChanged) {
+      // упавший провайдер не должен ронять/морозить рендер — при ошибке остаёмся
+      // на текущих строках БД (каталог обновится при следующей проверке)
+      try {
+        await refreshCatalog();
+        rows = await readRows();
+      } catch (e) {
+        console.error("[getCatalog] refreshCatalog не удался, оставляю текущий каталог:", e);
+      }
+    }
   }
   return rows
     .filter((r) => !kind || r.kind === kind)
@@ -236,8 +254,11 @@ async function mediaForReference(
       return JSON.parse(cached.value) as { id: string; url: string };
     } catch {}
   }
-  const data = await readFile(ref.storagePath);
-  const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+  const raw = await readFile(ref.storagePath);
+  // провайдеру отдаём JPEG: Higgsfield media_upload отбивает WebP (его создаёт
+  // normalizeUploadImage для фото с альфой) и иногда PNG — «Upload URL generation failed»
+  const fallbackType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+  const { data, contentType } = await toProviderJpeg(raw, fallbackType);
   const media = await provider.uploadMedia(data, contentType);
   await db
     .insert(settings)
@@ -260,8 +281,9 @@ async function publicUrlForReference(
     return (await mediaForReference(refId, p))?.id ?? null;
   }
   if (!process.env.SUPABASE_URL && p.uploadFile) {
-    const data = await readFile(ref.storagePath);
-    const contentType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+    const raw = await readFile(ref.storagePath);
+    const fallbackType = ref.storagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+    const { data, contentType } = await toProviderJpeg(raw, fallbackType);
     return p.uploadFile(data, contentType);
   }
   return getFileUrl(ref.storagePath);
@@ -447,7 +469,7 @@ interface ProviderCtx {
     elementId: string | null;
   }>;
   /** композиционные референсы шота (кадрирование/свет/настроение), @Comp1..@CompN */
-  compositions: Array<{ media: { id: string; url: string } }>;
+  compositions: Array<{ media: { id: string; url: string }; refId: string }>;
 }
 
 export async function submitJobs(input: SubmitInput): Promise<{ queued: number }> {
@@ -525,8 +547,21 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
     ).filter((r) => r.role !== "start_frame");
     const compositions: ProviderCtx["compositions"] = [];
     for (const c of compRows) {
-      const media = await mediaForReference(c.id, provider).catch(() => null);
-      if (media) compositions.push({ media });
+      // референс добавлен пользователем осознанно. Раньше сбой заливки глотался
+      // молча → @CompN уходил в промпт буквой, а задача падала общей ошибкой
+      // провайдера. Теперь валимся с КОНКРЕТНОЙ причиной (видно в модалке задачи).
+      let media: { id: string; url: string } | null = null;
+      try {
+        media = await mediaForReference(c.id, provider);
+      } catch (e) {
+        throw new Error(
+          `Композиционный референс не удалось передать провайдеру: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (!media) {
+        throw new Error("Композиционный референс не удалось передать провайдеру: пустой ответ загрузки медиа");
+      }
+      compositions.push({ media, refId: c.id });
     }
     const ctx = { startImageUrl, resolved, compositions };
     ctxCache.set(cacheKey, ctx);
@@ -636,18 +671,25 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
       ...(virtual?.params ?? {}),
     };
-    const logRefs = [
-      ...(input.startFrameRefId ? [{ id: input.startFrameRefId, role: "start_frame" }] : []),
-      ...(await refsFor(promptRow).catch(() => [])).map((r) => ({
-        id: r.refId,
-        caption: r.name,
-        role: "character",
-      })),
-    ];
     try {
       // резолв провайдер-объекта (проверка/рефреш токенов по сети) — уже в фоне
       const provider = await providerForModel(modelId, catalog);
       const ctx = await ctxFor(provider, promptRow);
+      // лог прикреплённых референсов: start-frame + персонажи + КОМПОЗИЦИИ шота
+      // (раньше композиции в лог не попадали — казалось, что их не прикрепили)
+      const logRefs = [
+        ...(input.startFrameRefId ? [{ id: input.startFrameRefId, role: "start_frame" }] : []),
+        ...(await refsFor(promptRow).catch(() => [])).map((r) => ({
+          id: r.refId,
+          caption: r.name,
+          role: "character",
+        })),
+        ...ctx.compositions.map((c) => ({
+          id: c.refId,
+          caption: "composition",
+          role: "composition",
+        })),
+      ];
       const exactCost = provider.preflightCost
         ? await provider
             .preflightCost({ model: virtual?.base ?? modelId, prompt: promptRow.text, ...params })

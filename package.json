@@ -24,6 +24,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-code": "^2.1.207",
     "@tailwindcss/postcss": "^4",
     "@types/archiver": "^8.0.0",
     "@types/node": "^20",

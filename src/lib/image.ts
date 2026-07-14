@@ -82,6 +82,30 @@ export async function normalizeUploadImage(
 }
 
 /**
+ * Байты референса в формате, который видео-провайдеры (Higgsfield/Kling) точно
+ * принимают на аплоаде — JPEG. Higgsfield media_upload отбивает WebP и иногда
+ * PNG («Upload URL generation failed»), а normalizeUploadImage сохраняет фото с
+ * альфой в WebP — поэтому перед заливкой сводим к JPEG (EXIF-поворот, альфа на
+ * белый фон). sharp недоступен → отдаём оригинал с запасным content_type.
+ */
+export async function toProviderJpeg(
+  input: Buffer,
+  fallbackContentType: string,
+): Promise<{ data: Buffer; contentType: string }> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const data = await sharp(input)
+      .rotate() // по EXIF
+      .flatten({ background: { r: 255, g: 255, b: 255 } }) // убрать альфу
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toBuffer();
+    return { data, contentType: "image/jpeg" };
+  } catch {
+    return { data: input, contentType: fallbackContentType };
+  }
+}
+
+/**
  * Байты изображения из хранилища, приведённые к виду, который точно примет
  * vision-модель (под лимитом по размеру, корректная ориентация).
  */

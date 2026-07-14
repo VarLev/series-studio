@@ -39,15 +39,42 @@ export function estimateSpeechSeconds(dialogue: string): number {
 }
 
 /**
- * Сумма длительностей шотов группы, посчитанная из их time-диапазонов (сек).
+ * Сумма длительностей ОСНОВНЫХ шотов группы (Main Shots) из их time-диапазонов.
  * Источник истины для durationSec группы после ручной правки шотов (добавление/
  * удаление/правка секунд одного шота) — считается программно, без участия ИИ.
+ * Черновые шоты (draft) в длительность группы и лимит 15 сек НЕ входят.
  */
 export function sumBeatsDurationSec(beats: GroupShot[]): number {
-  return beats.reduce((sum, b) => {
-    const r = parseTimeRange(b.time);
-    return sum + (r ? r[1] - r[0] : 0);
-  }, 0);
+  return beats
+    .filter((b) => !b.draft)
+    .reduce((sum, b) => {
+      const r = parseTimeRange(b.time);
+      return sum + (r ? r[1] - r[0] : 0);
+    }, 0);
+}
+
+/** Ретайминг области: время подряд от 00:00, длительность реплики — нижняя граница. */
+function retimeArea(
+  area: GroupShot[],
+  fallbackDurationSec: number,
+  startOrder: number,
+): { beats: GroupShot[]; totalSec: number } {
+  const parsed = area.map((b) => parseTimeRange(b.time));
+  const durations = area.map((b, i) => {
+    const p = parsed[i];
+    const base = p ? p[1] - p[0] : Math.max(1, Math.round(fallbackDurationSec / area.length));
+    // речевую границу округляем ВВЕРХ до целой секунды: длительности обязаны быть
+    // целыми — duration_sec в БД integer, дробная сумма роняла UPDATE группы
+    // («Failed query…», инцидент Enhance 2026-07-13)
+    return Math.max(base, Math.ceil(estimateSpeechSeconds(b.dialogue)));
+  });
+  let cursor = 0;
+  const beats = area.map((b, i) => {
+    const time = `${fmtTime(cursor)}–${fmtTime(cursor + durations[i])}`;
+    cursor += durations[i];
+    return { ...b, order: startOrder + i, time };
+  });
+  return { beats, totalSec: cursor };
 }
 
 /**
@@ -55,12 +82,14 @@ export function sumBeatsDurationSec(beats: GroupShot[]): number {
  * отсчёте), а сами метки перезаписываем от 00:00. Длительность реплики —
  * нижняя граница шота: считается программно по числу слов (estimateSpeechSeconds),
  * а не берётся на веру из тайминга, который дала модель — подстраховка от
- * шотов, где реплика длиннее выделенного модель времени. Возвращает шоты и
- * итоговую длительность группы.
- * Известное ограничение: если реплики реально не помещаются в 15 сек даже
- * после подстраховки — durationSec всё равно клампится к 15 (сумма шотов
- * теоретически может чуть превысить кламп); материал в такой сцене стоит
- * разбивать на несколько групп — см. TIMING_RULES в lib/templates.ts.
+ * шотов, где реплика длиннее выделенного модель времени.
+ * Две области: ОСНОВНЫЕ шоты (Main, draft=false) получают order 1..N, идут в
+ * durationSec группы; ЧЕРНОВЫЕ (Draft) — своя шкала времени от 00:00, order
+ * продолжается после основных (N+1..) для уникальности внутри группы, в
+ * durationSec и лимит 15 сек не входят. Возвращает [main..., drafts...].
+ * Известное ограничение: если реплики Main реально не помещаются в 15 сек даже
+ * после подстраховки — durationSec клампится к 15; лишний материал должен
+ * уезжать в Draft Shots (это делает Enhance) — см. TIMING_RULES.
  */
 export function normalizeBeats(
   rawBeats: GroupShot[],
@@ -68,27 +97,30 @@ export function normalizeBeats(
 ): { beats: GroupShot[]; durationSec: number } {
   const sorted = [...rawBeats].sort((a, b) => a.order - b.order);
   if (!sorted.length) {
-    return { beats: [], durationSec: Math.min(15, Math.max(3, fallbackDurationSec)) };
+    return { beats: [], durationSec: Math.min(15, Math.max(3, Math.round(fallbackDurationSec))) };
   }
-  const parsed = sorted.map((b) => parseTimeRange(b.time));
-  const durations = sorted.map((b, i) => {
-    const p = parsed[i];
-    const base = p ? p[1] - p[0] : Math.max(1, Math.round(fallbackDurationSec / sorted.length));
-    return Math.max(base, estimateSpeechSeconds(b.dialogue));
-  });
-  let cursor = 0;
-  const beats = sorted.map((b, i) => {
-    const time = `${fmtTime(cursor)}–${fmtTime(cursor + durations[i])}`;
-    cursor += durations[i];
-    return { ...b, order: i + 1, time };
-  });
-  return { beats, durationSec: Math.min(15, Math.max(3, cursor)) };
+  const mainArea = sorted.filter((b) => !b.draft);
+  const draftArea = sorted.filter((b) => b.draft);
+  const main = mainArea.length ? retimeArea(mainArea, fallbackDurationSec, 1) : { beats: [], totalSec: 0 };
+  const drafts = draftArea.length
+    ? retimeArea(draftArea, fallbackDurationSec, mainArea.length + 1)
+    : { beats: [], totalSec: 0 };
+  // группа без основных шотов (всё в черновиках) — длительность из фолбэка.
+  // Math.round — страховка целочисленности: duration_sec в БД integer
+  const durationSec = main.beats.length
+    ? Math.min(15, Math.max(3, Math.round(main.totalSec)))
+    : Math.min(15, Math.max(3, Math.round(fallbackDurationSec)));
+  return { beats: [...main.beats, ...drafts.beats], durationSec };
 }
 
-/** Текст фрагмента группы для списка и промпт-фабрики: строка на шот. */
+/**
+ * Текст фрагмента группы для списка и промпт-фабрики: строка на шот.
+ * Только ОСНОВНЫЕ шоты — черновики в сюжетный текст и промпты не попадают.
+ */
 export function composeActionMd(beats: GroupShot[], fallback: string): string {
-  if (!beats.length) return fallback;
-  return beats
+  const main = beats.filter((b) => !b.draft);
+  if (!main.length) return fallback;
+  return main
     .map((b) => {
       const head = `Шот ${b.order}${b.time ? ` (${b.time})` : ""}: `;
       const parts = [b.action || b.camera || b.framing];

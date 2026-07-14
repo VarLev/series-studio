@@ -11,13 +11,11 @@ import {
   normalizeBeats,
   recomputeEpisodeTimecodes,
   sceneChainOf,
-  sumBeatsDurationSec,
 } from "@/lib/beats";
 import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
 import { listTechniques } from "@/lib/director";
 import { stripAt } from "@/lib/entityName";
-import { getSetting } from "@/lib/settings";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
 
@@ -59,20 +57,25 @@ export async function moveShot(shotId: string, direction: "up" | "down"): Promis
 
 /**
  * Ручная правка шотов группы: перезаписывает beats_json и собранный из него
- * фрагмент. Длительность группы (durationSec) пересчитывается программно из
- * суммы time-диапазонов шотов — так добавление/удаление шота или правка секунд
- * одного шота (клиент уже пересчитал диапазоны всех шотов) сразу отражаются на
- * длительности группы и, через recomputeEpisodeTimecodes, на таймкодах эпизода.
+ * фрагмент. Нормализация — единой normalizeBeats: основные шоты (Main) получают
+ * order 1..N, тайминг от 00:00 и дают durationSec группы; черновые (Draft) —
+ * свою шкалу и order после основных, в длительность не входят. Дальше
+ * recomputeEpisodeTimecodes обновляет сквозные таймкоды эпизода.
  */
 export async function updateGroupBeats(shotId: string, rawBeats: GroupShot[]): Promise<void> {
   await requireAuth();
   const parsed = z.array(groupShotSchema).safeParse(rawBeats);
-  if (!parsed.success) return;
+  if (!parsed.success) {
+    // раньше молча возвращались — клиент показывал «Шоты сохранены», хотя запись
+    // не шла, и после обновления страницы правка откатывалась. Теперь честно падаем,
+    // чтобы клиент показал ошибку, а не ложный успех.
+    console.error("[updateGroupBeats] невалидные шоты:", parsed.error.issues);
+    throw new Error("Не удалось сохранить шоты: некорректные данные");
+  }
   const db = await getDb();
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot) return;
-  const beats = parsed.data.map((b, i) => ({ ...b, order: i + 1 }));
-  const durationSec = Math.min(15, Math.max(3, sumBeatsDurationSec(beats) || shot.durationSec));
+  const { beats, durationSec } = normalizeBeats(parsed.data, shot.durationSec);
   await db
     .update(shots)
     .set({
@@ -119,9 +122,10 @@ export async function reviseGroup(
     const idx = siblings.findIndex((s) => s.id === shotId);
     const digest = (s: (typeof siblings)[number]): string => {
       try {
-        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string }>;
+        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string; draft?: boolean }>;
         if (Array.isArray(b)) {
-          const txt = b.map((x) => x.action || "").filter(Boolean).join(" ");
+          // черновые шоты — не сюжетная канва: в дайджест соседей не попадают
+          const txt = b.filter((x) => !x.draft).map((x) => x.action || "").filter(Boolean).join(" ");
           if (txt) return txt.slice(0, 280);
         }
       } catch {}
@@ -136,20 +140,25 @@ export async function reviseGroup(
       .filter(Boolean)
       .join("\n");
 
-    // только валидные номера шотов текущей группы
-    const validOrders = new Set(currentBeats.map((b) => b.order));
+    // реворк оперирует ТОЛЬКО основными шотами: черновики (Draft Shots) проходят
+    // насквозь нетронутыми — иначе ответ модели (groupShotSchema, draft default
+    // false) молча превратил бы их в основные
+    const mainCurrent = currentBeats.filter((b) => !b.draft);
+    const draftCurrent = currentBeats.filter((b) => b.draft);
+
+    // только валидные номера ОСНОВНЫХ шотов текущей группы
+    const validOrders = new Set(mainCurrent.map((b) => b.order));
     const scoped = targetOrders.filter((o) => validOrders.has(o));
 
+    // модель и канал заданы в llmReviseGroup: всегда Claude через CLI (подписка)
     const patch = await llmReviseGroup({
       episodeId: shot.episodeId,
       contextFragment,
       groupTitle: shot.title,
       durationSec: shot.durationSec,
-      beats: currentBeats,
+      beats: mainCurrent,
       feedback,
       targetOrders: scoped,
-      // корректировка шотов — «моделью для простых запросов» из настроек
-      model: await getSetting("llm_simple_model"),
     });
 
     // точечная правка: детерминированно берём из ответа модели ТОЛЬКО целевые шоты,
@@ -158,7 +167,7 @@ export async function reviseGroup(
     let finalTitle: string;
     if (scoped.length) {
       const revisedByOrder = new Map(patch.shots.map((s) => [s.order, s]));
-      finalShots = currentBeats.map((orig) =>
+      finalShots = mainCurrent.map((orig) =>
         scoped.includes(orig.order) ? (revisedByOrder.get(orig.order) ?? orig) : orig,
       );
       finalTitle = shot.title; // при точечной правке группу не переименовываем
@@ -168,7 +177,9 @@ export async function reviseGroup(
     }
 
     const { beats, durationSec } = normalizeBeats(
-      finalShots,
+      // ответ модели — основные (draft сбрасываем на false на всякий случай),
+      // черновики группы возвращаются как были
+      [...finalShots.map((s) => ({ ...s, draft: false })), ...draftCurrent],
       scoped.length ? shot.durationSec : patch.duration_sec,
     );
     await db
@@ -219,9 +230,10 @@ export async function enhanceGroup(
     const idx = siblings.findIndex((s) => s.id === shotId);
     const digest = (s: (typeof siblings)[number]): string => {
       try {
-        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string }>;
+        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string; draft?: boolean }>;
         if (Array.isArray(b)) {
-          const txt = b.map((x) => x.action || "").filter(Boolean).join(" ");
+          // черновые шоты — не сюжетная канва: в дайджест соседей не попадают
+          const txt = b.filter((x) => !x.draft).map((x) => x.action || "").filter(Boolean).join(" ");
           if (txt) return txt.slice(0, 280);
         }
       } catch {}
@@ -246,11 +258,21 @@ export async function enhanceGroup(
       emotionalTone: shot.emotionalTone,
       sceneContext,
     });
-    if (!res.shots.length) return { ok: false, error: "Модель не вернула ни одного шота" };
+    // Opus может вернуть черновики отдельным массивом shots_draft вместо
+    // draft:true внутри shots (реальный инцидент) — сливаем оба формата в один
+    // список; для shots_draft флаг draft форсируем
+    const allReturned: GroupShot[] = [
+      ...res.shots,
+      ...res.shots_draft.map((s) => ({ ...s, draft: true })),
+    ];
+    // группа обязана иметь хотя бы один ОСНОВНОЙ шот — черновики одни видео не дают
+    if (!allReturned.some((s) => !s.draft)) {
+      return { ok: false, error: "Модель не вернула ни одного основного шота" };
+    }
 
     // приёмы: оставляем только реально существующие в библиотеке id, максимум 1 на шот
     const knownTech = new Set((await listTechniques()).map((t) => t.id));
-    const cleanShots = res.shots.map((s) => ({
+    const cleanShots = allReturned.map((s) => ({
       ...s,
       technique_id: s.technique_id && knownTech.has(s.technique_id) ? s.technique_id : "",
     }));
@@ -283,11 +305,23 @@ export async function enhanceGroup(
     // авто-привязанных персонажей, которых в кадре нет (стили и ручные — не трогаем)
     await syncFrameCharacters(shotId, res.characters_in_frame);
 
+    // локация из библии: если итоговая локация/текст шотов совпали с location-
+    // сущностью — привязываем её (референс окружения уйдёт в промпт и задачу);
+    // авто-привязки локаций, которые больше не совпадают, снимаем (ручные — нет)
+    await syncLocationEntities(
+      shotId,
+      res.location.trim() || shot.location,
+      cleanShots.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
+    );
+
     await recomputeEpisodeTimecodes(shot.episodeId);
     revalidatePath(shotPath(shot.episodeId, shotId));
     revalidatePath(`/episodes/${shot.episodeId}`);
     return { ok: true };
   } catch (e) {
+    // стек в терминал сервера: тост клиента может не дожить до пользователя
+    // (туннель), а «Failed query…» без стека дважды уводил отладку не туда
+    console.error("[enhanceGroup]", e);
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
   }
 }
@@ -322,6 +356,45 @@ async function syncFrameCharacters(shotId: string, elementNames: string[]): Prom
     }
   }
   // привязать видимых (идемпотентно)
+  for (const entityId of wanted) {
+    await db.insert(shotEntities).values({ shotId, entityId, auto: true }).onConflictDoNothing();
+  }
+}
+
+/**
+ * Синхронизация локации из библии для группы: если имя/element_name location-
+ * сущности встречается в тексте локации или шотов — привязываем её (auto);
+ * авто-привязки локаций, которые больше не совпадают, снимаем. Ручные привязки
+ * (auto=false) и сущности других типов не трогаем. Матчинг по границам слов —
+ * та же логика, что в entityLink.ts.
+ */
+async function syncLocationEntities(
+  shotId: string,
+  locationText: string,
+  beatsText: string,
+): Promise<void> {
+  const db = await getDb();
+  const locs = await db
+    .select()
+    .from(entities)
+    .where(and(eq(entities.type, "location"), eq(entities.archived, false)));
+  if (!locs.length) return;
+  const hay = `${locationText} ${beatsText}`;
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hit = (key: string) =>
+    key.length >= 2 && new RegExp(`(^|[^\\wа-яё])${esc(key)}([^\\wа-яё]|$)`, "i").test(hay);
+  const wanted = new Set(
+    locs.filter((l) => hit(stripAt(l.elementName)) || hit(stripAt(l.name))).map((l) => l.id),
+  );
+  const locIds = new Set(locs.map((l) => l.id));
+  const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
+  for (const l of links) {
+    if (l.auto && locIds.has(l.entityId) && !wanted.has(l.entityId)) {
+      await db
+        .delete(shotEntities)
+        .where(and(eq(shotEntities.shotId, shotId), eq(shotEntities.entityId, l.entityId)));
+    }
+  }
   for (const entityId of wanted) {
     await db.insert(shotEntities).values({ shotId, entityId, auto: true }).onConflictDoNothing();
   }
@@ -421,9 +494,10 @@ export async function insertShotGroups(
     const sceneRows = chain.length ? chain : [anchor];
     const digest = (s: (typeof siblings)[number]): string => {
       try {
-        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string }>;
+        const b = JSON.parse(s.beatsJson || "[]") as Array<{ action?: string; draft?: boolean }>;
         if (Array.isArray(b)) {
-          const txt = b.map((x) => x.action || "").filter(Boolean).join(" ");
+          // черновые шоты — не сюжетная канва: в дайджест соседей не попадают
+          const txt = b.filter((x) => !x.draft).map((x) => x.action || "").filter(Boolean).join(" ");
           if (txt) return txt.slice(0, 280);
         }
       } catch {}
@@ -507,6 +581,21 @@ export async function insertShotGroups(
 }
 
 /**
+ * Лёгкий read для поллинга Enhance: «отпечаток» группы (шоты как строка).
+ * Клиент сравнивает с ориентиром до запуска — самовосстановление, если ответ
+ * долгого экшена (Opus 60–120с) потерялся в туннеле (паттерн PromptBlock).
+ */
+export async function groupBeatsStamp(shotId: string): Promise<string> {
+  await requireAuth();
+  const db = await getDb();
+  const [row] = await db
+    .select({ beatsJson: shots.beatsJson })
+    .from(shots)
+    .where(eq(shots.id, shotId));
+  return row?.beatsJson ?? "";
+}
+
+/**
  * Лёгкий read для поллинга вставки групп: клиент сравнивает число групп эпизода
  * с ориентиром — самовосстановление, если ответ долгого экшена потерялся в
  * туннеле (паттерн PromptBlock, см. latestPromptVersion).
@@ -577,15 +666,19 @@ export async function removeShotEntity(shotId: string, entityId: string): Promis
 export async function attachReferenceToShot(
   shotId: string,
   referenceId: string,
-  role: "start_frame" | "composition",
+  role: "start_frame" | "composition" | "layout",
 ): Promise<void> {
   await requireAuth();
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, referenceId));
   if (!ref) return;
   if (role === "start_frame") {
-    // start-frame один на шот — прежний становится композицией (spec §3.6)
-    await db.update(references).set({ role: "composition" }).where(eq(references.shotId, shotId));
+    // start-frame один на шот — прежний становится композицией (spec §3.6);
+    // composition/layout-референсы не трогаем
+    await db
+      .update(references)
+      .set({ role: "composition" })
+      .where(and(eq(references.shotId, shotId), eq(references.role, "start_frame")));
   }
   await db.insert(references).values({
     id: crypto.randomUUID(),
@@ -619,15 +712,19 @@ export async function detachShotReference(referenceId: string): Promise<void> {
 
 export async function setShotReferenceRole(
   referenceId: string,
-  role: "start_frame" | "composition",
+  role: "start_frame" | "composition" | "layout",
 ): Promise<void> {
   await requireAuth();
   const db = await getDb();
   const [ref] = await db.select().from(references).where(eq(references.id, referenceId));
   if (!ref?.shotId) return;
   if (role === "start_frame") {
-    // start-frame один на шот (spec §3.6)
-    await db.update(references).set({ role: "composition" }).where(eq(references.shotId, ref.shotId));
+    // start-frame один на шот (spec §3.6): демотим ТОЛЬКО прежний start-frame,
+    // не трогая composition/layout-референсы шота
+    await db
+      .update(references)
+      .set({ role: "composition" })
+      .where(and(eq(references.shotId, ref.shotId), eq(references.role, "start_frame")));
   }
   await db.update(references).set({ role }).where(eq(references.id, referenceId));
   const [shot] = await db.select().from(shots).where(eq(shots.id, ref.shotId));

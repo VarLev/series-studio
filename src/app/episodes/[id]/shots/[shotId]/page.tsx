@@ -15,7 +15,7 @@ import {
 import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
-import { getTechniquesByIds } from "@/lib/director";
+import { getTechniquesByIds, listTechniques } from "@/lib/director";
 import type { GroupShot } from "@/lib/llm/contracts";
 import { promptFamily } from "@/lib/llm/models";
 import { getT } from "@/lib/i18n-server";
@@ -23,18 +23,17 @@ import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from 
 import ConfirmButton from "@/components/ConfirmButton";
 import { deleteAllGenerations, deleteShot } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
-import StyleChips from "@/components/shot/StyleChips";
 import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
 import PromptTrackProvider from "@/components/shot/PromptTrackContext";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
+import EnhanceButton from "@/components/shot/EnhanceButton";
 import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
 import SceneToggle from "@/components/shot/SceneToggle";
 import ResultsStrip from "@/components/shot/ResultsStrip";
 import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
-import QueuePill from "@/components/QueuePill";
 import FilmStrip from "@/components/FilmStrip";
 import { chainLocation, chainTimeWeather, displayGroupNumbers } from "@/lib/beats";
 
@@ -57,6 +56,8 @@ export default async function ShotPage(ctx: {
     const parsed = JSON.parse(shot.beatsJson || "[]");
     if (Array.isArray(parsed)) beats = parsed as GroupShot[];
   } catch {}
+  // основные шоты (Main): длительность/промпт/счётчики; черновики — запаски
+  const mainBeats = beats.filter((b) => !b.draft);
 
   // все шоты серии — кинолента + master-список (spec §2.3/§4)
   const allShots = await db
@@ -150,9 +151,7 @@ export default async function ShotPage(ctx: {
     wardrobe: e.wardrobe,
     outfitSource: links.find((l) => l.entityId === e.id)?.outfitSource ?? "",
   }));
-  const styleChips = chipData
-    .filter((c) => c.type === "style")
-    .map((c) => ({ id: c.id, name: c.name, linked: c.linked }));
+  // стили в чипы сущностей не попадают («Наборы стилей» убраны как неиспользуемые)
   const entityChips = chipData.filter((c) => c.type !== "style");
 
   // референсы шота (с ролями); порядок createdAt = порядок якорей @Comp1..N
@@ -169,7 +168,7 @@ export default async function ShotPage(ctx: {
       id: r.id,
       url: await getFileUrl(r.storagePath),
       caption: r.caption,
-      role: (r.role ?? "composition") as "start_frame" | "composition",
+      role: (r.role ?? "composition") as "start_frame" | "composition" | "layout",
       anchor: anchorByRefId.get(r.id) ?? "",
     })),
   );
@@ -337,37 +336,73 @@ export default async function ShotPage(ctx: {
   ];
   const defaultStartFrame = shotRefs.find((r) => r.role === "start_frame") ?? null;
 
-  const copyPackRefs = [
-    ...shotRefs.map((r) => ({ url: r.url, name: r.caption || r.role })),
-    ...bibleRefs.map((r) => ({ url: r.url, name: r.label })),
-  ];
-
   const shotHref = (s: { id: string }) => `/episodes/${episodeId}/shots/${s.id}`;
 
   const t = await getT();
+  const imageModelsList = await availableImageModels();
   const grpLabel = shot.isInsert ? t("Вставка", "Insert") : `${t("Группа", "Group")} ${grpN}`;
 
+  // библиотека режиссёрских приёмов — компактный список для ручного закрепления
+  // приёма за шотом (пикер в GroupShotsEditor). Enhance проставляет их сам, но
+  // теперь приём можно и добавить руками, не только снять (замечание заказчика).
+  const techniqueLibrary = (await listTechniques()).map((tq) => ({
+    id: tq.id,
+    title: tq.title,
+    category: tq.category,
+    camera: tq.camera,
+    tags: tq.tags,
+  }));
+
+  // Сущности + Референсы шота: раньше шли отдельными секциями ПОСЛЕ шотов группы.
+  // Теперь их место — сразу после эмоционального тона (внутри GroupShotsEditor,
+  // через topSlot); в ветке без группы (фрагмент сюжета) рендерим как раньше.
+  const entitiesRefs = (
+    <>
+      <div className="flex flex-col gap-1.5">
+        <SectionLabel
+          hint={t("определил Claude · правится вручную", "detected by Claude · editable")}
+        >
+          {t("Сущности", "Entities")}
+        </SectionLabel>
+        <EntityChips shotId={shotId} entities={entityChips} />
+      </div>
+
+      {/* «Наборы стилей» убраны — фича не используется (замечание заказчика) */}
+
+      <div className="flex flex-col gap-1.5">
+        <SectionLabel hint={t("тап по бейджу — роль", "tap the badge to set role")}>
+          {t("Референсы шота", "Shot references")}
+        </SectionLabel>
+        <ShotRefs
+          shotId={shotId}
+          episodeId={episodeId}
+          refs={shotRefs}
+          seriesRefs={seriesRefs}
+          bibleRefs={bibleRefs}
+          promptText={current?.text ?? shot.actionMd}
+          imageModels={imageModelsList}
+        />
+      </div>
+    </>
+  );
+
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:max-w-none">
+    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:h-dvh lg:min-h-0 lg:max-w-none lg:overflow-hidden">
       <ScreenHeader
         backHref={`/episodes/${episodeId}`}
         eyebrow={`${t("Серия", "Episode")} ${epN} · ${grpLabel}`}
         title={shot.title || t("Группа шотов", "Shot group")}
         right={
+          // очередь убрана из шапки — нижний таб-бар с бейджем теперь на всех экранах
           shot.isInsert ? (
-            <div className="flex items-center gap-1.5">
-              <ConfirmButton
-                action={deleteShot.bind(null, shotId)}
-                label={t("Удалить вставку", "Delete insert")}
-                confirmLabel={t("Точно удалить эту вставную группу?", "Really delete this insert group?")}
-                className="min-h-8 rounded-full border border-[rgba(194,71,106,.4)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
-                armedClassName="border-danger bg-[rgba(194,71,106,.15)] text-[#e08aa4]"
-              />
-              <QueuePill />
-            </div>
-          ) : (
-            <QueuePill />
-          )
+            <ConfirmButton
+              action={deleteShot.bind(null, shotId)}
+              label={t("Удалить вставку", "Delete insert")}
+              confirmLabel={t("Точно удалить эту вставную группу?", "Really delete this insert group?")}
+              className="min-h-8 rounded-full border border-[rgba(194,71,106,.4)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
+              armedClassName="border-danger bg-[rgba(194,71,106,.15)] text-[#e08aa4]"
+            />
+          ) : undefined
         }
       />
       <GenPoller activeCount={activeCount} />
@@ -470,13 +505,19 @@ export default async function ShotPage(ctx: {
               <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
                 {shot.timecode ? `${shot.timecode} · ` : ""}
                 {shot.durationSec} {t("сек", "sec")}
-                {beats.length ? ` · ${t("шотов", "shots")} ${beats.length}` : ""} ·{" "}
+                {mainBeats.length ? ` · ${t("шотов", "shots")} ${mainBeats.length}` : ""}
+                {beats.length > mainBeats.length
+                  ? ` (+${beats.length - mainBeats.length} draft)`
+                  : ""}{" "}
+                ·{" "}
                 {versions.length
                   ? `${t("промпт", "prompt")} v${current!.version}`
                   : t("промпта нет", "no prompt")}{" "}
                 · {t("видео", "videos")} {results.filter((r) => r.status === "done").length}
               </div>
             </div>
+            {/* Enhance — в шапке группы (перенос из блока шотов, замечание заказчика) */}
+            <EnhanceButton shotId={shotId} />
           </div>
 
           {/* граница сюжетной сцены: тумблер «новая сцена / продолжение».
@@ -500,51 +541,23 @@ export default async function ShotPage(ctx: {
               <GroupShotsEditor
                 shotId={shotId}
                 initialBeats={beats}
-                simpleModel={settings.llm_simple_model}
                 llmModel={settings.llm_model}
                 location={chainLocation(allShots, shotId)}
                 timeWeather={chainTimeWeather(allShots, shotId)}
                 emotionalTone={shot.emotionalTone}
-                useCli={settings.llm_use_cli === "1"}
+                techniqueLibrary={techniqueLibrary}
+                topSlot={entitiesRefs}
               />
             </div>
           ) : (
-            <div className="flex flex-col gap-1.5">
-              <SectionLabel>{t("Фрагмент сюжета", "Story fragment")}</SectionLabel>
-              <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
-            </div>
+            <>
+              <div className="flex flex-col gap-1.5">
+                <SectionLabel>{t("Фрагмент сюжета", "Story fragment")}</SectionLabel>
+                <EditableAction shotId={shotId} initial={shot.actionMd} cameraHint={shot.cameraHint} />
+              </div>
+              {entitiesRefs}
+            </>
           )}
-
-          <div className="flex flex-col gap-1.5">
-            <SectionLabel
-              hint={t("определил Claude · правится вручную", "detected by Claude · editable")}
-            >
-              {t("Сущности", "Entities")}
-            </SectionLabel>
-            <EntityChips shotId={shotId} entities={entityChips} />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <SectionLabel hint={t("уходят в промпт-фабрику", "feed the prompt factory")}>
-              {t("Наборы стилей", "Style sets")}
-            </SectionLabel>
-            <StyleChips shotId={shotId} styles={styleChips} />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <SectionLabel hint={t("тап по бейджу — роль", "tap the badge to set role")}>
-              {t("Референсы шота", "Shot references")}
-            </SectionLabel>
-            <ShotRefs
-              shotId={shotId}
-              episodeId={episodeId}
-              refs={shotRefs}
-              seriesRefs={seriesRefs}
-              bibleRefs={bibleRefs}
-              promptText={current?.text ?? shot.actionMd}
-              imageModels={await availableImageModels()}
-            />
-          </div>
 
           <PromptBlock
             shotId={shotId}
@@ -588,18 +601,13 @@ export default async function ShotPage(ctx: {
         </div>
       </div>
 
-      {/* копипак — ручная генерация на kling.ai, поэтому берёт Kling-промпт, если он есть */}
       <ActionBar
         episodeId={episodeId}
         shotId={shotId}
-        promptText={(currentByFamily.kling ?? currentByFamily.seedance)?.text ?? ""}
-        promptVersion={(currentByFamily.kling ?? currentByFamily.seedance)?.version ?? 0}
-        promptId={(currentByFamily.kling ?? currentByFamily.seedance)?.id ?? ""}
         promptFamilies={{
           seedance: Boolean(currentByFamily.seedance),
           kling: Boolean(currentByFamily.kling),
         }}
-        copyPackRefs={copyPackRefs}
         hasPrompt={Boolean(current)}
         models={catalog}
         defaultModelIds={defaultModelIds}

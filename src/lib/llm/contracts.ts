@@ -14,6 +14,10 @@ export const groupShotSchema = z.object({
   // id закреплённого за этим шотом режиссёрского приёма (из библиотеки), либо ""
   // — проставляется кнопкой Enhance; при генерации промпта его язык вплетается
   technique_id: z.string().default(""),
+  // черновой шот (область Draft Shots): полноценный шот-запаска при группе, но
+  // НЕ входит в длительность группы, лимит 15 сек и Seedance-промпт. default
+  // false → все сохранённые до этой фичи шоты автоматически основные (main)
+  draft: z.boolean().default(false),
 });
 export type GroupShot = z.infer<typeof groupShotSchema>;
 
@@ -86,6 +90,10 @@ export const enhanceGroupSchema = z.object({
   // element_name'ы персонажей, реально присутствующих в кадре этой группы
   characters_in_frame: z.array(z.string()).default([]),
   shots: z.array(groupShotSchema).default([]),
+  // страховка: Opus иногда кладёт черновики отдельным массивом вместо
+  // draft:true внутри shots (реальный инцидент) — принимаем и такой формат,
+  // enhanceGroup сольёт их в общий список с draft:true
+  shots_draft: z.array(groupShotSchema).default([]),
 });
 export type EnhanceGroup = z.infer<typeof enhanceGroupSchema>;
 

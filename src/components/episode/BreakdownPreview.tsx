@@ -268,11 +268,11 @@ export default function BreakdownPreview({
       </div>
 
       <div
-        className="fixed inset-x-0 bottom-0 z-30 mx-auto flex w-full max-w-lg gap-2 border-t border-[var(--border-default)] px-3 py-3 md:max-w-3xl lg:left-56 lg:mx-0 lg:max-w-none"
+        // мобайл: над общим таб-баром (58px + safe-area); десктоп: у низа окна
+        className="fixed inset-x-0 bottom-[calc(58px+env(safe-area-inset-bottom))] z-30 mx-auto flex w-full max-w-lg gap-2 border-t border-[var(--border-default)] px-3 py-3 md:max-w-3xl lg:bottom-0 lg:left-56 lg:mx-0 lg:max-w-none"
         style={{
           background: "linear-gradient(180deg, rgba(15,12,22,.94), rgba(6,5,9,.98))",
           backdropFilter: "blur(14px)",
-          paddingBottom: "max(12px, env(safe-area-inset-bottom))",
         }}
       >
         <button
