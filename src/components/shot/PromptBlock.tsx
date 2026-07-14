@@ -193,6 +193,10 @@ export default function PromptBlock({
     clearMarker();
     // новая версия трека стала последней — открываем её (сбрасываем ручной выбор)
     setOpen(family, undefined);
+    // подгруженный по «показать ещё» полный список устарел: без сброса он перекрывал
+    // бы свежий проп versions, и новая версия не показалась бы (а на генерацию
+    // ушла бы старая). После сброса список снова строится из versions с сервера.
+    setLoadedExtra({});
     // гасим таймер и поллинг, но НЕ refresh-повторы (их запустим ниже)
     if (timers.current.tick) clearInterval(timers.current.tick);
     if (timers.current.poll) clearInterval(timers.current.poll);
@@ -306,6 +310,7 @@ export default function PromptBlock({
     setDeleting(false);
     setExpanded(false);
     setOpen(family, undefined); // открытой станет последняя из оставшихся версий
+    setLoadedExtra({}); // полный список устарел (см. finishOk) — перечитаем из versions
     router.refresh(); // если версий больше нет — появится форма «Сгенерировать»
   }
 

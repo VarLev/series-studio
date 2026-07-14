@@ -28,11 +28,19 @@ export default function GenPoller({ activeCount }: { activeCount: number }) {
           signal: AbortSignal.timeout(20_000),
         });
         if (!res.ok) return; // 401/500 — не рефрешим, попробуем в следующий тик
-        const data = (await res.json().catch(() => null)) as { fp?: string } | null;
+        const data = (await res.json().catch(() => null)) as
+          | { updated?: number; fp?: string }
+          | null;
         const fp = data?.fp;
         if (typeof fp === "string") {
-          // первый тик — только запоминаем отпечаток (страница только что отрендерена)
-          if (lastFp.current !== null && fp !== lastFp.current) router.refresh();
+          // Рефреш в двух случаях. (1) poll сам что-то записал (updated > 0) — это
+          // покрывает и первый тик (приземление внутри первого POST иначе пряталось
+          // бы за только что запомненным fp — страница залипала бы на «генерируется»),
+          // и _poll-ошибки связи, которых в отпечатке нет (бейдж «нет связи» должен
+          // появляться). (2) отпечаток сменился — изменения, случившиеся вне poll.
+          const changed =
+            (data?.updated ?? 0) > 0 || (lastFp.current !== null && fp !== lastFp.current);
+          if (changed) router.refresh();
           lastFp.current = fp;
         } else {
           router.refresh(); // ответ без отпечатка (старый роут) — обновим на всякий случай
