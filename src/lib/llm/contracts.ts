@@ -97,12 +97,25 @@ export const enhanceGroupSchema = z.object({
 });
 export type EnhanceGroup = z.infer<typeof enhanceGroupSchema>;
 
-/** Переделка одной группы по замечанию пользователя (llmReviseGroup). */
-export const groupPatchSchema = z.object({
-  title: z.string().default(""),
-  duration_sec: z.number().int().min(1).max(60).default(15),
-  shots: z.array(groupShotSchema).default([]),
-});
+/**
+ * Переделка одной группы по замечанию пользователя (llmReviseGroup).
+ * ТОЛЕРАНТНОСТЬ К ГОЛОМУ МАССИВУ: Sonnet через CLI регулярно отдаёт не объект
+ * {title, duration_sec, shots:[…]}, а просто массив шотов [{…},{…}] — особенно
+ * при точечной правке одного шота. Раньше это валило валидацию («expected object,
+ * received array»), runJson делал вторую попытку (+ещё до 210 с CLI), которая
+ * часто упиралась в таймаут — реворк «зависал» на 6+ минут и не применялся
+ * (подтверждено логами Console 2026-07-14: пары попыток 169с+210с, 166с+210с).
+ * Теперь голый массив принимаем как {shots: [...]} — ретрай не нужен, реворк
+ * укладывается в одну попытку (~170 с) и проходит.
+ */
+export const groupPatchSchema = z.preprocess(
+  (v) => (Array.isArray(v) ? { shots: v } : v),
+  z.object({
+    title: z.string().default(""),
+    duration_sec: z.number().int().min(1).max(60).default(15),
+    shots: z.array(groupShotSchema).default([]),
+  }),
+);
 export type GroupPatch = z.infer<typeof groupPatchSchema>;
 
 /** TZ §7 — Промпт шота */

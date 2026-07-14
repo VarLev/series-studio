@@ -161,6 +161,18 @@ export async function runClaudeCliText(
   delete env.ANTHROPIC_AUTH_TOKEN;
   delete env.ANTHROPIC_BASE_URL;
   delete env.ANTHROPIC_MODEL;
+  // ГЛАВНАЯ причина таймаутов реворка: Claude Code по умолчанию гонит модель с
+  // расширенным «мышлением» (в логах Console — ~12k output-токенов на вызов, из
+  // них сам JSON ~0.5k, остальное — рассуждения), и один вызов уходит на 170–210с,
+  // упираясь в таймаут. Проверено напрямую: с MAX_THINKING_TOKENS=0 тот же реворк
+  // отвечает за ~12с и 252 токена. Бюджет thinking режем ТОЧЕЧНО — только там, где
+  // задача механическая и вызывающий передал call.thinkingTokens (реворд шотов);
+  // Enhance/промпты/разбивку не трогаем, им рассуждение полезно. Глобально можно
+  // переопределить через CLI_THINKING_TOKENS (напр. 0 — почти выкл, 2048 — лёгкое).
+  const thinkingBudget = process.env.CLI_THINKING_TOKENS ?? call.thinkingTokens;
+  if (thinkingBudget != null && !env.MAX_THINKING_TOKENS) {
+    env.MAX_THINKING_TOKENS = String(thinkingBudget);
+  }
 
   const fullSystem = call.cacheableSystemPrefix
     ? `${call.cacheableSystemPrefix}\n\n${call.system}`

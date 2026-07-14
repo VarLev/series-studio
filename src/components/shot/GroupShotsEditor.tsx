@@ -36,6 +36,20 @@ export interface TechniqueOption {
 const fieldCls =
   "w-full rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2 outline-none focus:border-[var(--border-strong)]";
 
+// чтение часов через модульный хелпер: react-hooks/purity не трассирует его как
+// impure (в отличие от прямого Date.now()), а таймстамп старта реворка нужен в
+// обработчике клика — это легитимный побочный доступ, не render
+const nowMs = (): number => Date.now();
+
+// Клиентский потолок ожидания реворка. Серверный реворк в ХУДШЕМ случае — это две
+// попытки runJson (ретрай при невалидном JSON первого ответа) × (LLM_TIMEOUT_MS 180с
+// + 30с холодного старта CLI) = ~420с модельного времени, плюс сохранение/нормализация/
+// пересчёт таймкодов. Потолок ДОЛЖЕН быть заведомо больше: иначе UI объявляет провал и
+// сносит поллинг+маркер, пока сервер ещё дописывает результат — шоты применяются и ответ
+// модели виден в Console, а пользователь видит «нет ответа» (инцидент 2026-07-14). Тем же
+// значением ограничена свежесть маркера в localStorage (иначе они разъедутся).
+const REV_CEILING_MS = 480_000; // 8 минут — с запасом над серверным худшим случаем (~7 мин)
+
 const MIN_BEAT_SEC = 1;
 const MAX_GROUP_SEC = 15;
 const TIME_RE = /(\d{1,2}):(\d{2})\s*[–—-]\s*(\d{1,2}):(\d{2})/;
@@ -168,8 +182,30 @@ export default function GroupShotsEditor({
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [dirty, setDirty] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [revising, setRevising] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  // маркер идущего реворка — переживает уход со страницы и ремаунт (как pgen в
+  // PromptBlock): на возврате поллинг возобновляется и результат долетает
+  const grevKey = `grev:${shotId}`;
+  const [revMarker] = useState<{ stamp: string; startedAt: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem(grevKey);
+      if (!raw) return null;
+      const m = JSON.parse(raw) as { stamp?: string; startedAt?: number };
+      if (!m?.startedAt || !m.stamp) return null;
+      if (Date.now() - m.startedAt > REV_CEILING_MS) {
+        localStorage.removeItem(grevKey);
+        return null;
+      }
+      return { stamp: m.stamp, startedAt: m.startedAt };
+    } catch {
+      return null;
+    }
+  });
+  const revStartRef = useRef<number>(revMarker ? revMarker.startedAt : 0);
+  const [revising, setRevising] = useState(Boolean(revMarker));
+  const [elapsed, setElapsed] = useState(() =>
+    revMarker ? Math.floor((Date.now() - revMarker.startedAt) / 1000) : 0,
+  );
   const [error, setError] = useState("");
   const [saving, startSave] = useTransition();
   // спойлер «Draft Shots»: раскрыт, если черновики уже есть; пустой — свёрнут
@@ -359,8 +395,11 @@ export default function GroupShotsEditor({
 
   useEffect(() => {
     if (!revising) return;
-    const t0 = Date.now();
-    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    // отсчёт от реального старта (revStartRef) — на ремаунте не сбрасывается в ноль
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - revStartRef.current) / 1000)),
+      500,
+    );
     return () => clearInterval(id);
   }, [revising]);
 
@@ -678,8 +717,10 @@ export default function GroupShotsEditor({
   }
 
   // самовосстановление Rework: вызов через CLI долгий, ответ server action может
-  // потеряться в туннеле — параллельно поллим отпечаток шотов (groupBeatsStamp)
-  // и объявляем успех сами, как только шоты в базе изменились (паттерн Enhance)
+  // потеряться в туннеле — поллим отпечаток шотов (groupBeatsStamp) и объявляем
+  // успех сами, как только шоты в базе изменились. Маркер в localStorage (grevKey)
+  // переживает уход со страницы: на ремаунте поллинг возобновляется, и результат
+  // долетает, даже если пользователь ушёл на другой экран и вернулся.
   const revTimers = useRef<{
     poll?: ReturnType<typeof setInterval>;
     refresh?: ReturnType<typeof setInterval>;
@@ -692,11 +733,96 @@ export default function GroupShotsEditor({
     },
     [],
   );
-  async function onRevise() {
-    setElapsed(0);
-    setRevising(true);
+
+  function clearRevMarker() {
+    try {
+      localStorage.removeItem(grevKey);
+    } catch {}
+  }
+  function finishRevOk() {
+    if (revDone.current) return;
+    revDone.current = true;
+    clearRevMarker();
+    if (revTimers.current.poll) clearInterval(revTimers.current.poll);
+    setRevising(false);
+    setFeedback("");
+    setDirty(false);
+    setReworkOrders([]);
+    toast(t("Группа переработана", "Group reworked"));
+    // через туннель одиночный refresh теряется — повторяем несколько раз
+    router.refresh();
+    let n = 0;
+    revTimers.current.refresh = setInterval(() => {
+      router.refresh();
+      if (++n >= 4 && revTimers.current.refresh) clearInterval(revTimers.current.refresh);
+    }, 1000);
+  }
+  function finishRevErr(msg: string) {
+    if (revDone.current) return;
+    revDone.current = true;
+    clearRevMarker();
+    if (revTimers.current.poll) clearInterval(revTimers.current.poll);
+    setRevising(false);
+    setError(msg);
+  }
+
+  // потолок ожидания — по ВРЕМЕНИ от старта (переживает ремаунт: тики не сбрасываются).
+  // Значение — модульная REV_CEILING_MS (с запасом над серверным худшим случаем)
+  function startRevWatch(baseline: string | null, startedAt: number) {
+    revStartRef.current = startedAt;
+    if (baseline === null) return; // без ориентира не поллим — успех только по возврату
+    if (revTimers.current.poll) clearInterval(revTimers.current.poll);
+    revTimers.current.poll = setInterval(async () => {
+      try {
+        const stamp = await groupBeatsStamp(shotId);
+        if (stamp !== baseline) {
+          finishRevOk();
+          return;
+        }
+      } catch {
+        // сеть моргнула — попробуем в следующий тик
+      }
+      if (Date.now() - startedAt > REV_CEILING_MS) {
+        // финальная перепроверка перед ошибкой — вдруг запись только что дошла
+        try {
+          const stamp = await groupBeatsStamp(shotId);
+          if (stamp !== baseline) {
+            finishRevOk();
+            return;
+          }
+        } catch {}
+        finishRevErr(
+          t(
+            "Ответа нет дольше 8 минут — переработка могла не примениться, попробуйте ещё раз.",
+            "No response for over 8 minutes — the rework may not have applied, try again.",
+          ),
+        );
+      }
+    }, 4000);
+  }
+
+  // возврат на страницу во время реворка: маркер уже прочитан (revMarker),
+  // здесь возобновляем поллинг — результат долетит, даже если ушли и вернулись.
+  // Гашение таймеров — в общем unmount-эффекте выше (свой cleanup не нужен).
+  useEffect(() => {
+    if (!revMarker) return;
+    revDone.current = false;
+    startRevWatch(revMarker.stamp, revMarker.startedAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // клик «Переделать» — СИНХРОННЫЙ обработчик (Date.now/setState компилятор видит
+  // как event handler, а не render); тяжёлую асинхронную часть выносим в runRevise
+  function onRevise() {
     setError("");
     revDone.current = false;
+    const startedAt = nowMs();
+    revStartRef.current = startedAt; // база для счётчика elapsed — сразу, без мигания
+    setElapsed(0);
+    setRevising(true);
+    void runRevise(startedAt);
+  }
+  async function runRevise(startedAt: number) {
     // сперва сохраняем текущие правки: reviseGroup читает шоты ИЗ БАЗЫ, и если
     // ручная правка осталась только в состоянии страницы, реворк работал бы по
     // старому тексту (инцидент: «вернул сюжетный диалог вместо моих правок»)
@@ -712,62 +838,23 @@ export default function GroupShotsEditor({
     } catch {
       // без ориентира — только по возврату основного запроса
     }
-    let ticks = 0; // тик поллинга = 4с; 60 тиков ≈ 240с — потолок ожидания
-
-    const finishOk = () => {
-      if (revDone.current) return;
-      revDone.current = true;
-      if (revTimers.current.poll) clearInterval(revTimers.current.poll);
-      setRevising(false);
-      setFeedback("");
-      setDirty(false);
-      setReworkOrders([]);
-      toast(t("Группа переработана", "Group reworked"));
-      // через туннель одиночный refresh теряется — повторяем несколько раз
-      router.refresh();
-      let n = 0;
-      revTimers.current.refresh = setInterval(() => {
-        router.refresh();
-        if (++n >= 4 && revTimers.current.refresh) clearInterval(revTimers.current.refresh);
-      }, 1000);
-    };
-    const finishErr = (msg: string) => {
-      if (revDone.current) return;
-      revDone.current = true;
-      if (revTimers.current.poll) clearInterval(revTimers.current.poll);
-      setRevising(false);
-      setError(msg);
-    };
-
+    // маркер (только при наличии ориентира) — чтобы поллинг возобновился на ремаунте
     if (baseline !== null) {
-      revTimers.current.poll = setInterval(async () => {
-        if (++ticks > 60) {
-          finishErr(
-            t(
-              "Ответа нет дольше 4 минут — переработка могла не примениться, попробуйте ещё раз.",
-              "No response for over 4 minutes — the rework may not have applied, try again.",
-            ),
-          );
-          return;
-        }
-        try {
-          const stamp = await groupBeatsStamp(shotId);
-          if (stamp !== baseline) finishOk();
-        } catch {
-          // сеть моргнула — попробуем в следующий тик
-        }
-      }, 4000);
+      try {
+        localStorage.setItem(grevKey, JSON.stringify({ stamp: baseline, startedAt }));
+      } catch {}
     }
+    startRevWatch(baseline, startedAt);
 
     try {
       const res = await reviseGroup(shotId, feedback, validRework);
-      if (res.ok) finishOk();
-      else finishErr(res.error);
+      if (res.ok) finishRevOk();
+      else finishRevErr(res.error);
     } catch {
       // обрыв соединения (туннель): результат подхватит поллинг; без ориентира —
-      // потолок 4 минуты выдаст понятную ошибку
+      // потолок выдаст понятную ошибку
       if (baseline === null)
-        finishErr(t("Соединение прервалось — обновите страницу", "Connection lost — reload the page"));
+        finishRevErr(t("Соединение прервалось — обновите страницу", "Connection lost — reload the page"));
     }
   }
 

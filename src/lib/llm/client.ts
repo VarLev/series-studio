@@ -116,6 +116,13 @@ export interface LlmCall {
    * (Enhance на Opus). Работает только для Claude-моделей без картинки.
    */
   forceCli?: boolean;
+  /**
+   * Бюджет «мышления» для CLI-вызова (env MAX_THINKING_TOKENS дочернего процесса).
+   * По умолчанию Claude Code думает щедро (~12k токенов → 170–210с и таймауты).
+   * Для механических задач (реворк раскадровки) ставим 0 — вызов ускоряется в разы
+   * без потери качества. Не задан → поведение CLI по умолчанию (для Enhance/промптов).
+   */
+  thinkingTokens?: number;
 }
 
 function fullSystemText(call: LlmCall): string {
@@ -165,8 +172,11 @@ export async function runText(call: LlmCall): Promise<string> {
   const refs = (call.refIds ?? []).map((id) => ({ id }));
   try {
     const { text, usage } = viaCli
-      ? // +30 c к потолку: холодный старт процесса CLI не должен съедать бюджет модели
-        await runClaudeCliText(call, LLM_TIMEOUT_MS + 30_000)
+      ? // CLI получает больше потолка, чем API: холодный старт процесса + возможное
+        // «мышление» модели не должны съедать бюджет. Основной рычаг скорости —
+        // срез thinking (MAX_THINKING_TOKENS в cli.ts); этот запас — страховка на
+        // случай всё ещё медленного вызова, чтобы не ловить таймаут на 210с.
+        await runClaudeCliText(call, LLM_TIMEOUT_MS + 120_000)
       : provider === "anthropic"
         ? await runAnthropicText(call)
         : await runOpenAiText(call, provider);

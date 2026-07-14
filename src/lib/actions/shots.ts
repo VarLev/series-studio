@@ -93,14 +93,38 @@ export async function updateGroupBeats(shotId: string, rawBeats: GroupShot[]): P
  * Замечание к группе → Claude переписывает её шоты (llmReviseGroup) →
  * группа обновляется, сквозные таймкоды эпизода пересчитываются.
  */
+type RevResult = { ok: true } | { ok: false; error: string };
+type GlobalRevlock = typeof globalThis & { __ssReviseInflight?: Map<string, Promise<RevResult>> };
+
 export async function reviseGroup(
   shotId: string,
   feedback: string,
   /** номера шотов группы, к которым ограничить правку (пусто → решает модель) */
   targetOrders: number[] = [],
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<RevResult> {
   await requireAuth();
   if (!feedback.trim()) return { ok: false, error: "Напишите замечание" };
+  // Дедуп: долгий CLI-вызов через туннель браузер/Next повторяют, пока первый жив —
+  // это плодило ВТОРОЙ Sonnet-процесс на ~200с и ложную ошибку «нет ответа 4 минуты»
+  // в UI. Повтор с ТЕМ ЖЕ замечанием теперь ждёт результат уже идущего вызова, а не
+  // запускает новый. Ключ включает feedback: другое замечание — легитимно новый вызов.
+  const g = globalThis as GlobalRevlock;
+  if (!g.__ssReviseInflight) g.__ssReviseInflight = new Map();
+  const key = `${shotId}::${targetOrders.join(",")}::${feedback}`;
+  const inflight = g.__ssReviseInflight.get(key);
+  if (inflight) return inflight;
+  const work = doReviseGroup(shotId, feedback, targetOrders).finally(() => {
+    g.__ssReviseInflight!.delete(key);
+  });
+  g.__ssReviseInflight.set(key, work);
+  return work;
+}
+
+async function doReviseGroup(
+  shotId: string,
+  feedback: string,
+  targetOrders: number[] = [],
+): Promise<RevResult> {
   try {
     const db = await getDb();
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
