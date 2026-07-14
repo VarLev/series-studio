@@ -44,3 +44,6 @@ next-env.d.ts
 # local data (PGlite + file storage)
 .data/
 
+# database/storage backups (scripts/backup-db.mjs)
+.backups/
+

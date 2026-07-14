@@ -12,7 +12,7 @@ import {
   shots,
   shotEntities,
 } from "@/lib/db";
-import { getFileUrl } from "@/lib/storage";
+import { getFileUrl, getFileUrls } from "@/lib/storage";
 import { thumbForResult } from "@/lib/poster";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
@@ -73,17 +73,24 @@ export default async function ShotPage(ctx: {
   const shotRefsAll = shotIds.length
     ? await db.select().from(references).where(inArray(references.shotId, shotIds))
     : [];
-  // референс-миниатюра шота (фолбэк, если готового видео ещё нет).
-  // slice() — чтобы не мутировать массив (ниже он ещё нужен для shotRefRows);
-  // валидный компаратор: start_frame вперёд (битый однорукий давал случайный порядок)
-  const thumbByShot = new Map<string, string>();
+  // референс-миниатюра шота (фолбэк, если готового видео ещё нет): по одному рефу
+  // на шот (start_frame вперёд), URL'ы — одним батчем (getFileUrls), а не циклом
+  // последовательных подписей. slice() — чтобы не мутировать массив (ниже он ещё
+  // нужен для shotRefRows); валидный компаратор (битый однорукий давал случайный
+  // порядок — миниатюрой мог стать не start_frame).
+  const thumbRefByShot = new Map<string, string>(); // shotId → storage_path
   for (const ref of shotRefsAll
     .slice()
     .sort((a, b) => (a.role === "start_frame" ? -1 : 0) - (b.role === "start_frame" ? -1 : 0))) {
-    if (ref.shotId && !thumbByShot.has(ref.shotId)) {
-      thumbByShot.set(ref.shotId, await getFileUrl(ref.storagePath));
+    if (ref.shotId && !thumbRefByShot.has(ref.shotId)) {
+      thumbRefByShot.set(ref.shotId, ref.storagePath);
     }
   }
+  const thumbEntries = [...thumbRefByShot.entries()];
+  const thumbUrls = await getFileUrls(thumbEntries.map(([, p]) => p));
+  const thumbByShot = new Map<string, string>(
+    thumbEntries.map(([shotId], i) => [shotId, thumbUrls[i]]),
+  );
   // основная миниатюра киноленты = кадр ФАКТИЧЕСКОГО видео: последний утверждённый
   // (★), иначе первый готовый результат (совпадает с логикой списка шотов серии)
   // узкие колонки (не тянем килобайтные params_json) + фильтр «готовый результат» в SQL
