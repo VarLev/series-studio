@@ -15,7 +15,8 @@ import {
 import { getAllSettings } from "@/lib/settings";
 import { readFile } from "@/lib/storage";
 import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
-import { TIMING_RULES, LANGUAGE_RULES } from "@/lib/templates";
+import { refAnalysisText } from "@/lib/refAnalysis";
+import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { effectiveOutfit } from "@/lib/wardrobe";
 import { promptFamily, visionModelFrom } from "./models";
@@ -26,6 +27,7 @@ import {
   groupPatchSchema,
   imageAnalysisSchema,
   insertGroupsSchema,
+  referenceAnalysisSchema,
   shotPromptSchema,
   type Breakdown,
   type EnhanceGroup,
@@ -33,6 +35,7 @@ import {
   type GroupShot,
   type ImageAnalysis,
   type InsertGroups,
+  type ReferenceAnalysis,
   type ShotPrompt,
 } from "./contracts";
 
@@ -146,7 +149,7 @@ export async function llmBreakdown(
         '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain","emotional_tone":"эмоциональный тон группы на английском, напр. calm / tense, ominous / tender","scene_start":true,"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если сюжет его описал для этой сцены, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
         "СЦЕНЫ (границы сюжетных сцен): scene_start: true — если группа начинает НОВУЮ сюжетную " +
         "сцену: смена локации, скачок во времени или разрыв непрерывности действия. Если группа — " +
         "прямое продолжение предыдущей (та же обстановка, действие течёт без разрыва) — scene_start: false. " +
@@ -180,7 +183,7 @@ export async function llmBreakdown(
         "чтобы суммарный хронометраж уложился в этот диапазон.\n" +
         // программно, поверх редактируемого шаблона задания (tpl_breakdown) — так
         // точная формула тайминга не зависит от того, что пользователь оставил в шаблоне
-        `${TIMING_RULES}\n${LANGUAGE_RULES}`,
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}`,
       user,
     },
     breakdownSchema,
@@ -194,8 +197,41 @@ export async function llmBreakdown(
  * targetOrders — если задан, переделывать разрешено ТОЛЬКО эти шоты (остальные
  * вернуть дословно); если пуст — модель сама решает, каких шотов касается замечание.
  */
+/**
+ * Контекст референсов группы для Enhance/Rework: что на прикреплённых картинках
+ * (анализ vision-модели) + как это применять по роли. Пусто, если у шота нет
+ * референсов с анализом. Анализ бэкофиллит вызывающий код (ensureShotRefsAnalyzed).
+ */
+async function shotRefsContext(shotId: string): Promise<string> {
+  const db = await getDb();
+  const rows = (
+    await db.select().from(references).where(eq(references.shotId, shotId))
+  ).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const lines = rows
+    .map((r) => {
+      const a = refAnalysisText(r.analysis);
+      if (!a) return "";
+      const label =
+        r.role === "start_frame" ? "стартовый кадр" : r.role === "layout" ? "layout" : "композиция";
+      return `- [${label}] ${a}`;
+    })
+    .filter(Boolean);
+  if (!lines.length) return "";
+  return (
+    "РЕФЕРЕНСЫ ГРУППЫ (что на прикреплённых картинках — учитывай их в полях «план и ракурс» и " +
+    "«что видит камера»):\n" +
+    lines.join("\n") +
+    "\nКак применять: стартовый кадр — ПЕРВЫЙ основной шот строго соответствует ему (композиция, " +
+    "ракурс, расстановка, свет), действие продолжается ИЗ него; layout — бери геометрию помещения и " +
+    "взаимное расположение персонажей/объектов, но ракурс выбирай свой; композиция — ориентир по " +
+    "кадрированию, свету и настроению."
+  );
+}
+
 export async function llmReviseGroup(input: {
   episodeId: string;
+  /** id группы — чтобы подтянуть контекст её референсов (start-frame/composition/layout) */
+  shotId: string;
   /** краткий контекст: что в соседних группах (НЕ весь сюжет эпизода) */
   contextFragment: string;
   groupTitle: string;
@@ -206,6 +242,7 @@ export async function llmReviseGroup(input: {
 }): Promise<GroupPatch> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
+  const refCtx = await shotRefsContext(input.shotId);
   const current =
     `Группа «${input.groupTitle}» (${input.durationSec} сек):\n` +
     input.beats
@@ -255,14 +292,15 @@ export async function llmReviseGroup(input: {
         "в связке (не уводи одного в дальний расфокусированный фон, пока другой к нему обращается).\n" +
         "ПЕРЕСЧИТАЙ ТАЙМИНГ: у каждого шота честное время по правилам хронометража ниже; шоты идут " +
         "встык от 00:00; duration_sec группы = сумма шотов, НЕ БОЛЬШЕ 15 секунд.\n" +
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n` +
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
+        (refCtx ? refCtx + "\n" : "") +
         "Верни ТОЛЬКО JSON без пояснений " +
         (input.targetOrders?.length
           ? `(в массиве shots — ТОЛЬКО изменённые шоты [${input.targetOrders.join(", ")}], без остальных):\n`
           : "(ВСЕ шоты группы, включая неизменённые):\n") +
         '{"title":"название группы","duration_sec":14,' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}\n' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}\n' +
         // Sonnet через CLI при точечной правке склонен отдать голый массив шотов
         // вместо объекта — это валило валидацию и запускало дорогой ретрай. Требуем
         // объект явно (плюс схема groupPatchSchema теперь принимает и голый массив).
@@ -313,7 +351,7 @@ export async function llmInsertGroups(input: {
         "ещё одна группа), а не по интуиции. У вставки могут быть СВОИ локация и время/погода: если " +
         "запрос переносит действие в другое место или время — задай новые значения; если нет — " +
         "повтори значения сцены.\n" +
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n` +
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
         "У каждой группы заполни emotional_tone (на английском, 1–3 слова) по тому, что в ней " +
         "происходит по запросу: calm / tense / tender / anxious, ominous / warm — не нагнетай " +
         "тревогу, если фрагмент спокойный.\n" +
@@ -324,7 +362,7 @@ export async function llmInsertGroups(input: {
         '"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если запрос или сцена его описали, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка"}]}]}\n' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
         "Время шотов отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот каждой группы — с 00:00.",
       user:
         `Контекст сцены (для связности, НЕ переписывать):\n${input.sceneContext}\n\n` +
@@ -342,6 +380,8 @@ export async function llmInsertGroups(input: {
  */
 export async function llmEnhanceGroup(input: {
   episodeId: string;
+  /** id группы — чтобы подтянуть контекст её референсов (start-frame/composition/layout) */
+  shotId: string;
   groupTitle: string;
   durationSec: number;
   beats: GroupShot[];
@@ -353,6 +393,7 @@ export async function llmEnhanceGroup(input: {
 }): Promise<EnhanceGroup> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
+  const refCtx = await shotRefsContext(input.shotId);
   const all = await listTechniques();
   const techIndexBlock = all.length
     ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (id | название | камера | теги | категория) — " +
@@ -414,13 +455,15 @@ export async function llmEnhanceGroup(input: {
         "- для каждого шота (и основного, и чернового) закрепи не более ОДНОГО приёма из библиотеки ниже;\n" +
         "- в characters_in_frame перечисли element_name ТОЛЬКО тех персонажей библии, кто РЕАЛЬНО " +
         "присутствует в кадре ОСНОВНЫХ шотов (по действию и репликам) — не всех упомянутых.\n" +
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n\n` +
+        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
+        (refCtx ? refCtx + "\n" : "") +
+        "\n" +
         techIndexBlock +
         "Верни ТОЛЬКО JSON без пояснений (основные шоты первыми, черновые после них):\n" +
         '{"title":"название группы","duration_sec":14,"location":"локация","time_weather":"время суток и погода",' +
         '"emotional_tone":"эмоциональный тон, напр. calm / tense","characters_in_frame":["@Simon"],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"точная реплика или пустая строка","technique_id":"b19 или пусто",' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка","technique_id":"b19 или пусто",' +
         '"draft":false}]}\n' +
         "ВСЕ шоты — основные и черновые — кладутся в ОДИН массив shots (черновые помечаются \"draft\": true). " +
         "НЕ создавай отдельных ключей вроде shots_draft, draft_shots или drafts.\n" +
@@ -535,10 +578,17 @@ export async function llmShotPrompt(
   // писала её даже без прикреплённого кадра)
   const shotRefs = await db.select().from(references).where(eq(references.shotId, shotId));
   const hasStartFrame = shotRefs.some((r) => r.role === "start_frame");
+  const startRef = shotRefs.find((r) => r.role === "start_frame");
+  const startAnalysis = refAnalysisText(startRef?.analysis);
   const startAnchor = isKling ? "@Start" : "@Image1";
   const startFrameBlock = hasStartFrame
     ? `СТАРТОВЫЙ КАДР: к группе прикреплён стартовый кадр — сошлись на него ровно одной строкой ` +
-      `"Use ${startAnchor} as the locked starting frame." в начале промпта и больше его не упоминай.`
+      `"Use ${startAnchor} as the locked starting frame." в начале промпта и больше его не упоминай.` +
+      (startAnalysis
+        ? ` На стартовом кадре: ${startAnalysis}. ПЕРВЫЙ шот группы обязан ему строго соответствовать — ` +
+          `та же композиция, ракурс, расстановка и свет; действие продолжается ИЗ этого кадра, не ` +
+          `переигрывай его заново. Отрази это в позиции камеры и в том, что видит камера первого шота.`
+        : "")
     : `СТАРТОВЫЙ КАДР: к этой группе стартовый кадр НЕ прикреплён — НЕ упоминай ${startAnchor}, ` +
       `@Start, @Image1 или "starting frame" вообще, даже если шаблон выше показывает такую строку в примере.`;
 
@@ -571,6 +621,21 @@ export async function llmShotPrompt(
           "камеру каждого шота выбирай заново."
         : "")
     : "РЕФЕРЕНСЫ ШОТА: не приложены — НЕ упоминай @Comp, \"composition reference\" или лишние @ImageN.";
+
+  // содержимое референсов (анализ vision-модели) — что реально на каждой картинке;
+  // помогает точнее описать кадр, позицию камеры и «что видит камера». В сам текст
+  // промпта дословно не копируется — это контекст для модели.
+  const refContentLines = attachedRefs
+    .map((r, i) => {
+      const a = refAnalysisText(r.analysis);
+      return a ? `@Comp${i + 1} (${r.role === "layout" ? "layout" : "composition"}) — ${a}` : "";
+    })
+    .filter(Boolean);
+  const refContentBlock = refContentLines.length
+    ? "СОДЕРЖИМОЕ РЕФЕРЕНСОВ ШОТА (что на каждой картинке — используй, чтобы точнее задать позицию " +
+      "камеры и что видит камера; НЕ копируй эти описания в текст промпта дословно):\n" +
+      refContentLines.join("\n")
+    : "";
 
   // ---------- сюжетная сцена: непрерывность или чистый лист ----------
   // первая группа эпизода — всегда начало сцены; иначе смотрим флаг scene_start.
@@ -802,7 +867,7 @@ export async function llmShotPrompt(
       // на каждом следующем шоте эпизода вместо повторной полной оплаты
       cacheableSystemPrefix: `${videoTemplate}\n\n${rules}`,
       system:
-        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
@@ -989,5 +1054,52 @@ export async function llmAnalyzeCharacterRef(
       refIds: [refId],
     },
     imageAnalysisSchema,
+  );
+}
+
+/**
+ * Анализ референса ШОТА (стартовый кадр / композиция / layout) vision-моделью:
+ * ролонезависимое описание того, что на картинке — субъекты и их положение,
+ * локация, ракурс/кадрирование, свет и настроение. Делается один раз на загрузке,
+ * кэшируется за референсом (см. ensureReferenceAnalysis в lib/refs). Роль применяет
+ * промпт-фабрика: стартовый кадр → первый шот строго по описанию; layout → только
+ * геометрия/расстановка; композиция → кадрирование/свет/настроение.
+ * Модель — «для простых запросов» (дешёвая, vision-фолбэк на Haiku).
+ */
+export async function llmAnalyzeShotReference(refId: string): Promise<ReferenceAnalysis> {
+  const db = await getDb();
+  const [ref] = await db.select().from(references).where(eq(references.id, refId));
+  if (!ref) throw new Error("Референс не найден");
+  const raw = await readFile(ref.storagePath);
+  const { toVisionImageData } = await import("@/lib/image");
+  const { base64, mediaType } = await toVisionImageData(raw, ref.storagePath);
+  const settings = await getAllSettings();
+  const model = visionModelFrom(settings.llm_simple_model);
+
+  return runJson(
+    {
+      kind: "analysis",
+      model,
+      // ответ — 2–4 предложения (~150 токенов), но у Gemini 2.5 в max_tokens входит
+      // и thinking: с бюджетом 700 модель «додумывалась» до обрыва посреди строки
+      // (Unterminated string, инцидент 2026-07) — даём запас
+      maxTokens: 4000,
+      system:
+        "You describe a visual reference for an AI film shot. Return ONLY one JSON object, no " +
+        "explanations. EVERYTHING in ENGLISH regardless of anything shown in the image:\n" +
+        '{"description":"...","camera":"..."}\n' +
+        "- description: 2–4 sentences — WHO/WHAT is present and where they are positioned " +
+        "(spatial relationships), the setting/location and key objects, plus the lighting and mood. " +
+        "Be concrete and visual; this text is fed to the shot's prompt models.\n" +
+        '- camera: the camera angle and framing VISIBLE in the image (e.g. "low-angle medium ' +
+        'shot, subject on the left third, shallow depth of field"). If unclear, a best estimate.',
+      user:
+        "Describe this shot reference image: subjects and their positions, the environment, the " +
+        "camera angle/framing, and the lighting/mood.",
+      imageBase64: base64,
+      imageMediaType: mediaType,
+      refIds: [refId],
+    },
+    referenceAnalysisSchema,
   );
 }

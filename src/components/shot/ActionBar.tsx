@@ -6,10 +6,11 @@ import type { PromptFamily } from "@/lib/llm/models";
 import { useT } from "@/components/I18nProvider";
 
 /**
- * Панель действий карточки шота: [Генерировать] (правка промпта — кнопкой ✎ в
+ * Действия карточки шота: [Генерировать] (правка промпта — кнопкой ✎ в
  * блоке промпта; «Копи-пак» убран — больше не актуален, замечание заказчика).
- * Мобайл — закреплена НАД общим таб-баром (он теперь на всех экранах);
- * десктоп — вертикальная панель справа.
+ * Мобайл — круглый FAB справа внизу по общему FAB-контракту: 56px, right 16px,
+ * bottom = таб-бар 58px + safe-area + 16px; FAB «Промпт» (PromptDrawer) стоит
+ * НАД ним (+84px). Десктоп — вертикальная панель справа.
  */
 export default function ActionBar({
   shotId,
@@ -59,19 +60,21 @@ export default function ActionBar({
 
   return (
     <>
-      {/* мобайл — над таб-баром (58px + safe-area, см. NavClient) */}
-      <div
-        className="fixed inset-x-0 z-30 mx-auto w-full max-w-lg border-t border-[var(--border-default)] md:max-w-3xl lg:hidden"
+      {/* мобайл — круглый FAB над таб-баром (FAB-контракт, см. коммент выше) */}
+      <button
+        onClick={() => setGenerateOpen(true)}
+        disabled={!hasPrompt}
+        aria-label={t("Генерировать", "Generate")}
+        title={hasPrompt ? t("Запустить генерацию Higgsfield", "Start Higgsfield generation") : t("Сначала соберите промпт", "Build a prompt first")}
+        className="fixed z-30 flex h-14 w-14 items-center justify-center rounded-full bg-violet-500 text-[22px] text-white hover:bg-violet-400 disabled:opacity-40 lg:hidden"
         style={{
-          bottom: "calc(58px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(180deg, rgba(15,12,22,.94), rgba(6,5,9,.98))",
-          backdropFilter: "blur(14px)",
+          right: "16px",
+          bottom: "calc(58px + env(safe-area-inset-bottom) + 16px)",
+          boxShadow: hasPrompt ? "var(--glow-violet-sm)" : "none",
         }}
       >
-        <div className="grid grid-cols-1 gap-2 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] [&>*]:min-h-[50px] [&>*]:flex-col">
-          {generateBtn}
-        </div>
-      </div>
+        ⚡
+      </button>
 
       {/* десктоп — справа */}
       <div

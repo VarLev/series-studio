@@ -172,6 +172,7 @@ ALTER TABLE shots ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT '';
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS time_weather text NOT NULL DEFAULT '';
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS is_insert boolean NOT NULL DEFAULT false;
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS emotional_tone text NOT NULL DEFAULT '';
+ALTER TABLE "references" ADD COLUMN IF NOT EXISTS analysis text NOT NULL DEFAULT '';
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

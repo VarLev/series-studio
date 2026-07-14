@@ -9,7 +9,9 @@ import {
   attachReferenceToShot,
   detachShotReference,
   setShotReferenceRole,
+  analyzeShotReference,
 } from "@/lib/actions/shots";
+import { parseRefAnalysis } from "@/lib/refAnalysis";
 import { useT } from "@/components/I18nProvider";
 import type { ImageModelMeta } from "@/lib/imageModels";
 
@@ -20,6 +22,8 @@ interface ShotRef {
   role: "start_frame" | "composition" | "layout";
   /** якорь в тексте промпта: @Start | @Comp1..N — связь картинки с промптом */
   anchor: string;
+  /** анализ изображения (JSON {description,camera}) — показывается в слайдере деталей */
+  analysis: string;
 }
 
 interface PickerRef {
@@ -60,6 +64,31 @@ export default function ShotRefs({
   const [, startTransition] = useTransition();
   const roleLabel = (role: keyof typeof ROLE_LABEL) => t(ROLE_LABEL[role].ru, ROLE_LABEL[role].en);
 
+  // слайдер деталей референса: тап по миниатюре открывает его анализ
+  const [detailFor, setDetailFor] = useState<ShotRef | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  // локальные анализы (перекрывают props после дозапроса); ключ — id референса
+  const [analyses, setAnalyses] = useState<Record<string, string>>({});
+  const analysisOf = (r: ShotRef) => analyses[r.id] ?? r.analysis;
+
+  async function openDetail(r: ShotRef) {
+    setDetailFor(r);
+    if (analysisOf(r).trim()) return; // анализ уже есть — показываем сразу
+    // пусто → запрашиваем (vision-модель или кэш по файлу); слайдер покажет спиннер
+    setAnalyzing(true);
+    try {
+      const res = await analyzeShotReference(r.id);
+      if (res.ok) setAnalyses((p) => ({ ...p, [r.id]: res.analysis }));
+      else toast(res.error);
+    } catch {
+      toast(t("Не удалось получить анализ", "Failed to get the analysis"));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  const detailParsed = detailFor ? parseRefAnalysis(analysisOf(detailFor)) : null;
+
   function attach(refId: string) {
     startTransition(async () => {
       await attachReferenceToShot(shotId, refId, "composition");
@@ -78,11 +107,22 @@ export default function ShotRefs({
                 borderColor: r.role === "start_frame" ? "rgba(192,138,62,.55)" : "var(--border-default)",
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+              {/* тап по миниатюре → слайдер с подробной инфой (анализ референса) */}
               <button
-                onClick={() => setRoleFor(r)}
-                className="absolute left-0.5 top-0.5 rounded-[3px] border px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em]"
+                type="button"
+                onClick={() => openDetail(r)}
+                aria-label={t("Открыть детали референса", "Open reference details")}
+                className="absolute inset-0 h-full w-full"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRoleFor(r);
+                }}
+                className="absolute left-0.5 top-0.5 z-10 rounded-[3px] border px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em]"
                 style={{
                   background: "rgba(6,5,9,.8)",
                   color:
@@ -101,6 +141,10 @@ export default function ShotRefs({
               >
                 {roleLabel(r.role)}
               </button>
+              {/* значок «инфо» — намёк, что по миниатюре есть детали */}
+              <span className="pointer-events-none absolute bottom-0.5 right-0.5 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[rgba(6,5,9,.8)] text-[8px] font-semibold text-t200">
+                ⓘ
+              </span>
             </div>
             <div className="mt-1 truncate font-mono text-[8.5px] text-t400">
               {/* якорь = имя референса в тексте промпта (@Comp1 / @Start) */}
@@ -275,6 +319,85 @@ export default function ShotRefs({
             label={t("Загрузить файл с устройства", "Upload a file from device")}
           />
         </div>
+      </Sheet>
+
+      {/* Слайдер деталей референса: крупная картинка + сохранённый анализ */}
+      <Sheet
+        open={Boolean(detailFor)}
+        onClose={() => setDetailFor(null)}
+        title={t("Референс шота", "Shot reference")}
+      >
+        {detailFor && (
+          <div className="flex flex-col gap-3 pb-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={detailFor.url}
+              alt={detailFor.caption}
+              className="max-h-[44vh] w-full rounded-lg border border-[var(--border-subtle)] object-contain"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className="rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em]"
+                style={{
+                  color:
+                    detailFor.role === "start_frame"
+                      ? "var(--warning)"
+                      : detailFor.role === "layout"
+                        ? "#6fc3d4"
+                        : "var(--violet-200)",
+                  borderColor:
+                    detailFor.role === "start_frame"
+                      ? "rgba(192,138,62,.5)"
+                      : detailFor.role === "layout"
+                        ? "rgba(111,195,212,.5)"
+                        : "rgba(139,95,176,.5)",
+                }}
+              >
+                {roleLabel(detailFor.role)}
+              </span>
+              {detailFor.anchor && (
+                <span className="font-mono text-[10px] font-semibold text-violet-200">
+                  {detailFor.anchor}
+                </span>
+              )}
+              {detailFor.caption && (
+                <span className="text-[11px] text-t300">{detailFor.caption}</span>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3">
+              <div className="section-label mb-1.5">{t("Анализ изображения", "Image analysis")}</div>
+              {analyzing ? (
+                <div className="text-[11px] text-t400">
+                  {t("Анализирую изображение…", "Analyzing the image…")}
+                </div>
+              ) : detailParsed ? (
+                <div className="flex flex-col gap-1.5 text-[12px] leading-relaxed text-t200">
+                  {detailParsed.description && <div>{detailParsed.description}</div>}
+                  {detailParsed.camera && (
+                    <div className="text-t400">
+                      <span className="font-mono text-[9px] uppercase tracking-[0.1em]">
+                        {t("камера", "camera")}:
+                      </span>{" "}
+                      {detailParsed.camera}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[11px] text-t400">
+                  {t("Анализа пока нет.", "No analysis yet.")}
+                </div>
+              )}
+            </div>
+
+            <div className="text-[10px] leading-snug text-t400">
+              {t(
+                "Описание сохранено за референсом и уходит в Enhance и Rework. Открепление и повторное добавление в шот анализ заново не запускают.",
+                "The description is stored with the reference and fed to Enhance and Rework. Detaching and re-adding to the shot won't re-run the analysis.",
+              )}
+            </div>
+          </div>
+        )}
       </Sheet>
 
       <NanoBananaSheet

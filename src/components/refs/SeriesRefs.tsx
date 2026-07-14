@@ -13,6 +13,8 @@ import { toast } from "@/components/Toaster";
 import { upscaleReference, editReference } from "@/lib/actions/generate";
 import { deleteReference, updateReferenceCaption } from "@/lib/actions/entities";
 import { deleteAllSeriesRefs } from "@/lib/actions/deletes";
+import { analyzeShotReference } from "@/lib/actions/shots";
+import { parseRefAnalysis } from "@/lib/refAnalysis";
 import { EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import { useT } from "@/components/I18nProvider";
@@ -26,6 +28,8 @@ export interface SeriesRef {
   source: string;
   width: number | null;
   height: number | null;
+  /** анализ изображения (JSON {description,camera}) — показывается в детальном просмотре */
+  analysis: string;
 }
 
 const SOURCE_LABEL: Record<string, { ru: string; en: string }> = {
@@ -88,12 +92,30 @@ export default function SeriesRefs({
   const [extraRefs, setExtraRefs] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
   const [pending, startTransition] = useTransition();
+  // анализ изображения: локальные результаты дозапроса перекрывают props
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyses, setAnalyses] = useState<Record<string, string>>({});
+  const analysisOf = (r: SeriesRef) => analyses[r.id] ?? r.analysis;
 
-  function openDetail(ref: SeriesRef) {
+  async function openDetail(ref: SeriesRef) {
     setSelected(ref);
     setCaption(ref.caption);
     setEditOpen(false);
+    if (analysisOf(ref).trim()) return; // анализ уже есть — показываем сразу
+    // пусто → запрашиваем (vision-модель или кэш по файлу); просмотр покажет спиннер
+    setAnalyzing(true);
+    try {
+      const res = await analyzeShotReference(ref.id);
+      if (res.ok) setAnalyses((p) => ({ ...p, [ref.id]: res.analysis }));
+      else toast(res.error);
+    } catch {
+      toast(t("Не удалось получить анализ", "Failed to get the analysis"));
+    } finally {
+      setAnalyzing(false);
+    }
   }
+
+  const selectedParsed = selected ? parseRefAnalysis(analysisOf(selected)) : null;
 
   function doUpscale() {
     if (!selected) return;
@@ -248,6 +270,31 @@ export default function SeriesRefs({
               >
                 ✓
               </button>
+            </div>
+            {/* анализ изображения — тот же, что в слайдере референсов шота */}
+            <div className="rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3">
+              <div className="section-label mb-1.5">{t("Анализ изображения", "Image analysis")}</div>
+              {analyzing ? (
+                <div className="text-[11px] text-t400">
+                  {t("Анализирую изображение…", "Analyzing the image…")}
+                </div>
+              ) : selectedParsed ? (
+                <div className="flex flex-col gap-1.5 text-[12px] leading-relaxed text-t200">
+                  {selectedParsed.description && <div>{selectedParsed.description}</div>}
+                  {selectedParsed.camera && (
+                    <div className="text-t400">
+                      <span className="font-mono text-[9px] uppercase tracking-[0.1em]">
+                        {t("камера", "camera")}:
+                      </span>{" "}
+                      {selectedParsed.camera}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[11px] text-t400">
+                  {t("Анализа пока нет.", "No analysis yet.")}
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button

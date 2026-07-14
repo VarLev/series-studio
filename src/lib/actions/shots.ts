@@ -13,6 +13,7 @@ import {
   sceneChainOf,
 } from "@/lib/beats";
 import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
+import { ensureShotRefsAnalyzed } from "@/lib/refs";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
 import { listTechniques } from "@/lib/director";
 import { stripAt } from "@/lib/entityName";
@@ -174,9 +175,12 @@ async function doReviseGroup(
     const validOrders = new Set(mainCurrent.map((b) => b.order));
     const scoped = targetOrders.filter((o) => validOrders.has(o));
 
+    // догоняем анализ референсов группы, чтобы реворк учитывал их контекст
+    await ensureShotRefsAnalyzed(shotId);
     // модель и канал заданы в llmReviseGroup: всегда Claude через CLI (подписка)
     const patch = await llmReviseGroup({
       episodeId: shot.episodeId,
+      shotId,
       contextFragment,
       groupTitle: shot.title,
       durationSec: shot.durationSec,
@@ -272,8 +276,11 @@ export async function enhanceGroup(
       .filter(Boolean)
       .join("\n");
 
+    // догоняем анализ референсов группы, чтобы Enhance учитывал их контекст
+    await ensureShotRefsAnalyzed(shotId);
     const res = await llmEnhanceGroup({
       episodeId: shot.episodeId,
+      shotId,
       groupTitle: shot.title,
       durationSec: shot.durationSec,
       beats: currentBeats,
@@ -704,19 +711,52 @@ export async function attachReferenceToShot(
       .set({ role: "composition" })
       .where(and(eq(references.shotId, shotId), eq(references.role, "start_frame")));
   }
+  const copyId = crypto.randomUUID();
   await db.insert(references).values({
-    id: crypto.randomUUID(),
+    id: copyId,
     shotId,
     entityId: ref.entityId,
     storagePath: ref.storagePath,
     caption: ref.caption || ref.token || "",
+    // копируем готовый анализ оригинала (реаттач не перезапускает vision-модель)
+    analysis: ref.analysis ?? "",
     source: ref.source,
     role,
     width: ref.width,
     height: ref.height,
   });
+  // если у оригинала анализа ещё не было — разберём картинку ФОНОМ. Ожидание
+  // vision-вызова здесь держало server action до минуты (ретраи Gemini), и
+  // миниатюра появлялась только после него без всякого отклика. Слайдер деталей
+  // и Enhance/Rework дозапросят анализ сами (ensureShotRefsAnalyzed).
+  const { ensureReferenceAnalysis } = await import("@/lib/refs");
+  void ensureReferenceAnalysis(copyId).catch(() => {});
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, shotId));
+}
+
+/**
+ * Ручной/фоновый запрос анализа референса (слайдер деталей референса): если анализ
+ * ещё пуст — запускает vision-модель (или берёт кэш по файлу) и возвращает текст.
+ */
+export async function analyzeShotReference(
+  referenceId: string,
+): Promise<{ ok: true; analysis: string } | { ok: false; error: string }> {
+  await requireAuth();
+  try {
+    const { ensureReferenceAnalysis } = await import("@/lib/refs");
+    await ensureReferenceAnalysis(referenceId);
+    const db = await getDb();
+    const [ref] = await db.select().from(references).where(eq(references.id, referenceId));
+    const [shot] = ref?.shotId
+      ? await db.select().from(shots).where(eq(shots.id, ref.shotId))
+      : [];
+    if (shot) revalidatePath(shotPath(shot.episodeId, shot.id));
+    return { ok: true, analysis: ref?.analysis ?? "" };
+  } catch (err) {
+    console.error("analyzeShotReference failed:", err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function detachShotReference(referenceId: string): Promise<void> {

@@ -141,6 +141,20 @@ export const techniquePickSchema = z.object({
   ids: z.array(z.string()).default([]),
 });
 
+/**
+ * Анализ референса шота (стартовый кадр / композиция / layout) vision-моделью.
+ * Ролонезависимое описание того, что на картинке — роль применяет промпт-фабрика.
+ */
+export const referenceAnalysisSchema = z.object({
+  // цельное описание на английском: субъекты и их положение, локация/обстановка,
+  // свет и настроение — одним компактным абзацем (2–4 предложения)
+  description: z.string().default(""),
+  // ракурс и кадрирование, ВИДИМЫЕ на картинке (напр. "low-angle medium shot,
+  // subject on the left third") — нужно для стартового кадра и композиции
+  camera: z.string().default(""),
+});
+export type ReferenceAnalysis = z.infer<typeof referenceAnalysisSchema>;
+
 /** Анализ референса персонажа (кнопка «Анализ» в библии, vision-модель). */
 export const imageAnalysisSchema = z.object({
   name: z.string().default(""), // имя сущности на английском (транслит собственных имён)

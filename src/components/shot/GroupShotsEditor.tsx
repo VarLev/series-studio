@@ -54,6 +54,25 @@ const MIN_BEAT_SEC = 1;
 const MAX_GROUP_SEC = 15;
 const TIME_RE = /(\d{1,2}):(\d{2})\s*[–—-]\s*(\d{1,2}):(\d{2})/;
 
+// свайп влево по карточке шота переносит его между Main/Draft (замечание заказчика):
+// SWIPE_ARM — порог, после которого жест распознаётся как горизонтальный (а не
+// скролл/долгое нажатие); SWIPE_TRIGGER — сдвиг влево, после которого перенос срабатывает
+const SWIPE_ARM = 14;
+const SWIPE_TRIGGER = 56;
+
+/**
+ * Строки диалога для отображения. Реплики нескольких персонажей приходят в
+ * формате «[Имя]: -фраза» построчно (см. шаблоны разбивки/enhance/rework) —
+ * разбиваем по переводам строк, пустые отбрасываем. Старый формат (одна строка
+ * без переносов) возвращается как единственная строка — обратная совместимость.
+ */
+function dialogueLines(s: string): string[] {
+  return s
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
 // та же логика, что parseTimeRange/fmtTime в lib/beats.ts — дублируем локально
 // (не тянем @/lib/beats в клиентский бандл: там же серверный @/lib/db)
 function beatSeconds(b: GroupShot): number {
@@ -208,8 +227,9 @@ export default function GroupShotsEditor({
   );
   const [error, setError] = useState("");
   const [saving, startSave] = useTransition();
-  // спойлер «Draft Shots»: раскрыт, если черновики уже есть; пустой — свёрнут
-  const [draftsOpen, setDraftsOpen] = useState(() => initialBeats.some((b) => b.draft));
+  // спойлер «Draft Shots»: ВСЕГДА свёрнут по умолчанию (замечание заказчика).
+  // Раскрывается только явным действием — тап по шапке, «+ Черновик», перенос сюда.
+  const [draftsOpen, setDraftsOpen] = useState(false);
   // пикер ручного закрепления приёма: индекс шота (в массиве beats) + поиск
   const [pickBeat, setPickBeat] = useState<number | null>(null);
   const [pickQuery, setPickQuery] = useState("");
@@ -372,6 +392,9 @@ export default function GroupShotsEditor({
 
   // шоты, добавленные в Rework (правка ограничивается ими); порядок добавления
   const [reworkOrders, setReworkOrders] = useState<number[]>([]);
+  // спойлер Rework: свёрнут по умолчанию (замечание заказчика). Во время
+  // перетаскивания раскрывается сам — иначе шот некуда бросить (drop-зона внутри).
+  const [reworkOpen, setReworkOpen] = useState(false);
   // перетаскивание: ghost под пальцем + подсветка drop-зоны
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragActive = useRef(false); // синхронный флаг (без гонок со стейтом)
@@ -379,6 +402,28 @@ export default function GroupShotsEditor({
   const lp = useRef<
     { timer?: ReturnType<typeof setTimeout>; order: number; x: number; y: number; pointerId: number; el: HTMLElement } | null
   >(null);
+  // свайп влево по карточке (перенос Main↔Draft, #1): dx для сдвига карточки под
+  // пальцем; swiping — синхронный флаг активного свайпа (как dragActive)
+  const [swipe, setSwipe] = useState<{ order: number; dx: number } | null>(null);
+  const swiping = useRef(false);
+  // раскрытые в полную высоту карточки шотов (#6): свёрнутые показывают по одной
+  // строке с обрезкой …, тап по карточке раскрывает/сворачивает. Ключ — order шота.
+  const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
+  function toggleExpand(order: number) {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(order)) next.delete(order);
+      else next.add(order);
+      return next;
+    });
+  }
+  // перенос шота в противоположную область по свайпу влево (Main↔Draft). Все
+  // проверки (последний основной, лимит 15с) и автосейв — внутри moveBeat.
+  function swipeToOtherArea(order: number) {
+    const b = beats.find((x) => x.order === order);
+    if (!b) return;
+    moveBeat(order, b.draft ? "main" : "draft", null);
+  }
 
   // после reviseGroup сервер отдаёт новые шоты — принимаем их, если нет своих
   // правок И нет открытой карточки. Иначе периодический router.refresh (GenPoller
@@ -405,25 +450,44 @@ export default function GroupShotsEditor({
 
   useEffect(() => () => { if (lp.current?.timer) clearTimeout(lp.current.timer); }, []);
 
-  // единая точка сохранения шотов группы (кнопка «Сохранить», закрытие карточки ✓)
-  function persist(next: GroupShot[] = beats) {
-    startSave(async () => {
-      try {
-        await updateGroupBeats(shotId, next);
-        setDirty(false);
-        toast(t("Шоты сохранены", "Shots saved"));
-      } catch (err) {
-        console.error("beats save failed:", err);
-        setDirty(true); // осталось локально — сохранится кнопкой «Сохранить шоты»
+  // единая точка сохранения шотов группы (закрытие карточки ✓, перенос, правка приёма).
+  // Кнопка «Сохранить шоты» убрана (замечание заказчика) — вместо неё автосейв на
+  // каждое действие + тихое самовосстановление ниже (эффект по dirty), чтобы правки
+  // не терялись при обрыве туннеля уже без ручной кнопки.
+  async function persistNow(next: GroupShot[], silent = false): Promise<boolean> {
+    try {
+      await updateGroupBeats(shotId, next);
+      setDirty(false);
+      if (!silent) toast(t("Шоты сохранены", "Shots saved"));
+      return true;
+    } catch (err) {
+      console.error("beats save failed:", err);
+      setDirty(true); // осталось локально — подхватит авто-повтор ниже
+      if (!silent)
         toast(
           t(
-            "Не сохранилось (сеть?) — нажмите «Сохранить шоты»",
-            "Save failed (network?) — press “Save shots”",
+            "Не сохранилось (сеть?) — повторю автоматически",
+            "Save failed (network?) — retrying automatically",
           ),
         );
-      }
+      return false;
+    }
+  }
+  function persist(next: GroupShot[] = beats) {
+    startSave(async () => {
+      await persistNow(next);
     });
   }
+
+  // самовосстановление автосейва вместо кнопки «Сохранить шоты»: если правки
+  // остались несохранёнными (обрыв туннеля) и ни одна карточка не открыта на
+  // редактирование — тихо повторяем сохранение, пока не пройдёт.
+  useEffect(() => {
+    if (!dirty || editing.size > 0 || saving) return;
+    const id = setTimeout(() => void persistNow(beats, true), 2500);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, editing, saving, beats]);
 
   function toggleEdit(i: number) {
     const closing = editing.has(i); // ✓ на открытой карточке = «готово»
@@ -519,11 +583,11 @@ export default function GroupShotsEditor({
         toast(t("Приём снят с шота", "Technique removed"));
       } catch (err) {
         console.error("remove technique failed:", err);
-        setDirty(true); // осталось локально — сохранится кнопкой «Сохранить шоты»
+        setDirty(true); // осталось локально — подхватит авто-повтор
         toast(
           t(
-            "Не сохранилось (сеть?) — нажмите «Сохранить шоты»",
-            "Save failed (network?) — press “Save shots”",
+            "Не сохранилось (сеть?) — повторю автоматически",
+            "Save failed (network?) — retrying automatically",
           ),
         );
       }
@@ -544,11 +608,11 @@ export default function GroupShotsEditor({
         toast(t("Приём закреплён за шотом", "Technique attached"));
       } catch (err) {
         console.error("attach technique failed:", err);
-        setDirty(true); // осталось локально — сохранится кнопкой «Сохранить шоты»
+        setDirty(true); // осталось локально — подхватит авто-повтор
         toast(
           t(
-            "Не сохранилось (сеть?) — нажмите «Сохранить шоты»",
-            "Save failed (network?) — press “Save shots”",
+            "Не сохранилось (сеть?) — повторю автоматически",
+            "Save failed (network?) — retrying automatically",
           ),
         );
       }
@@ -596,6 +660,7 @@ export default function GroupShotsEditor({
     }
     setBeats(next);
     setEditing(new Set());
+    setExpandedCards(new Set()); // order шотов переназначились — сбрасываем раскрытие
     if (toDraft) setDraftsOpen(true); // перенос в черновики — раскрываем спойлер
     startSave(async () => {
       // reject внутри транзиции уронил бы страницу в error boundary — ловим сами
@@ -605,20 +670,15 @@ export default function GroupShotsEditor({
         toast(t("Перенесено · сохранено", "Moved · saved"));
       } catch (err) {
         console.error("beat move autosave failed:", err);
-        setDirty(true); // изменение осталось локально — сохранится кнопкой
+        setDirty(true); // изменение осталось локально — подхватит авто-повтор
         toast(
           t(
-            "Перенос не сохранился (сеть?) — нажмите «Сохранить шоты»",
-            "Move not saved (network?) — press “Save shots”",
+            "Перенос не сохранился (сеть?) — повторю автоматически",
+            "Move not saved (network?) — retrying automatically",
           ),
         );
       }
     });
-  }
-
-  function save() {
-    setEditing(new Set());
-    persist();
   }
 
   // ---------- Drag & drop шотов в Rework ----------
@@ -638,6 +698,7 @@ export default function GroupShotsEditor({
       return;
     }
     setReworkOrders((prev) => (prev.includes(order) ? prev : [...prev, order]));
+    setReworkOpen(true); // добавили шот — раскрываем, чтобы виден был чип и замечание
   }
   function removeRework(order: number) {
     setReworkOrders((prev) => prev.filter((o) => o !== order));
@@ -665,9 +726,25 @@ export default function GroupShotsEditor({
       setDrag((d) => (d ? { ...d, x, y, over: isOverDrop(x, y) } : d));
       return;
     }
+    // активный свайп влево — двигаем карточку под пальцем (только влево)
+    if (swiping.current && lp.current) {
+      setSwipe({ order: lp.current.order, dx: Math.min(0, e.clientX - lp.current.x) });
+      return;
+    }
     if (lp.current) {
-      // сдвинулись до срабатывания долгого нажатия → это скролл, отменяем захват
-      if (Math.hypot(e.clientX - lp.current.x, e.clientY - lp.current.y) > 10) {
+      const dx = e.clientX - lp.current.x;
+      const dy = e.clientY - lp.current.y;
+      // горизонталь доминирует → свайп переноса Main↔Draft (не скролл, не долгое нажатие)
+      if (Math.abs(dx) >= SWIPE_ARM && Math.abs(dx) > Math.abs(dy)) {
+        if (lp.current.timer) clearTimeout(lp.current.timer);
+        swiping.current = true;
+        try { lp.current.el.setPointerCapture(lp.current.pointerId); } catch {}
+        if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges();
+        setSwipe({ order: lp.current.order, dx: Math.min(0, dx) });
+        return;
+      }
+      // вертикаль → это скролл, отменяем захват (долгое нажатие не сработает)
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
         if (lp.current.timer) clearTimeout(lp.current.timer);
         lp.current = null;
       }
@@ -714,6 +791,52 @@ export default function GroupShotsEditor({
       setDrag(null);
     }
     lp.current = null;
+  }
+
+  // pointerup по карточке: завершение свайпа (перенос области), либо drag-drop,
+  // либо — быстрый тап без смещения — раскрытие/сворачивание карточки (#6)
+  function onCardPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (swiping.current) {
+      const order = lp.current?.order;
+      const dx = e.clientX - (lp.current?.x ?? e.clientX);
+      try { lp.current?.el.releasePointerCapture(e.pointerId); } catch {}
+      if (lp.current?.timer) clearTimeout(lp.current.timer);
+      swiping.current = false;
+      setSwipe(null);
+      lp.current = null;
+      if (order != null && dx <= -SWIPE_TRIGGER) {
+        try {
+          swipeToOtherArea(order);
+        } catch (err) {
+          console.error("beat swipe move failed:", err);
+          toast(`Swipe: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      return;
+    }
+    if (dragActive.current) {
+      endDrag(e, true);
+      return;
+    }
+    // ни драг, ни свайп: быстрый тап с малым смещением → тумблер раскрытия карточки
+    if (lp.current) {
+      if (lp.current.timer) clearTimeout(lp.current.timer);
+      const moved = Math.hypot(e.clientX - lp.current.x, e.clientY - lp.current.y);
+      const order = lp.current.order;
+      lp.current = null;
+      if (moved < 10) toggleExpand(order);
+    }
+  }
+  function onCardPointerCancel(e: React.PointerEvent<HTMLDivElement>) {
+    if (swiping.current) {
+      try { lp.current?.el.releasePointerCapture(e.pointerId); } catch {}
+      swiping.current = false;
+      setSwipe(null);
+      if (lp.current?.timer) clearTimeout(lp.current.timer);
+      lp.current = null;
+      return;
+    }
+    endDrag(e, false);
   }
 
   // самовосстановление Rework: вызов через CLI долгий, ответ server action может
@@ -1026,15 +1149,25 @@ export default function GroupShotsEditor({
         const isEditing = editing.has(i);
         const inRework = validRework.includes(b.order);
         const isDragged = drag?.order === b.order;
+        const isExpanded = expandedCards.has(b.order);
+        const isSwiping = swipe?.order === b.order;
+        // строки диалога (мультиперсонажный формат) + эвристика «есть что раскрывать»:
+        // шеврон-подсказку показываем только когда в свёрнутом виде что-то прячется
+        const dl = dialogueLines(b.dialogue);
+        const hasMore =
+          b.action.length > 42 ||
+          b.framing.length + b.camera.length > 42 ||
+          dl.length > 1 ||
+          (dl[0]?.length ?? 0) > 42;
         return (
           <div
             key={i}
             data-beat-idx={i}
             onPointerDown={(e) => onCardPointerDown(e, b.order, isEditing)}
             onPointerMove={onCardPointerMove}
-            onPointerUp={(e) => endDrag(e, true)}
-            onPointerCancel={(e) => endDrag(e, false)}
-            className={`drag-src rounded-lg border p-2.5 transition-opacity ${
+            onPointerUp={onCardPointerUp}
+            onPointerCancel={onCardPointerCancel}
+            className={`drag-src relative overflow-hidden rounded-lg border p-2.5 transition-opacity ${
               b.draft ? "draft-hatch bg-ink-800" : "bg-ink-700"
             }`}
             style={{
@@ -1042,8 +1175,18 @@ export default function GroupShotsEditor({
               opacity: isDragged ? 0.45 : 1,
               cursor: isEditing ? "auto" : "grab",
               touchAction: drag ? "none" : "pan-y",
+              transform: isSwiping ? `translateX(${swipe!.dx}px)` : undefined,
             }}
           >
+            {/* индикатор свайпа влево → перенос в другую область (Main↔Draft) */}
+            {isSwiping && (
+              <span
+                className="pointer-events-none absolute inset-y-0 right-0 flex items-center rounded-l-lg bg-[rgba(139,95,176,.9)] px-2 text-[9px] font-semibold uppercase tracking-[0.08em] text-white"
+                style={{ opacity: Math.min(1, Math.abs(swipe!.dx) / SWIPE_TRIGGER) }}
+              >
+                → {b.draft ? "Main" : "Draft"}
+              </span>
+            )}
             <div className="mb-1 flex items-center gap-2">
               {!isEditing && <span className="select-none text-[11px] leading-none text-t400">⠿</span>}
               <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
@@ -1144,19 +1287,37 @@ export default function GroupShotsEditor({
 
             {isEditing ? (
               <div className="flex flex-col gap-1.5">
+                {/* Длительность — степпер −/+, а не controlled type=number: на мобиле
+                    контролируемый number с производным и обрезаемым значением «не
+                    менялся» (при основных шотах на пределе 15с правка откатывалась,
+                    и цифра не двигалась — замечание заказчика). Степпер надёжен. */}
                 <div className="flex items-center gap-2">
                   <span className="shrink-0 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-t400">
                     {t("Длительность, сек", "Duration, sec")}
                   </span>
-                  <input
-                    type="number"
-                    min={MIN_BEAT_SEC}
-                    max={MAX_GROUP_SEC}
-                    step={1}
-                    value={beatSeconds(b)}
-                    onChange={(e) => setBeatDuration(i, Number(e.target.value))}
-                    className={`${fieldCls} w-20 font-mono text-[11px] text-t200`}
-                  />
+                  <div className="flex items-stretch overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-800">
+                    <button
+                      type="button"
+                      aria-label={t("Меньше на секунду", "One second less")}
+                      onClick={() => setBeatDuration(i, beatSeconds(b) - 1)}
+                      disabled={beatSeconds(b) <= MIN_BEAT_SEC}
+                      className="flex h-9 w-9 items-center justify-center text-[16px] leading-none text-t200 hover:bg-ink-600 hover:text-t100 disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                    <span className="flex h-9 min-w-[42px] items-center justify-center border-x border-[var(--border-subtle)] px-1 font-mono text-[13px] font-semibold text-t100">
+                      {beatSeconds(b)}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={t("Больше на секунду", "One second more")}
+                      onClick={() => setBeatDuration(i, beatSeconds(b) + 1)}
+                      className="flex h-9 w-9 items-center justify-center text-[16px] leading-none text-t200 hover:bg-ink-600 hover:text-t100"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <span className="font-mono text-[9.5px] text-t400">{t("сек", "sec")}</span>
                 </div>
                 <input
                   value={b.framing}
@@ -1177,28 +1338,55 @@ export default function GroupShotsEditor({
                   placeholder={t("Действие и эмоция", "Action & emotion")}
                   className={`${fieldCls} resize-y text-[12px] leading-relaxed text-t200`}
                 />
-                <input
+                {/* Диалог — по строке на реплику каждого персонажа (мультиперсонажный
+                    формат «[Имя]: -фраза»); textarea допускает переводы строк */}
+                <textarea
                   value={b.dialogue}
                   onChange={(e) => patch(i, { dialogue: e.target.value })}
-                  placeholder={t("Реплика (если есть)", "Dialogue (if any)")}
-                  className={`${fieldCls} text-[12px] text-violet-200 placeholder:text-t400`}
+                  rows={2}
+                  placeholder={t(
+                    "Диалог — по строке на реплику:\n[Имя]: -фраза",
+                    "Dialogue — one line per cue:\n[Name]: -line",
+                  )}
+                  className={`${fieldCls} resize-y whitespace-pre-wrap text-[12px] text-violet-200 placeholder:text-t400`}
                 />
               </div>
             ) : (
               <>
                 {(b.framing || b.camera) && (
-                  <div className="mb-1 font-mono text-[10px] leading-relaxed text-t400">
+                  <div
+                    className={`mb-1 font-mono text-[10px] leading-relaxed text-t400 ${isExpanded ? "" : "truncate"}`}
+                  >
                     {b.framing && <>🎥 {b.framing}</>}
                     {b.framing && b.camera && " · "}
                     {b.camera}
                   </div>
                 )}
                 {b.action && (
-                  <div className="text-[12px] leading-relaxed text-t200">{b.action}</div>
+                  <div
+                    className={`text-[12px] leading-relaxed text-t200 ${isExpanded ? "whitespace-pre-wrap" : "truncate"}`}
+                  >
+                    {b.action}
+                  </div>
                 )}
-                {b.dialogue && (
-                  <div className="mt-1 text-[12px] leading-relaxed text-violet-200">
-                    «{b.dialogue}»
+                {b.dialogue &&
+                  (isExpanded ? (
+                    // раскрыто: каждая реплика на своей строке — «[Имя]: -фраза»
+                    <div className="mt-1 flex flex-col gap-0.5 text-[12px] leading-relaxed text-violet-200">
+                      {dl.map((ln, k) => (
+                        <div key={k}>{ln}</div>
+                      ))}
+                    </div>
+                  ) : (
+                    // свёрнуто: весь диалог в одну строку с обрезкой …
+                    <div className="mt-1 truncate text-[12px] leading-relaxed text-violet-200">
+                      {dl.join("  ·  ")}
+                    </div>
+                  ))}
+                {/* тап по карточке раскрывает/сворачивает — шеврон только если есть что прятать */}
+                {hasMore && (
+                  <div className="mt-1 flex justify-center text-[9px] leading-none text-t400">
+                    {isExpanded ? "⌃" : "⌄"}
                   </div>
                 )}
               </>
@@ -1255,6 +1443,110 @@ export default function GroupShotsEditor({
               <span className="text-[14px] leading-none">+</span>
               {t("Черновик", "Add draft")}
             </button>
+          </div>
+
+          {/* ---------- Rework: свёрнутый спойлер ПОД Main Shots (замечание заказчика).
+              Во время перетаскивания раскрывается сам — иначе шот некуда бросить ---------- */}
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => setReworkOpen((v) => !v)}
+              aria-expanded={reworkOpen || Boolean(drag)}
+              className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-dashed border-[var(--border-default)] px-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
+            >
+              <span className="shrink-0 text-[11px] leading-none text-violet-300">✎</span>
+              <span className="shrink-0 font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t300">
+                Rework
+              </span>
+              <span className="hidden min-w-0 flex-1 truncate text-[9px] text-t400 sm:block">
+                {t("переделать шоты по замечанию — Claude", "rework shots per feedback — Claude")}
+              </span>
+              <span className="flex-1 sm:hidden" />
+              {validRework.length > 0 && (
+                <span className="shrink-0 rounded-full bg-[rgba(139,95,176,.22)] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-violet-200">
+                  {validRework.length}
+                </span>
+              )}
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--border-default)] bg-ink-700 text-[10px] leading-none text-t200">
+                {reworkOpen || Boolean(drag) ? "▴" : "▾"}
+              </span>
+            </button>
+            {(reworkOpen || Boolean(drag)) && (
+              <div
+                ref={dropRef}
+                className="flex flex-col gap-1.5 rounded-lg border border-dashed p-2.5 transition-colors"
+                style={{
+                  borderColor: drag?.over ? "var(--violet-400)" : "var(--border-default)",
+                  background: drag?.over ? "rgba(139,95,176,.08)" : "transparent",
+                }}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {validRework.length === 0 ? (
+                    <span className="text-[10px] text-t400">
+                      {drag
+                        ? t("отпустите здесь", "drop here")
+                        : t(
+                            "перетащите сюда шоты (долгое нажатие), чтобы менять только их",
+                            "drag shots here (long-press) to rework only them",
+                          )}
+                    </span>
+                  ) : (
+                    validRework.map((o) => (
+                      <span
+                        key={o}
+                        className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-ink-600 py-0.5 pl-2 pr-1 text-[10px] font-semibold text-violet-200"
+                      >
+                        {t("Шот", "Shot")} {o}
+                        <button
+                          onClick={() => removeRework(o)}
+                          aria-label={t("Убрать", "Remove")}
+                          className="flex h-4 w-4 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  rows={2}
+                  placeholder={t(
+                    "Замечание к группе: что переделать (темп, планы, реплики, эмоции)…",
+                    "Feedback for the group: what to rework (pace, framing, dialogue, emotion)…",
+                  )}
+                  className="w-full resize-y rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2 text-[12px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
+                />
+                <div className="text-[9.5px] leading-snug text-t400">
+                  {validRework.length > 0
+                    ? t(
+                        `Правка применится только к шотам ${validRework.join(", ")}. Остальные останутся без изменений.`,
+                        `The rework applies only to shots ${validRework.join(", ")}. The rest stay unchanged.`,
+                      )
+                    : t(
+                        "Шоты не выбраны — Claude сам определит, каких шотов касается замечание.",
+                        "No shots selected — Claude decides which shots the feedback affects.",
+                      )}
+                </div>
+                {error && <div className="text-[11px] text-danger">{error}</div>}
+                <button
+                  onClick={onRevise}
+                  disabled={revising || !feedback.trim()}
+                  className="min-h-11 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold uppercase tracking-[0.1em] text-violet-200 hover:bg-ink-500 disabled:opacity-50"
+                >
+                  {revising
+                    ? t(`Claude переделывает… ${elapsed}с`, `Claude is reworking… ${elapsed}s`)
+                    : validRework.length > 0
+                      ? t(
+                          `Переделать шоты ${validRework.join(", ")} · ${reviseCost}`,
+                          `Rework shots ${validRework.join(", ")} · ${reviseCost}`,
+                        )
+                      : t(`Переделать по замечанию · ${reviseCost}`, `Rework per feedback · ${reviseCost}`)}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* ---------- Draft Shots: запаски при группе, своя шкала времени.
@@ -1314,96 +1606,6 @@ export default function GroupShotsEditor({
         </>
       );
       })()}
-
-      {dirty && (
-        <button
-          onClick={save}
-          disabled={saving}
-          className="min-h-11 rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-60"
-          style={{ boxShadow: "var(--glow-violet-sm)" }}
-        >
-          {saving ? t("Сохранение…", "Saving…") : t("Сохранить шоты", "Save shots")}
-        </button>
-      )}
-
-      {/* Rework: drop-зона + чипы добавленных шотов + замечание */}
-      <div
-        ref={dropRef}
-        className="mt-1 flex flex-col gap-1.5 rounded-lg border border-dashed p-2.5 transition-colors"
-        style={{
-          borderColor: drag?.over ? "var(--violet-400)" : "var(--border-default)",
-          background: drag?.over ? "rgba(139,95,176,.08)" : "transparent",
-        }}
-      >
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-t400">
-            Rework
-          </span>
-          {validRework.length === 0 ? (
-            <span className="text-[10px] text-t400">
-              {drag
-                ? t("отпустите здесь", "drop here")
-                : t(
-                    "перетащите сюда шоты (долгое нажатие), чтобы менять только их",
-                    "drag shots here (long-press) to rework only them",
-                  )}
-            </span>
-          ) : (
-            validRework.map((o) => (
-              <span
-                key={o}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-ink-600 py-0.5 pl-2 pr-1 text-[10px] font-semibold text-violet-200"
-              >
-                {t("Шот", "Shot")} {o}
-                <button
-                  onClick={() => removeRework(o)}
-                  aria-label={t("Убрать", "Remove")}
-                  className="flex h-4 w-4 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger"
-                >
-                  ×
-                </button>
-              </span>
-            ))
-          )}
-        </div>
-
-        <textarea
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-          rows={2}
-          placeholder={t(
-            "Замечание к группе: что переделать (темп, планы, реплики, эмоции)…",
-            "Feedback for the group: what to rework (pace, framing, dialogue, emotion)…",
-          )}
-          className="w-full resize-y rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2 text-[12px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
-        />
-        <div className="text-[9.5px] leading-snug text-t400">
-          {validRework.length > 0
-            ? t(
-                `Правка применится только к шотам ${validRework.join(", ")}. Остальные останутся без изменений.`,
-                `The rework applies only to shots ${validRework.join(", ")}. The rest stay unchanged.`,
-              )
-            : t(
-                "Шоты не выбраны — Claude сам определит, каких шотов касается замечание.",
-                "No shots selected — Claude decides which shots the feedback affects.",
-              )}
-        </div>
-        {error && <div className="text-[11px] text-danger">{error}</div>}
-        <button
-          onClick={onRevise}
-          disabled={revising || !feedback.trim()}
-          className="min-h-11 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold uppercase tracking-[0.1em] text-violet-200 hover:bg-ink-500 disabled:opacity-50"
-        >
-          {revising
-            ? t(`Claude переделывает… ${elapsed}с`, `Claude is reworking… ${elapsed}s`)
-            : validRework.length > 0
-              ? t(
-                  `Переделать шоты ${validRework.join(", ")} · ${reviseCost}`,
-                  `Rework shots ${validRework.join(", ")} · ${reviseCost}`,
-                )
-              : t(`Переделать по замечанию · ${reviseCost}`, `Rework per feedback · ${reviseCost}`)}
-        </button>
-      </div>
 
       {/* Пикер режиссёрского приёма: ручное закрепление за шотом */}
       <Sheet

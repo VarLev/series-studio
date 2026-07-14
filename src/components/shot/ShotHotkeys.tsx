@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { canGoBack, markBack } from "@/components/nav/NavHistory";
 
 /** Горячие клавиши карточки шота (spec §5): J/K — шоты, G — генерация, P — промпт, Esc — назад.
  *  e.code — работает и в русской раскладке. */
@@ -36,7 +37,13 @@ export default function ShotHotkeys({
           router.push(editorHref);
           break;
         case "Escape":
-          router.push(backHref);
+          // как кнопка «назад» в шапке: по истории, если есть куда, иначе к родителю
+          if (canGoBack()) {
+            markBack();
+            router.back();
+          } else {
+            router.push(backHref);
+          }
           break;
       }
     };

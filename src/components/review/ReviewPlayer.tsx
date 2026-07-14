@@ -88,7 +88,6 @@ export default function ReviewPlayer({
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [pending, startTransition] = useTransition();
-  const touchStart = useRef<number | null>(null);
   const dragging = useRef(false);
 
   const shotHref = `/episodes/${episodeId}/shots/${shotId}`;
@@ -347,21 +346,9 @@ export default function ReviewPlayer({
         )}
       </div>
 
-      {/* видео: одиночный / сравнение */}
-      <div
-        className="relative flex min-h-0 flex-1 items-center justify-center"
-        onWheel={(e) => {
-          if (compare) return;
-          if (Math.abs(e.deltaY) > 24) switchCandidate(e.deltaY > 0 ? 1 : -1);
-        }}
-        onTouchStart={(e) => (touchStart.current = e.touches[0].clientY)}
-        onTouchEnd={(e) => {
-          if (compare || touchStart.current == null) return;
-          const delta = e.changedTouches[0].clientY - touchStart.current;
-          if (Math.abs(delta) > 60) switchCandidate(delta < 0 ? 1 : -1);
-          touchStart.current = null;
-        }}
-      >
+      {/* видео: одиночный / сравнение. Листание кандидатов — только кнопками
+          ↑/↓ у правого края (свайпы конфликтовали со скроллом, убраны) */}
+      <div className="relative flex min-h-0 flex-1 items-center justify-center">
         {!compare || !other ? (
           current.isVideo ? (
             <video
@@ -478,99 +465,120 @@ export default function ReviewPlayer({
           </>
         )}
 
-        {/* точки-индикаторы кандидатов (spec §2.5) */}
+        {/* листание кандидатов ↑/↓ + точки-индикаторы (spec §2.5) */}
         {candidates.length > 1 && !compare && (
-          <div className="absolute right-2 top-1/2 flex -translate-y-1/2 flex-col gap-1.5">
-            {candidates.map((c, i) => (
-              <button
-                key={c.id}
-                aria-label={`Кандидат ${i + 1}`}
-                onClick={() => setIdx(i)}
-                className="h-2 w-2 rounded-full"
-                style={{ background: i === idx ? "#e6e6e6" : "#3a3a3a" }}
-              />
-            ))}
+          <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-2">
+            <button
+              onClick={() => switchCandidate(-1)}
+              aria-label={t("Предыдущий кандидат", "Previous candidate")}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#0b0b0bb3] text-[14px] text-[#e6e6e6] hover:bg-[#1c1c1c]"
+            >
+              ↑
+            </button>
+            <div className="flex flex-col items-center gap-1.5">
+              {candidates.map((c, i) => (
+                <button
+                  key={c.id}
+                  aria-label={`Кандидат ${i + 1}`}
+                  onClick={() => setIdx(i)}
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: i === idx ? "#e6e6e6" : "#3a3a3a" }}
+                />
+              ))}
+            </div>
+            <button
+              onClick={() => switchCandidate(1)}
+              aria-label={t("Следующий кандидат", "Next candidate")}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#0b0b0bb3] text-[14px] text-[#e6e6e6] hover:bg-[#1c1c1c]"
+            >
+              ↓
+            </button>
           </div>
         )}
       </div>
 
-      {/* транспорт */}
+      {/* транспорт: кадровый слайдер — своей строкой во всю ширину,
+          кнопки и таймкод — компактной строкой под ним */}
       {current.isVideo && (
-        <div className="flex items-center gap-1.5 border-t border-[#1b1b1b] bg-[#0b0b0b] px-3 py-2">
-          <button
-            onClick={togglePlay}
-            aria-label={playing ? "Пауза" : "Играть"}
-            className="flex h-11 w-11 items-center justify-center rounded-md text-[16px] text-[#e6e6e6] hover:bg-[#181818]"
-          >
-            {playing ? "⏸" : "▶"}
-          </button>
-          <button
-            onClick={() => step(-1)}
-            aria-label="Кадр назад"
-            className="flex h-11 w-11 items-center justify-center rounded-md font-mono text-[16px] text-[#e6e6e6] hover:bg-[#181818]"
-          >
-            ‹
-          </button>
-          <button
-            onClick={() => step(1)}
-            aria-label="Кадр вперёд"
-            className="flex h-11 w-11 items-center justify-center rounded-md font-mono text-[16px] text-[#e6e6e6] hover:bg-[#181818]"
-          >
-            ›
-          </button>
+        <div className="border-t border-[#1b1b1b] bg-[#0b0b0b]">
           {/* шкала бегунка: реальная длина файла, если известна; иначе длительность
               группы — некоторые MP4 (Kling/Higgsfield) не сообщают duration, и без
               запасной шкалы max=0 «замораживает» ползунок */}
-          <input
-            type="range"
-            min={0}
-            max={(duration > 0 ? duration : shotDurationSec) || 0}
-            step={FRAME}
-            value={time}
-            onChange={(e) => {
-              const t = Number(e.target.value);
-              eachVideo((x) => (x.currentTime = t));
-              setTime(t);
-            }}
-            className="min-w-0 flex-1 accent-[#e6e6e6]"
-          />
-          <span className="font-mono text-[10px] text-[#8a8a8a]">
-            {timecode(time)} · {(duration > 0 ? duration : shotDurationSec).toFixed(0)}
-            {t("с", "s")}
-          </span>
+          <div className="px-4 pt-1.5">
+            <input
+              type="range"
+              min={0}
+              max={(duration > 0 ? duration : shotDurationSec) || 0}
+              step={FRAME}
+              value={time}
+              onChange={(e) => {
+                const t = Number(e.target.value);
+                eachVideo((x) => (x.currentTime = t));
+                setTime(t);
+              }}
+              className="w-full accent-[#e6e6e6]"
+            />
+          </div>
+          <div className="flex items-center gap-1 px-3 pb-1.5">
+            <button
+              onClick={togglePlay}
+              aria-label={playing ? "Пауза" : "Играть"}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-[15px] text-[#e6e6e6] hover:bg-[#181818]"
+            >
+              {playing ? "⏸" : "▶"}
+            </button>
+            <button
+              onClick={() => step(-1)}
+              aria-label="Кадр назад"
+              className="flex h-9 w-9 items-center justify-center rounded-md font-mono text-[15px] text-[#e6e6e6] hover:bg-[#181818]"
+            >
+              ‹
+            </button>
+            <button
+              onClick={() => step(1)}
+              aria-label="Кадр вперёд"
+              className="flex h-9 w-9 items-center justify-center rounded-md font-mono text-[15px] text-[#e6e6e6] hover:bg-[#181818]"
+            >
+              ›
+            </button>
+            <span className="ml-auto font-mono text-[10px] text-[#8a8a8a]">
+              {timecode(time)} · {(duration > 0 ? duration : shotDurationSec).toFixed(0)}
+              {t("с", "s")}
+            </span>
+          </div>
         </div>
       )}
 
       {/* нижняя панель: [Замечание] [Взять кадр] [Победитель] */}
       <div
-        className="flex gap-2 border-t border-[#1b1b1b] bg-[#0b0b0b] px-3 py-2.5"
-        style={{ paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}
+        className="flex gap-2 border-t border-[#1b1b1b] bg-[#0b0b0b] px-3 py-1.5"
+        style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
       >
         <button
           onClick={() => setNoteOpen(true)}
           disabled={!latestPromptId}
-          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
+          className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
         >
           <span>👎</span>{t("Замечание", "Note")}
         </button>
         <button
           onClick={grabFrame}
           disabled={!current.isVideo}
-          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
+          className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
         >
           <span>📷</span>{t("Взять кадр", "Grab frame")}
         </button>
         <a
           href={current.url}
           download
-          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c]"
+          className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c]"
         >
           <span>⬇</span>{t("Скачать", "Download")}
         </a>
         <button
           onClick={pickWinner}
           disabled={pending}
-          className="flex min-h-[50px] flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-semibold uppercase tracking-[0.08em] disabled:opacity-70"
+          className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[9.5px] font-semibold uppercase tracking-[0.08em] disabled:opacity-70"
           style={{
             background: current.isWinner ? "var(--success)" : "#141414",
             border: current.isWinner ? "none" : "1px solid #2a2a2a",

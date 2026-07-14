@@ -5,6 +5,7 @@ import SwRegister from "@/components/SwRegister";
 import Toaster from "@/components/Toaster";
 import AppNav from "@/components/nav/AppNav";
 import { ContentShell } from "@/components/nav/NavClient";
+import { NavHistoryTracker } from "@/components/nav/NavHistory";
 import { I18nProvider } from "@/components/I18nProvider";
 import { getAllSettings } from "@/lib/settings";
 
@@ -50,6 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         className={`${golos.variable} ${cinzel.variable} ${jetbrains.variable} antialiased`}
       >
         <I18nProvider lang={settings.ui_lang}>
+          <NavHistoryTracker />
           <AppNav />
           <ContentShell>{children}</ContentShell>
           <Toaster />

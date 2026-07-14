@@ -29,6 +29,8 @@ export default async function RefsContent({ episodeId }: { episodeId: string }) 
       source: r.source,
       width: r.width,
       height: r.height,
+      // анализ изображения (JSON {description,camera}) — детальный просмотр
+      analysis: r.analysis ?? "",
     })),
   );
 

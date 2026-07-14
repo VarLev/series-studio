@@ -110,8 +110,9 @@ export async function POST(req: NextRequest) {
       width,
       height,
     });
+    const shotCopyId = crypto.randomUUID();
     await db.insert(references).values({
-      id: crypto.randomUUID(), // копия, прикреплённая к шоту
+      id: shotCopyId, // копия, прикреплённая к шоту
       shotId,
       episodeId: null,
       entityId: null,
@@ -122,6 +123,12 @@ export async function POST(req: NextRequest) {
       width,
       height,
     });
+    // анализ картинки vision-моделью в фоне (не блокируем загрузку); результат
+    // кэшируется за файлом и уходит в Enhance/Rework. Enhance/Rework догоняют его
+    // сами (ensureShotRefsAnalyzed), даже если фоновый вызов не успел.
+    void import("@/lib/refs").then(({ ensureReferenceAnalysis }) =>
+      ensureReferenceAnalysis(shotCopyId).catch(() => {}),
+    );
     revalidatePath(`/episodes/${episodeId}/refs`);
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
@@ -148,6 +155,13 @@ export async function POST(req: NextRequest) {
     width,
     height,
   });
+  // референсы шота и серии анализируем vision-моделью в фоне (у сущностей библии
+  // свой разбор — кнопка «Анализ», её не трогаем)
+  if (!entityId) {
+    void import("@/lib/refs").then(({ ensureReferenceAnalysis }) =>
+      ensureReferenceAnalysis(id).catch(() => {}),
+    );
+  }
   if (entityId) revalidatePath(`/bible/${entityId}`);
   if (episodeId) revalidatePath(`/episodes/${episodeId}/refs`);
   if (shotId) {

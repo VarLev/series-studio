@@ -28,8 +28,13 @@ export const references = pgTable("references", {
   episodeId: text("episode_id"),
   storagePath: text("storage_path").notNull(),
   caption: text("caption").notNull().default(""),
+  // текстовый анализ изображения vision-моделью (что на референсе): субъекты и их
+  // положение, локация, ракурс/кадрирование, свет и настроение. Делается ОДИН раз
+  // на загрузке и кэшируется за референсом (по storage_path) — открепление/повторное
+  // прикрепление НЕ перезапускает анализ. Уходит в Enhance/Rework и в промпт-фабрику.
+  analysis: text("analysis").notNull().default(""),
   source: text("source").notNull().default("upload"), // upload | frame-grab | nano-banana | upscale | edit
-  role: text("role"), // start_frame | composition | null
+  role: text("role"), // start_frame | composition | layout | null
   token: text("token"), // REF_NN — референсы серии (spec §1)
   width: integer("width"),
   height: integer("height"),

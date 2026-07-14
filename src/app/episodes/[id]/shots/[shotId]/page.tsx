@@ -25,6 +25,7 @@ import { deleteAllGenerations, deleteShot } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
 import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
+import PromptDrawer from "@/components/shot/PromptDrawer";
 import PromptTrackProvider from "@/components/shot/PromptTrackContext";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
@@ -170,6 +171,8 @@ export default async function ShotPage(ctx: {
       caption: r.caption,
       role: (r.role ?? "composition") as "start_frame" | "composition" | "layout",
       anchor: anchorByRefId.get(r.id) ?? "",
+      // анализ референса (JSON {description,camera}) — для слайдера деталей и промптов
+      analysis: r.analysis ?? "",
     })),
   );
 
@@ -559,16 +562,20 @@ export default async function ShotPage(ctx: {
             </>
           )}
 
-          <PromptBlock
-            shotId={shotId}
-            episodeId={episodeId}
-            versions={versions}
-            tokens={tokens}
-            tokenImages={tokenImages}
-            llmModel={settings.llm_model}
-            usedTechniquesByFamily={usedTechniquesByFamily}
-            useCli={settings.llm_use_cli === "1"}
-          />
+          {/* промпт: десктоп — инлайн, мобайл — правый слайдер c FAB (блок при
+              этом всегда смонтирован — см. PromptDrawer) */}
+          <PromptDrawer>
+            <PromptBlock
+              shotId={shotId}
+              episodeId={episodeId}
+              versions={versions}
+              tokens={tokens}
+              tokenImages={tokenImages}
+              llmModel={settings.llm_model}
+              usedTechniquesByFamily={usedTechniquesByFamily}
+              useCli={settings.llm_use_cli === "1"}
+            />
+          </PromptDrawer>
 
           <div className="flex flex-col gap-1.5">
             <SectionLabel

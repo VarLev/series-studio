@@ -13,9 +13,10 @@ const ITEMS = [
 ];
 
 /**
- * Таб-бар виден на ВСЕХ экранах (кроме /login) — это главная навигация.
+ * Таб-бар виден на ВСЕХ экранах (кроме /login и /review) — это главная навигация.
  * Экраны со своими нижними панелями (ActionBar шота) поднимают их НАД
- * таб-баром (bottom: var(--tabbar-h)), а не прячут его.
+ * таб-баром (bottom: var(--tabbar-h)), а не прячут его. Исключение — экран
+ * ревью: там плеер занимает всю высоту, навигация скрыта целиком.
  * «Затраты» (/costs) переехали внутрь Настроек — своего таба у них больше нет.
  */
 
@@ -23,7 +24,8 @@ const ITEMS = [
 export default function NavClient({ activeJobs }: { activeJobs: number }) {
   const pathname = usePathname();
   const t = useT();
-  if (pathname === "/login") return null;
+  // /review — иммерсивный экран плеера: навигацию не показываем (выход — «←» в шапке)
+  if (pathname === "/login" || pathname.includes("/review")) return null;
 
   const isActive = (href: string) =>
     href === "/episodes" ? pathname === "/episodes" || pathname.startsWith("/episodes/") : pathname.startsWith(href);
@@ -108,6 +110,8 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
  */
 export function ContentShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/login") return <>{children}</>;
+  // /review — без обвязки, как /login: NavClient скрыт, и отступы под таб-бар
+  // (pb-16) и сайдбар (lg:pl-56) дали бы лишний скролл/пустую полосу
+  if (pathname === "/login" || pathname.includes("/review")) return <>{children}</>;
   return <div className="content-shell pb-16 lg:pb-0 lg:pl-56">{children}</div>;
 }

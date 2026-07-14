@@ -1,5 +1,5 @@
-import Link from "next/link";
 import StatusPill from "@/components/StatusPill";
+import BackButton from "@/components/nav/BackButton";
 
 export { StatusPill };
 export { SHOT_STATUS, ENTITY_TYPE_LABEL } from "@/lib/statuses";
@@ -59,16 +59,15 @@ export function ScreenHeader({
       }}
     >
       {backHref && (
-        <Link
-          href={backHref}
-          aria-label="Back"
+        <BackButton
+          fallbackHref={backHref}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-t100 hover:bg-ink-500"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m12 19-7-7 7-7" />
             <path d="M19 12H5" />
           </svg>
-        </Link>
+        </BackButton>
       )}
       <div className="min-w-0 flex-1">
         <div className="eyebrow">{eyebrow}</div>
