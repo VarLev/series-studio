@@ -14,6 +14,7 @@ import {
 } from "@/lib/beats";
 import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
 import { ensureShotRefsAnalyzed } from "@/lib/refs";
+import { reconcileShotPromptRefs } from "@/lib/refDirectives";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
 import { listTechniques } from "@/lib/director";
 import { stripAt } from "@/lib/entityName";
@@ -731,6 +732,9 @@ export async function attachReferenceToShot(
   // и Enhance/Rework дозапросят анализ сами (ensureShotRefsAnalyzed).
   const { ensureReferenceAnalysis } = await import("@/lib/refs");
   void ensureReferenceAnalysis(copyId).catch(() => {});
+  // авто-синхронизация начальных строк-директив референса в актуальных промптах —
+  // без обращения к модели (добавили референс → строки появились сами)
+  await reconcileShotPromptRefs(shotId);
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, shotId));
 }
@@ -770,6 +774,8 @@ export async function detachShotReference(referenceId: string): Promise<void> {
   const { maybeDeleteBlob, invalidateProviderCaches } = await import("@/lib/cascade");
   await maybeDeleteBlob(ref.storagePath);
   await invalidateProviderCaches({ refIds: [referenceId] });
+  // удалили референс → его строки-директивы уходят из промптов сами (без модели)
+  await reconcileShotPromptRefs(ref.shotId);
   const [shot] = await db.select().from(shots).where(eq(shots.id, ref.shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, ref.shotId));
 }
@@ -791,6 +797,8 @@ export async function setShotReferenceRole(
       .where(and(eq(references.shotId, ref.shotId), eq(references.role, "start_frame")));
   }
   await db.update(references).set({ role }).where(eq(references.id, referenceId));
+  // сменили тип референса → начальные строки промптов перестраиваются сами (без модели)
+  await reconcileShotPromptRefs(ref.shotId);
   const [shot] = await db.select().from(shots).where(eq(shots.id, ref.shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, ref.shotId));
 }

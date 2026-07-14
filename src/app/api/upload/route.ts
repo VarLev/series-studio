@@ -5,6 +5,7 @@ import { putFile } from "@/lib/storage";
 import { normalizeUploadImage } from "@/lib/image";
 import { getDb, references, generations, shots } from "@/lib/db";
 import { nextRefToken, probeImageSize, recalcShotStatus } from "@/lib/generation";
+import { reconcileShotPromptRefs } from "@/lib/refDirectives";
 import { eq } from "drizzle-orm";
 
 export const maxDuration = 60;
@@ -129,6 +130,8 @@ export async function POST(req: NextRequest) {
     void import("@/lib/refs").then(({ ensureReferenceAnalysis }) =>
       ensureReferenceAnalysis(shotCopyId).catch(() => {}),
     );
+    // авто-синхронизация начальных строк-директив референса в промптах шота (без модели)
+    await reconcileShotPromptRefs(shotId);
     revalidatePath(`/episodes/${episodeId}/refs`);
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
@@ -162,6 +165,8 @@ export async function POST(req: NextRequest) {
       ensureReferenceAnalysis(id).catch(() => {}),
     );
   }
+  // добавили референс к шоту → перестраиваем начальные строки его промптов (без модели)
+  if (shotId) await reconcileShotPromptRefs(shotId);
   if (entityId) revalidatePath(`/bible/${entityId}`);
   if (episodeId) revalidatePath(`/episodes/${episodeId}/refs`);
   if (shotId) {

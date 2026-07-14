@@ -86,6 +86,10 @@ export default function GenerateSheet({
   const [aspect, setAspect] = useState<string>(
     (ASPECTS as readonly string[]).includes(aspectRatio) ? aspectRatio : "9:16",
   );
+  // битрейт Seedance (Higgsfield): дефолт high (замечание заказчика — раньше уходил
+  // standard). Контрол показываем, только если среди выбранных есть Seedance-модель.
+  const [bitrate, setBitrate] = useState<"high" | "standard">("high");
+  const hasSeedance = [...selected].some((id) => promptFamily(id) === "seedance");
   // роль start-frame из референсов шота подставляется автоматически (spec §3.1)
   const [startFrame, setStartFrame] = useState<string>(defaultStartFrameId ?? "");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -174,6 +178,8 @@ export default function GenerateSheet({
         durationSec: duration,
         aspectRatio: aspect,
         quality,
+        // сервер применит битрейт только к Seedance-моделям; для Kling он игнорируется
+        bitrate,
         confirmed: confirmStep >= 2,
       });
       if (res.ok) {
@@ -318,6 +324,40 @@ export default function GenerateSheet({
         </div>
       )}
 
+      {/* Битрейт — только у Seedance (Higgsfield); высокий = меньше сжатия/крупнее файл */}
+      {hasSeedance && (
+        <>
+          <div className="section-label mb-2 mt-3.5">{t("Битрейт · Seedance", "Bitrate · Seedance")}</div>
+          <div className="flex gap-1.5">
+            {(
+              [
+                { id: "high", label: "High", subRu: "меньше сжатия · крупнее файл", subEn: "less compression · larger size" },
+                { id: "standard", label: "Standard", subRu: "больше сжатия · меньше файл", subEn: "more compression · smaller size" },
+              ] as const
+            ).map((b) => (
+              <button
+                key={b.id}
+                onClick={() => setBitrate(b.id)}
+                className="flex min-h-11 flex-1 flex-col items-start justify-center gap-0.5 rounded-md border px-2.5 py-1.5 text-left"
+                style={{
+                  borderColor: bitrate === b.id ? "var(--border-strong)" : "var(--border-subtle)",
+                  background: bitrate === b.id ? "var(--ink-600)" : "none",
+                }}
+              >
+                <span
+                  className="font-mono text-[11.5px] font-semibold"
+                  style={{ color: bitrate === b.id ? "var(--text-100)" : "var(--text-400)" }}
+                >
+                  {b.id === "high" ? "✨ " : ""}
+                  {b.label}
+                </span>
+                <span className="text-[9px] text-t400">{t(b.subRu, b.subEn)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="section-label mb-2 mt-3.5">{t("Формат (соотношение сторон)", "Format (aspect ratio)")}</div>
       <div className="flex flex-wrap gap-1.5">
         {ASPECTS.map((a) => (
@@ -415,6 +455,7 @@ export default function GenerateSheet({
         <span className="text-[11px] text-t300">{t("Оценка списания:", "Estimated charge:")}</span>
         <span className="font-mono text-[10px] text-t400">
           {duration}{t("с", "s")} · {quality} · {aspect}
+          {hasSeedance ? ` · ${bitrate === "high" ? "High" : "Std"}` : ""}
         </span>
         <span className="flex-1" />
         <span className="text-right font-mono font-semibold text-t100">

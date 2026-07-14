@@ -16,6 +16,7 @@ import { getAllSettings } from "@/lib/settings";
 import { readFile } from "@/lib/storage";
 import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
 import { refAnalysisText } from "@/lib/refAnalysis";
+import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives";
 import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { effectiveOutfit } from "@/lib/wardrobe";
@@ -581,9 +582,10 @@ export async function llmShotPrompt(
   const startRef = shotRefs.find((r) => r.role === "start_frame");
   const startAnalysis = refAnalysisText(startRef?.analysis);
   const startAnchor = isKling ? "@Start" : "@Image1";
+  const refFamily = isKling ? "kling" : "seedance";
   const startFrameBlock = hasStartFrame
     ? `СТАРТОВЫЙ КАДР: к группе прикреплён стартовый кадр — сошлись на него ровно одной строкой ` +
-      `"Use ${startAnchor} as the locked starting frame." в начале промпта и больше его не упоминай.` +
+      `"${startFrameLine(refFamily)}" в начале промпта и больше его не упоминай.` +
       (startAnalysis
         ? ` На стартовом кадре: ${startAnalysis}. ПЕРВЫЙ шот группы обязан ему строго соответствовать — ` +
           `та же композиция, ракурс, расстановка и свет; действие продолжается ИЗ этого кадра, не ` +
@@ -605,11 +607,7 @@ export async function llmShotPrompt(
   const hasLayoutRef = attachedRefs.some((r) => r.role === "layout");
   const compLines = attachedRefs.map((r, i) => {
     const anchor = `@Comp${i + 1}`;
-    return r.role === "layout"
-      ? `"Use ${anchor} ONLY to establish the room layout and where characters and objects are ` +
-        `positioned (spatial relationships). Do NOT copy ${anchor}'s camera angle or visible framing — ` +
-        `the shots use new camera positions."`
-      : `"Use ${anchor} ONLY as composition and blocking reference."`;
+    return `"${r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor)}"`;
   });
   const compositionBlock = attachedRefs.length
     ? "РЕФЕРЕНСЫ ШОТА (приложение заменит якоря @CompN на реальные слоты картинок при отправке): " +

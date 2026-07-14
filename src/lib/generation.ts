@@ -436,6 +436,11 @@ export interface SubmitInput {
   durationSec: number;
   aspectRatio: string;
   quality: string;
+  // битрейт видео Seedance (Higgsfield): high — меньше сжатия/крупнее файл,
+  // standard — больше сжатия. Задаётся в шторке генерации, уходит в generate_video
+  // ТОЛЬКО для Seedance-моделей. По умолчанию high (замечание заказчика — раньше
+  // всегда уходил standard). У Kling своего битрейта нет.
+  bitrate?: "high" | "standard";
 }
 
 /**
@@ -671,6 +676,12 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       ...shapeVideoParams(modelId, input.durationSec, input.aspectRatio, quality),
       ...(virtual?.params ?? {}),
     };
+    // битрейт — только для Seedance (Higgsfield); ключ generate_video — bitrate_mode
+    // (high | standard), по умолчанию high. Добавляем ПОСЛЕ params, чтобы get_cost
+    // ниже считался по «чистым» параметрам (битрейт на цену не влияет). У Kling нет.
+    const submitParams = modelId.startsWith("seedance")
+      ? { ...params, bitrate_mode: input.bitrate ?? "high" }
+      : params;
     try {
       // резолв провайдер-объекта (проверка/рефреш токенов по сети) — уже в фоне
       const provider = await providerForModel(modelId, catalog);
@@ -699,7 +710,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       const logRequest = {
         prompt: modelPrompt,
         negativePrompt: promptRow.negativePrompt ?? "",
-        params,
+        params: submitParams,
         startFrame: Boolean(ctx.startImageUrl),
         attachedRefs: logRefs.length,
       };
@@ -709,7 +720,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
           model: virtual?.base ?? modelId,
           prompt: modelPrompt,
           negativePrompt: promptRow.negativePrompt ?? undefined,
-          params,
+          params: submitParams,
           startImageUrl: ctx.startImageUrl,
           characterRefUrls: refMedias,
         })
@@ -743,7 +754,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
         shotId: input.shotId,
       });
       const paramsJson: UrlBundle = {
-        ...params,
+        ...submitParams,
         quality,
         start_frame_ref: input.startFrameRefId ?? null,
         character_refs:

@@ -293,6 +293,7 @@ export async function retryGeneration(
     duration?: number;
     quality?: string;
     start_frame_ref?: string | null;
+    bitrate_mode?: "high" | "standard";
   };
   return startGeneration({
     shotId: gen.shotId,
@@ -302,6 +303,7 @@ export async function retryGeneration(
     aspectRatio: params.aspect_ratio ?? "9:16",
     quality: params.quality ?? "720p",
     startFrameRefId: params.start_frame_ref ?? undefined,
+    bitrate: params.bitrate_mode,
     confirmed: true,
   });
 }
