@@ -15,6 +15,7 @@ import {
 import { getAllSettings } from "@/lib/settings";
 import { readFile } from "@/lib/storage";
 import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
+import { getShotAnchorTexts } from "@/lib/anchors";
 import { refAnalysisText } from "@/lib/refAnalysis";
 import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives";
 import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
@@ -240,10 +241,19 @@ export async function llmReviseGroup(input: {
   beats: GroupShot[];
   feedback: string;
   targetOrders?: number[];
+  /** прикреплённые к группе якоря — обязательные детали, которые нельзя терять */
+  anchors?: string[];
 }): Promise<GroupPatch> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const refCtx = await shotRefsContext(input.shotId);
+  const anchorsBlock = input.anchors?.length
+    ? "ОБЯЗАТЕЛЬНЫЕ ДЕТАЛИ (ЯКОРЯ) этой группы — точечные пометки пользователя, которые ДОЛЖНЫ " +
+      "сохраняться при правке. Не выбрасывай и не затирай их: если деталь относится к действию/облику " +
+      "в шоте (синяк, цвет одежды, предмет), она должна оставаться отражённой в соответствующих шотах:\n" +
+      input.anchors.map((a) => `- ${a}`).join("\n") +
+      "\n"
+    : "";
   const current =
     `Группа «${input.groupTitle}» (${input.durationSec} сек):\n` +
     input.beats
@@ -295,6 +305,7 @@ export async function llmReviseGroup(input: {
         "встык от 00:00; duration_sec группы = сумма шотов, НЕ БОЛЬШЕ 15 секунд.\n" +
         `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
         (refCtx ? refCtx + "\n" : "") +
+        anchorsBlock +
         "Верни ТОЛЬКО JSON без пояснений " +
         (input.targetOrders?.length
           ? `(в массиве shots — ТОЛЬКО изменённые шоты [${input.targetOrders.join(", ")}], без остальных):\n`
@@ -391,10 +402,27 @@ export async function llmEnhanceGroup(input: {
   emotionalTone: string;
   /** краткий контекст соседних групп (НЕ весь сюжет) — для связности */
   sceneContext: string;
+  /**
+   * прикреплённые к группе якоря. Если ПУСТО — Enhance оценивает сюжет+референсы и
+   * МОЖЕТ предложить новые (поле anchors в ответе). Если НЕ пусто — новых не выдумывает,
+   * а обязан учитывать существующие и вернуть anchors: [].
+   */
+  anchors: string[];
 }): Promise<EnhanceGroup> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const refCtx = await shotRefsContext(input.shotId);
+  const anchorsBlock = input.anchors.length
+    ? "ЯКОРЯ ГРУППЫ (обязательные точечные детали пользователя) — учитывай их как данность при " +
+      "шлифовке шотов (если деталь относится к облику/действию — она должна оставаться отражённой в " +
+      "соответствующих шотах). НЕ предлагай новых якорей: в ответе верни \"anchors\": [].\n" +
+      input.anchors.map((a) => `- ${a}`).join("\n") +
+      "\n"
+    : "ЯКОРЯ: у группы их нет. Оцени сюжет шотов и анализ референсов и РЕШИ, нужны ли точечные детали-" +
+      "инъекции (напр. синяк на лице, цвет/предмет одежды, характерный предмет в кадре), которых НЕТ ни " +
+      "в референсах, ни в описаниях энтити/гардеробе. Если да — предложи их КОРОТКО по-русски в поле " +
+      "\"anchors\" (по одной детали на строку массива, 2–6 слов). Если добавлять нечего — \"anchors\": []. " +
+      "НЕ дублируй то, что уже описано в шотах, референсах или гардеробе; не выдумывай сюжетных событий.\n";
   const all = await listTechniques();
   const techIndexBlock = all.length
     ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (id | название | камера | теги | категория) — " +
@@ -458,10 +486,12 @@ export async function llmEnhanceGroup(input: {
         `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
         (refCtx ? refCtx + "\n" : "") +
         "\n" +
+        anchorsBlock +
         techIndexBlock +
         "Верни ТОЛЬКО JSON без пояснений (ВСЕ шоты — основные, draft:false):\n" +
         '{"title":"название группы","duration_sec":14,"location":"локация","time_weather":"время суток и погода",' +
         '"emotional_tone":"эмоциональный тон, напр. calm / tense","characters_in_frame":["@Simon"],' +
+        '"anchors":["синяк на левой скуле","красный шарф"],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка","technique_id":"b19 или пусто",' +
         '"draft":false}]}\n' +
@@ -683,6 +713,20 @@ export async function llmShotPrompt(
       'атмосфера спокойная: не добавляй тревогу, саспенс, "dark / psychological thriller / tense" ' +
       "мотивы, даже если они звучат в общих правилах или визуальном стиле сериала."
     : "";
+
+  // ЯКОРЯ — точечные детали пользователя (синяк, цвет одежды, предмет в кадре),
+  // которых нет в референсах/энтити. Это ОБЯЗАТЕЛЬНЫЕ пометки: должны появиться в
+  // кадре, приоритет за ними даже против референса/общего стиля.
+  const anchorTexts = await getShotAnchorTexts(shotId);
+  const anchorsBlock = anchorTexts.length
+    ? "ОБЯЗАТЕЛЬНЫЕ ДЕТАЛИ (ЯКОРЯ) этой группы — точечные пометки пользователя, которые ДОЛЖНЫ быть " +
+      "видимы в кадре. Впиши КАЖДУЮ в подходящее место промпта: если деталь постоянна во всех шотах " +
+      "(синяк, цвет/предмет одежды) — в GLOBAL CONTINUITY; если она про конкретный момент — в нужный " +
+      "SHOT-блок. Переведи на английский. НЕ игнорируй, НЕ смягчай и НЕ выкидывай их, даже если они " +
+      "расходятся с референсом, гардеробом или общим стилем — приоритет за якорями:\n" +
+      anchorTexts.map((a) => `- ${a}`).join("\n")
+    : "";
+
   let sceneBlock = "";
   if (shot.isInsert) {
     sceneBlock =
@@ -864,7 +908,7 @@ export async function llmShotPrompt(
       // на каждом следующем шоте эпизода вместо повторной полной оплаты
       cacheableSystemPrefix: `${videoTemplate}\n\n${rules}`,
       system:
-        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +

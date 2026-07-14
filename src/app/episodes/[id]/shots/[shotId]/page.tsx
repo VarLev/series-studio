@@ -23,6 +23,7 @@ import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from 
 import ConfirmButton from "@/components/ConfirmButton";
 import { deleteAllGenerations, deleteShot } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
+import AnchorsSection from "@/components/shot/AnchorsSection";
 import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
 import PromptDrawer from "@/components/shot/PromptDrawer";
@@ -37,6 +38,7 @@ import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
 import FilmStrip from "@/components/FilmStrip";
 import { chainLocation, chainTimeWeather, displayGroupNumbers } from "@/lib/beats";
+import { listShotAnchors, listEpisodeAnchors } from "@/lib/anchors";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +119,13 @@ export default async function ShotPage(ctx: {
   const shotIdx = allShots.findIndex((s) => s.id === shotId);
   const prevShot = allShots[shotIdx - 1] ?? null;
   const nextShot = allShots[shotIdx + 1] ?? null;
+
+  // якоря: прикреплённые к группе + пул эпизода для переиспользования (не прикреплённые)
+  const attachedAnchors = await listShotAnchors(shotId);
+  const attachedAnchorIds = new Set(attachedAnchors.map((a) => a.id));
+  const availableAnchors = (await listEpisodeAnchors(episodeId)).filter(
+    (a) => !attachedAnchorIds.has(a.id),
+  );
 
   const links = await db.select().from(shotEntities).where(eq(shotEntities.shotId, shotId));
   const allEntities = await db
@@ -361,6 +370,15 @@ export default async function ShotPage(ctx: {
   // через topSlot); в ветке без группы (фрагмент сюжета) рендерим как раньше.
   const entitiesRefs = (
     <>
+      <div className="flex flex-col gap-1.5">
+        <SectionLabel
+          hint={t("детали в кадр · обязательны в промпте", "details in frame · mandatory in prompt")}
+        >
+          {t("Якоря", "Anchors")}
+        </SectionLabel>
+        <AnchorsSection shotId={shotId} attached={attachedAnchors} available={availableAnchors} />
+      </div>
+
       <div className="flex flex-col gap-1.5">
         <SectionLabel
           hint={t("определил Claude · правится вручную", "detected by Claude · editable")}

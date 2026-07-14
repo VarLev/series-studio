@@ -91,6 +91,10 @@ export const enhanceGroupSchema = z.object({
   emotional_tone: z.string().default(""),
   // element_name'ы персонажей, реально присутствующих в кадре этой группы
   characters_in_frame: z.array(z.string()).default([]),
+  // ЯКОРЯ — короткие детали-инъекции (синяк, цвет одежды, предмет в кадре), которые
+  // Enhance ПРЕДЛАГАЕТ ТОЛЬКО когда у группы их ещё нет (иначе массив пустой и
+  // игнорируется). enhanceGroup создаёт их в пуле эпизода и цепляет к группе.
+  anchors: z.array(z.string()).default([]),
   shots: z.array(groupShotSchema).default([]),
   // страховка: Opus иногда кладёт черновики отдельным массивом вместо
   // draft:true внутри shots (реальный инцидент) — принимаем и такой формат,

@@ -173,6 +173,19 @@ ALTER TABLE shots ADD COLUMN IF NOT EXISTS time_weather text NOT NULL DEFAULT ''
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS is_insert boolean NOT NULL DEFAULT false;
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS emotional_tone text NOT NULL DEFAULT '';
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS analysis text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS anchors (
+  id text PRIMARY KEY,
+  episode_id text NOT NULL,
+  text text NOT NULL,
+  source text NOT NULL DEFAULT 'manual',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS anchors_episode_idx ON anchors (episode_id);
+CREATE TABLE IF NOT EXISTS shot_anchors (
+  shot_id text NOT NULL,
+  anchor_id text NOT NULL,
+  PRIMARY KEY (shot_id, anchor_id)
+);
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

@@ -140,6 +140,31 @@ export const generations = pgTable("generations", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Якоря — короткие текстовые инъекции-детали, которых не хватает референсам/энтити/
+ * тону: «синяк на лице», «красная куртка», «на столе разбитая чашка». Живут за
+ * ЭПИЗОДОМ (создаются в группе, но сохраняются в пул эпизода) и переиспользуются:
+ * один якорь цепляется к нескольким группам через shot_anchors. При генерации
+ * видео-промпта, Enhance и Rework прикреплённые якоря — ОБЯЗАТЕЛЬНЫЕ пометки.
+ */
+export const anchors = pgTable("anchors", {
+  id: text("id").primaryKey(),
+  episodeId: text("episode_id").notNull(),
+  text: text("text").notNull(),
+  source: text("source").notNull().default("manual"), // manual | enhance
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Привязка якоря к группе шотов (many-to-many): один якорь — на N групп. */
+export const shotAnchors = pgTable(
+  "shot_anchors",
+  {
+    shotId: text("shot_id").notNull(),
+    anchorId: text("anchor_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.shotId, t.anchorId] })],
+);
+
 export const knowledgeDocs = pgTable("knowledge_docs", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),

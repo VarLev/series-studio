@@ -13,6 +13,7 @@ import {
   sceneChainOf,
 } from "@/lib/beats";
 import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
+import { createEpisodeAnchor, getShotAnchorTexts } from "@/lib/anchors";
 import { ensureShotRefsAnalyzed } from "@/lib/refs";
 import { reconcileShotPromptRefs } from "@/lib/refDirectives";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
@@ -188,6 +189,8 @@ async function doReviseGroup(
       beats: mainCurrent,
       feedback,
       targetOrders: scoped,
+      // прикреплённые якоря — обязательные детали, которые правка не должна терять
+      anchors: await getShotAnchorTexts(shotId),
     });
 
     // точечная правка: детерминированно берём из ответа модели ТОЛЬКО целевые шоты,
@@ -284,6 +287,9 @@ export async function enhanceGroup(
 
     // догоняем анализ референсов группы, чтобы Enhance учитывал их контекст
     await ensureShotRefsAnalyzed(shotId);
+    // якоря группы: если их НЕТ — Enhance может предложить новые; если ЕСТЬ — только
+    // учитывает существующие и новых не выдумывает (решает по наличию, не пользователь)
+    const existingAnchors = await getShotAnchorTexts(shotId);
     const res = await llmEnhanceGroup({
       episodeId: shot.episodeId,
       shotId,
@@ -294,6 +300,7 @@ export async function enhanceGroup(
       timeWeather: chainTimeWeather(allRows, shotId),
       emotionalTone: shot.emotionalTone,
       sceneContext,
+      anchors: existingAnchors,
     });
     // Enhance только улучшает Main: все возвращённые шоты — основные (draft:false),
     // shots_draft игнорируем полностью (черновиков Enhance не создаёт)
@@ -347,6 +354,15 @@ export async function enhanceGroup(
       res.location.trim() || shot.location,
       cleanMain.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
     );
+
+    // якоря: Enhance предлагает новые ТОЛЬКО когда своих ещё не было — создаём их в
+    // пуле эпизода и цепляем к группе (source=enhance). Если якоря уже были, res.anchors
+    // приходит пустым (так велит промпт) и мы ничего не трогаем.
+    if (!existingAnchors.length && res.anchors.length) {
+      for (const text of res.anchors) {
+        await createEpisodeAnchor(shot.episodeId, shotId, text, "enhance");
+      }
+    }
 
     await recomputeEpisodeTimecodes(shot.episodeId);
     revalidatePath(shotPath(shot.episodeId, shotId));
