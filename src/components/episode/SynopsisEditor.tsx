@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   updateEpisode,
   breakdownEpisode,
+  pollBreakdownResult,
   saveBreakdown,
   saveLlmModelChoice,
 } from "@/lib/actions/episodes";
+import { countEpisodeShots } from "@/lib/actions/shots";
+import { useLongAction } from "@/components/useLongAction";
+import { toast } from "@/components/Toaster";
 import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
 import { estTextUsd, estTokens, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
@@ -84,19 +89,22 @@ export default function SynopsisEditor({
   const [durMin, setDurMin] = useState(DUR_DEFAULT[0]);
   const [durMax, setDurMax] = useState(DUR_DEFAULT[1]);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [breakingDown, setBreakingDown] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [preview, setPreview] = useState<Breakdown | null>(null);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // счётчик секунд, пока Claude раскадрирует — чтобы ожидание не выглядело зависанием
-  useEffect(() => {
-    if (!breakingDown) return;
-    const t0 = Date.now();
-    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
-    return () => clearInterval(id);
-  }, [breakingDown]);
+  const router = useRouter();
+  // разбивка и подтверждение — долгие вызовы с самовосстановлением через туннель:
+  // ответ экшена может потеряться, результат добирается поллингом (useLongAction)
+  const bd = useLongAction<Breakdown>();
+  const confirmAct = useLongAction<null>();
+  // повторные refresh после подтверждения: одиночный RSC-ответ мог потеряться
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(
+    () => () => {
+      if (refreshTimer.current) clearInterval(refreshTimer.current);
+    },
+    [],
+  );
 
   function pickModel(model: string) {
     onBreakdownModelChange(model);
@@ -187,19 +195,85 @@ export default function SynopsisEditor({
     scheduleSave(next);
   }
 
-  async function onBreakdown() {
-    setElapsed(0);
-    setBreakingDown(true);
+  function onBreakdown() {
     setError("");
-    const res = await breakdownEpisode(episodeId, breakdownModel, { min: durMin, max: durMax });
-    setBreakingDown(false);
-    if (res.ok) stashPreview(res.breakdown);
-    else setError(res.error);
+    // токен запуска: сервер кладёт результат в тайник под ним, и даже если ответ
+    // экшена потеряется в туннеле (llmBreakdown идёт минуты), поллинг его доберёт
+    const token = crypto.randomUUID();
+    bd.start({
+      run: async () => {
+        const res = await breakdownEpisode(
+          episodeId,
+          breakdownModel,
+          { min: durMin, max: durMax },
+          token,
+        );
+        return res.ok ? { ok: true, value: res.breakdown } : res;
+      },
+      poll: async () => {
+        const res = await pollBreakdownResult(episodeId, token);
+        if (!res) return null;
+        return res.ok ? { ok: true, value: res.breakdown } : res;
+      },
+      pollMs: 5000,
+      ceilingSec: 360,
+      ceilingMsg: t(
+        "Ответа нет дольше 6 минут. Раскадровка могла не создаться — попробуйте ещё раз или выберите более быструю модель.",
+        "No response for over 6 minutes. The breakdown may not have been created — try again or pick a faster model.",
+      ),
+      onOk: stashPreview,
+      onErr: setError,
+    });
   }
 
-  async function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace") {
-    await saveBreakdown(episodeId, confirmed, mode);
-    stashPreview(null);
+  // Промис резолвится по ФИНИШУ (успех/ошибка), а не по возврату экшена:
+  // BreakdownPreview ждёт его для своего saving-состояния (двойной тап по
+  // «Подтвердить» не должен продублировать группы)
+  function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace"): Promise<void> {
+    return new Promise((resolve) => {
+      void (async () => {
+        // свежий ориентир с сервера: пропсовый shotsCount мог устареть
+        const baseline = await countEpisodeShots(episodeId).catch(() => shotsCount);
+        const expected = mode === "append" ? baseline + confirmed.groups.length : null;
+        confirmAct.start({
+          run: async () => {
+            await saveBreakdown(episodeId, confirmed, mode);
+            return { ok: true, value: null };
+          },
+          // replace не поллим: новых групп может оказаться столько же, сколько
+          // старых — по числу не отличить; append детектируем по росту счётчика
+          poll:
+            expected == null
+              ? undefined
+              : async () =>
+                  (await countEpisodeShots(episodeId)) >= expected
+                    ? { ok: true, value: null }
+                    : null,
+          pollMs: 3000,
+          ceilingSec: 60,
+          ceilingMsg: t(
+            "Ответ не пришёл. Группы могли создаться — проверьте вкладку «Группы» и при повторе используйте «заменить».",
+            "No response. The groups may have been created — check the Groups tab; if retrying, use “replace”.",
+          ),
+          onOk: () => {
+            stashPreview(null);
+            // ревалидация из ответа могла потеряться — добираем свежий список
+            // групп повторными refresh (паттерн PromptBlock)
+            router.refresh();
+            let tries = 0;
+            refreshTimer.current = setInterval(() => {
+              router.refresh();
+              if (++tries >= 4 && refreshTimer.current) clearInterval(refreshTimer.current);
+            }, 1000);
+            resolve();
+          },
+          onErr: (msg) => {
+            toast(msg);
+            resolve();
+          },
+        });
+      })();
+    });
   }
 
   const saveLabel =
@@ -310,12 +384,12 @@ export default function SynopsisEditor({
           </div>
           <button
             onClick={onBreakdown}
-            disabled={breakingDown}
+            disabled={bd.busy}
             className="min-h-[52px] w-full rounded-lg bg-violet-500 px-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {breakingDown
-              ? t(`Claude раскадрирует… ${elapsed}с`, `Claude is storyboarding… ${elapsed}s`)
+            {bd.busy
+              ? t(`Claude раскадрирует… ${bd.elapsed}с`, `Claude is storyboarding… ${bd.elapsed}s`)
               : (() => {
                   // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
                   const cost =

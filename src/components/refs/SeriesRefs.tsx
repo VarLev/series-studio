@@ -105,7 +105,15 @@ export default function SeriesRefs({
     // пусто → запрашиваем (vision-модель или кэш по файлу); просмотр покажет спиннер
     setAnalyzing(true);
     try {
-      const res = await analyzeShotReference(ref.id);
+      // до 2 попыток: ответ первой мог потеряться в туннеле, а анализ на сервере
+      // уже сохранился (кэш по файлу) — повтор вернёт его мгновенно
+      let res: Awaited<ReturnType<typeof analyzeShotReference>>;
+      try {
+        res = await analyzeShotReference(ref.id);
+      } catch {
+        await new Promise((rs) => setTimeout(rs, 4000));
+        res = await analyzeShotReference(ref.id);
+      }
       if (res.ok) setAnalyses((p) => ({ ...p, [ref.id]: res.analysis }));
       else toast(res.error);
     } catch {

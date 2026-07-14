@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
   updateEntity,
   setEntityArchived,
   deleteEntity,
   analyzeEntityReference,
+  getEntityFields,
   type EntityType,
 } from "@/lib/actions/entities";
+import { useLongAction } from "@/components/useLongAction";
 import { normalizeElementName } from "@/lib/entityName";
 import { SectionLabel } from "@/components/ui";
 import { toast } from "@/components/Toaster";
@@ -54,7 +56,15 @@ export default function EntityForm({
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [analyzing, startAnalyze] = useTransition();
+  // анализ — долгий vision-вызов: ответ может потеряться в туннеле, но сервер уже
+  // сохранил поля — добираем их поллингом getEntityFields (useLongAction)
+  const analyzeAct = useLongAction<{
+    name: string;
+    description: string;
+    wardrobe: string;
+    faceOnly: boolean | null; // null — результат добран поллингом, флаг неизвестен
+  }>();
+  const startingRef = useRef(false);
   const dirty =
     fields.name !== saved.name ||
     fields.elementName !== saved.elementName ||
@@ -77,37 +87,65 @@ export default function EntityForm({
     });
   }
 
+  /** Применить результат анализа к полям и снимку (общий финиш обоих путей). */
+  function applyAnalysis(v: { name: string; description: string; wardrobe: string; faceOnly: boolean | null }) {
+    // сервер уже сохранил значения — синхронизируем поля и снимок
+    // (имя, описание и гардероб; подписи референсов правятся в БД → галерея)
+    setFields((f) => {
+      const next = {
+        ...f,
+        name: v.name || f.name,
+        description: v.description || f.description,
+        wardrobe: v.wardrobe || f.wardrobe,
+      };
+      setSaved((s) => ({
+        ...s,
+        name: v.name || s.name,
+        description: v.description || s.description,
+        wardrobe: v.wardrobe || s.wardrobe,
+      }));
+      return next;
+    });
+    toast(
+      v.faceOnly
+        ? t("Анализ готов · референс помечен «только лицо»", "Analyzed · reference marked face-only")
+        : t("Анализ готов — все поля переведены на английский", "Analyzed — all fields translated to English"),
+    );
+  }
+
   /** Анализ основного референса: vision-модель заполняет описание и гардероб. */
-  function analyze() {
+  async function analyze() {
     if (!mainRefId) return;
-    startAnalyze(async () => {
-      const res = await analyzeEntityReference(mainRefId);
-      if (!res.ok) {
-        toast(res.error);
-        return;
-      }
-      // сервер уже сохранил значения — синхронизируем поля и снимок
-      // (имя, описание и гардероб; подписи референсов правятся в БД → галерея)
-      setFields((f) => {
-        const next = {
-          ...f,
-          name: res.name || f.name,
-          description: res.description || f.description,
-          wardrobe: res.wardrobe || f.wardrobe,
-        };
-        setSaved((s) => ({
-          ...s,
-          name: res.name || s.name,
-          description: res.description || s.description,
-          wardrobe: res.wardrobe || s.wardrobe,
-        }));
-        return next;
-      });
-      toast(
-        res.faceOnly
-          ? t("Анализ готов · референс помечен «только лицо»", "Analyzed · reference marked face-only")
-          : t("Анализ готов — все поля переведены на английский", "Analyzed — all fields translated to English"),
-      );
+    // защита от двойного тапа: до start есть await за снимком, busy ещё false
+    if (startingRef.current || analyzeAct.busy) return;
+    startingRef.current = true;
+    // снимок «до» с сервера: поллинг ловит момент, когда анализ изменил поля в БД
+    const before = await getEntityFields(entity.id).catch(() => null);
+    startingRef.current = false;
+    analyzeAct.start({
+      run: async () => {
+        const res = await analyzeEntityReference(mainRefId);
+        return res.ok ? { ok: true, value: { ...res, faceOnly: res.faceOnly } } : res;
+      },
+      poll: before
+        ? async () => {
+            const f = await getEntityFields(entity.id);
+            if (!f) return null;
+            const changed =
+              f.name !== before.name ||
+              f.description !== before.description ||
+              f.wardrobe !== before.wardrobe;
+            return changed ? { ok: true, value: { ...f, faceOnly: null } } : null;
+          }
+        : undefined,
+      pollMs: 5000,
+      ceilingSec: 180,
+      ceilingMsg: t(
+        "Ответа нет дольше 3 минут. Анализ мог сохраниться — обновите страницу.",
+        "No response for over 3 minutes. The analysis may have been saved — reload the page.",
+      ),
+      onOk: applyAnalysis,
+      onErr: (msg) => toast(msg),
     });
   }
 
@@ -163,7 +201,7 @@ export default function EntityForm({
           {entity.type === "character" && (
             <button
               onClick={analyze}
-              disabled={analyzing || !mainRefId}
+              disabled={analyzeAct.busy || !mainRefId}
               title={
                 mainRefId
                   ? t(
@@ -174,7 +212,9 @@ export default function EntityForm({
               }
               className="min-h-8 rounded-md border border-[var(--border-default)] px-2.5 text-[10.5px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:bg-ink-600 disabled:opacity-50"
             >
-              {analyzing ? t("Анализ…", "Analyzing…") : t("✨ Анализ", "✨ Analyze")}
+              {analyzeAct.busy
+                ? t(`Анализ… ${analyzeAct.elapsed}с`, `Analyzing… ${analyzeAct.elapsed}s`)
+                : t("✨ Анализ", "✨ Analyze")}
             </button>
           )}
         </div>

@@ -77,7 +77,15 @@ export default function ShotRefs({
     // пусто → запрашиваем (vision-модель или кэш по файлу); слайдер покажет спиннер
     setAnalyzing(true);
     try {
-      const res = await analyzeShotReference(r.id);
+      // до 2 попыток: ответ первой мог потеряться в туннеле, а анализ на сервере
+      // уже сохранился (кэш по файлу) — повтор вернёт его мгновенно
+      let res: Awaited<ReturnType<typeof analyzeShotReference>>;
+      try {
+        res = await analyzeShotReference(r.id);
+      } catch {
+        await new Promise((rs) => setTimeout(rs, 4000));
+        res = await analyzeShotReference(r.id);
+      }
       if (res.ok) setAnalyses((p) => ({ ...p, [r.id]: res.analysis }));
       else toast(res.error);
     } catch {

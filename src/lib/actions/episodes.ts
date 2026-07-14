@@ -2,7 +2,7 @@
 
 import { asc, desc, eq, sql as dsql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, episodes, shots } from "@/lib/db";
+import { getDb, episodes, settings, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
@@ -52,12 +52,29 @@ export async function saveLlmModelChoice(model: string): Promise<void> {
   await setSetting("llm_model", model);
 }
 
+// Тайник результата разбивки (самовосстановление через туннель): llmBreakdown идёт
+// минуты, ответ экшена часто теряется (trycloudflare ~100 с) — раньше результат
+// пропадал вместе с потраченными деньгами. Теперь он кладётся в settings под
+// клиентским ТОКЕНОМ запуска, и SynopsisEditor добирает его pollBreakdownResult.
+// Токен вместо таймстампа: часы телефона и сервера могут расходиться на минуты.
+const bdStashKey = (episodeId: string) => `bd_result:${episodeId}`;
+
 export async function breakdownEpisode(
   episodeId: string,
   model?: string,
   duration?: { min: number; max: number },
+  /** токен клиента — метит тайник результата именно этого запуска */
+  token?: string,
 ): Promise<{ ok: true; breakdown: Breakdown } | { ok: false; error: string }> {
   await requireAuth();
+  const stash = async (
+    payload: { ok: true; breakdown: Breakdown } | { ok: false; error: string },
+  ) => {
+    if (!token) return;
+    try {
+      await setSetting(bdStashKey(episodeId), JSON.stringify({ token, ...payload }));
+    } catch {}
+  };
   try {
     if (model) await setSetting("llm_model", model);
     const db = await getDb();
@@ -66,10 +83,43 @@ export async function breakdownEpisode(
     if (!ep.synopsisMd.trim())
       return { ok: false, error: "Сначала вставьте литературный сюжет во вкладке «Сюжет»" };
     const breakdown = await llmBreakdown(episodeId, ep.synopsisMd, model, duration);
+    await stash({ ok: true, breakdown });
     return { ok: true, breakdown };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+    const error = e instanceof Error ? e.message : "Неизвестная ошибка";
+    // ошибку тоже в тайник: клиент, потерявший ответ, покажет её вместо таймаута
+    await stash({ ok: false, error });
+    return { ok: false, error };
   }
+}
+
+/**
+ * Поллинг тайника разбивки: вернёт результат (или ошибку) запуска с этим токеном,
+ * когда breakdownEpisode его сохранит; null — ещё не готово / чужой запуск.
+ */
+export async function pollBreakdownResult(
+  episodeId: string,
+  token: string,
+): Promise<{ ok: true; breakdown: Breakdown } | { ok: false; error: string } | null> {
+  await requireAuth();
+  const db = await getDb();
+  const [row] = await db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, bdStashKey(episodeId)));
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.value) as {
+      token?: string;
+      ok?: boolean;
+      breakdown?: Breakdown;
+      error?: string;
+    };
+    if (parsed.token !== token) return null;
+    if (parsed.ok && parsed.breakdown) return { ok: true, breakdown: parsed.breakdown };
+    if (parsed.ok === false) return { ok: false, error: parsed.error ?? "Неизвестная ошибка" };
+  } catch {}
+  return null;
 }
 
 /**

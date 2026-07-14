@@ -159,6 +159,20 @@ export async function setReferenceFace(id: string, face: boolean): Promise<void>
 }
 
 /**
+ * Текущие поля сущности из БД — поллинг самовосстановления анализа (EntityForm):
+ * ответ analyzeEntityReference мог потеряться в туннеле, но сервер уже сохранил
+ * значения; клиент сверяет их со снимком до запуска и подхватывает изменения.
+ */
+export async function getEntityFields(
+  id: string,
+): Promise<{ name: string; description: string; wardrobe: string } | null> {
+  await requireAuth();
+  const db = await getDb();
+  const [e] = await db.select().from(entities).where(eq(entities.id, id));
+  return e ? { name: e.name, description: e.description, wardrobe: e.wardrobe } : null;
+}
+
+/**
  * Кнопка «Анализ» (библия): vision-модель приводит к английскому ВСЕ текстовые
  * данные сущности — имя, описание, гардероб и подписи всех её референсов — и
  * ставит пометку «только лицо». Возвращает имя/описание/гардероб — форма обновляет

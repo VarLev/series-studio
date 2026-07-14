@@ -2,7 +2,13 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { revisePrompt, saveManualVersion, generateShotPrompt } from "@/lib/actions/prompts";
+import {
+  revisePrompt,
+  saveManualVersion,
+  generateShotPrompt,
+  latestPromptVersion,
+} from "@/lib/actions/prompts";
+import { useLongAction } from "@/components/useLongAction";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 import type { PromptVersion } from "@/components/shot/PromptBlock";
@@ -96,8 +102,13 @@ export default function PromptEditor({
   const [diffMode, setDiffMode] = useState(false);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  // реворк и первая генерация создают версию в БД долгим LLM-вызовом — ответ может
+  // потеряться в туннеле; поллим latestPromptVersion и финишируем сами (useLongAction)
+  const verWatch = useLongAction<number>();
+  const startingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const latest = versions[0];
+  const busy = pending || verWatch.busy;
 
   const mention = useMemo(() => findMention(text, caret), [text, caret]);
   const mentionItems: MentionItem[] = useMemo(() => {
@@ -191,20 +202,43 @@ export default function PromptEditor({
     });
   }
 
-  function makeVersion() {
+  /** Финиш реворка/генерации: версия появилась в БД (по ответу ИЛИ по поллингу). */
+  function versionDone(v: number) {
+    toast(t(`Версия v${v} создана`, `Version v${v} created`));
+    router.push(`/episodes/${episodeId}/shots/${shotId}`);
+  }
+
+  async function makeVersion() {
     if (!note.trim()) {
       setError(t("Напишите замечание — что исправить в новой версии", "Write a note — what to fix in the new version"));
       return;
     }
     if (!latest) return;
+    // защита от двойного тапа: до verWatch.start есть await за ориентиром,
+    // busy в этом окне ещё false
+    if (startingRef.current || verWatch.busy) return;
+    startingRef.current = true;
     setError("");
-    startTransition(async () => {
-      const res = await revisePrompt(latest.id, note.trim());
-      if (!res.ok) setError(res.error);
-      else {
-        toast(t(`Версия v${latest.version + 1} создана`, `Version v${latest.version + 1} created`));
-        router.push(`/episodes/${episodeId}/shots/${shotId}`);
-      }
+    // свежий ориентир с сервера: пропсовые versions могли устареть
+    const baseline = await latestPromptVersion(shotId).catch(() => latest.version);
+    startingRef.current = false;
+    verWatch.start({
+      run: async () => {
+        const res = await revisePrompt(latest.id, note.trim());
+        return res.ok ? { ok: true, value: baseline + 1 } : res;
+      },
+      poll: async () => {
+        const v = await latestPromptVersion(shotId);
+        return v > baseline ? { ok: true, value: v } : null;
+      },
+      pollMs: 4000,
+      ceilingSec: 300,
+      ceilingMsg: t(
+        "Ответа нет дольше 5 минут. Версия могла не создаться — вернитесь на карточку шота и проверьте.",
+        "No response for over 5 minutes. The version may not have been created — go back to the shot card and check.",
+      ),
+      onOk: versionDone,
+      onErr: setError,
     });
   }
 
@@ -237,19 +271,36 @@ export default function PromptEditor({
           )}
         </div>
         <button
-          onClick={() =>
-            startTransition(async () => {
-              // первая версия из редактора — трек Seedance (Kling создаётся на карточке шота)
-              const res = await generateShotPrompt(shotId, "seedance-2.0");
-              if (!res.ok) setError(res.error);
-              else router.refresh();
-            })
-          }
-          disabled={pending}
+          onClick={() => {
+            setError("");
+            // первая версия из редактора — трек Seedance (Kling создаётся на карточке
+            // шота); версий ещё нет, поэтому успех = появилась хоть одна (поллинг)
+            verWatch.start({
+              run: async () => {
+                const res = await generateShotPrompt(shotId, "seedance-2.0");
+                return res.ok ? { ok: true, value: 1 } : res;
+              },
+              poll: async () => {
+                const v = await latestPromptVersion(shotId);
+                return v > 0 ? { ok: true, value: v } : null;
+              },
+              pollMs: 4000,
+              ceilingSec: 300,
+              ceilingMsg: t(
+                "Ответа нет дольше 5 минут. Промпт мог не создаться — попробуйте ещё раз.",
+                "No response for over 5 minutes. The prompt may not have been created — try again.",
+              ),
+              onOk: () => router.refresh(),
+              onErr: setError,
+            });
+          }}
+          disabled={busy}
           className="min-h-12 rounded-lg bg-violet-500 px-6 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
-          {pending ? t("Фабрика работает…", "Factory running…") : t("Собрать промпт · Claude", "Build prompt · Claude")}
+          {verWatch.busy
+            ? t(`Фабрика работает… ${verWatch.elapsed}с`, `Factory running… ${verWatch.elapsed}s`)
+            : t("Собрать промпт · Claude", "Build prompt · Claude")}
         </button>
         {error && <div className="text-[11px] text-danger">{error}</div>}
       </div>
@@ -442,15 +493,17 @@ export default function PromptEditor({
         <div className="flex items-stretch gap-2">
           <button
             onClick={makeVersion}
-            disabled={pending}
+            disabled={busy}
             className="min-h-[46px] flex-1 rounded-md bg-violet-500 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {pending ? t("Claude думает…", "Claude is thinking…") : t(`Создать v${(latest?.version ?? 0) + 1}`, `Create v${(latest?.version ?? 0) + 1}`)}
+            {verWatch.busy
+              ? t(`Claude думает… ${verWatch.elapsed}с`, `Claude is thinking… ${verWatch.elapsed}s`)
+              : t(`Создать v${(latest?.version ?? 0) + 1}`, `Create v${(latest?.version ?? 0) + 1}`)}
           </button>
           <button
             onClick={saveAsIs}
-            disabled={pending}
+            disabled={busy}
             className="min-h-[46px] rounded-md border border-[var(--border-default)] px-3 text-[10.5px] font-semibold leading-tight text-t200 hover:bg-ink-500 hover:text-t100 disabled:opacity-50"
           >
             {t("Сохранить", "Save")}
