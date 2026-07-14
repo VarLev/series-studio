@@ -7,6 +7,7 @@ import { getT } from "@/lib/i18n-server";
 import { EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import LongPressMenu from "@/components/LongPressMenu";
+import ExportButton from "@/components/episode/ExportButton";
 
 export const dynamic = "force-dynamic";
 
@@ -34,46 +35,49 @@ export default async function EpisodesPage() {
           который теперь виден на всех экранах */}
       <div className="flex flex-col gap-2.5 px-4 pb-10">
         {episodes.map((ep) => (
-          <LongPressMenu
-            key={ep.id}
-            title={`${t("Серия", "Episode")} ${String(ep.number).padStart(2, "0")} · ${ep.title || t("Без названия", "Untitled")}`}
-            deleteLabel={t("Удалить серию", "Delete episode")}
-            confirmLabel={t(
-              "Точно удалить серию со всем содержимым?",
-              "Really delete this episode with everything inside?",
-            )}
-            doneToast={t("Серия удалена", "Episode deleted")}
-            action={deleteEpisode.bind(null, ep.id)}
-          >
-            <Link
-              href={`/episodes/${ep.id}`}
-              className="flex items-center gap-3.5 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3 hover:border-[var(--border-strong)]"
+          <div key={ep.id} className="relative">
+            <LongPressMenu
+              title={`${t("Серия", "Episode")} ${String(ep.number).padStart(2, "0")} · ${ep.title || t("Без названия", "Untitled")}`}
+              deleteLabel={t("Удалить серию", "Delete episode")}
+              confirmLabel={t(
+                "Точно удалить серию со всем содержимым?",
+                "Really delete this episode with everything inside?",
+              )}
+              doneToast={t("Серия удалена", "Episode deleted")}
+              action={deleteEpisode.bind(null, ep.id)}
             >
-              <div className="relative flex h-14 w-14 shrink-0 items-end overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 p-1.5">
-                <span className="chrome-text font-display text-[20px] font-bold leading-none tracking-[0.04em]">
-                  {String(ep.number).padStart(2, "0")}
-                </span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="eyebrow mb-1">
-                  {t("Серия", "Episode")} {String(ep.number).padStart(2, "0")}
+              <Link
+                href={`/episodes/${ep.id}`}
+                className="flex items-center gap-3.5 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3 hover:border-[var(--border-strong)]"
+              >
+                <div className="relative flex h-14 w-14 shrink-0 items-end overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-ink-600 p-1.5">
+                  <span className="chrome-text font-display text-[20px] font-bold leading-none tracking-[0.04em]">
+                    {String(ep.number).padStart(2, "0")}
+                  </span>
                 </div>
-                <div className="truncate text-[14px] font-semibold text-t100">
-                  {ep.title || t("Без названия", "Untitled")}
+                <div className="min-w-0 flex-1 pr-9">
+                  <div className="eyebrow mb-1">
+                    {t("Серия", "Episode")} {String(ep.number).padStart(2, "0")}
+                  </div>
+                  <div className="truncate text-[14px] font-semibold text-t100">
+                    {ep.title || t("Без названия", "Untitled")}
+                  </div>
+                  <div className="mt-1 font-mono text-[10px] text-t400">
+                    {ep.shotsTotal
+                      ? t(
+                          `${ep.shotsApproved} из ${ep.shotsTotal} шотов утверждено`,
+                          `${ep.shotsApproved} of ${ep.shotsTotal} shots approved`,
+                        )
+                      : ep.synopsisMd
+                        ? t("сюжет написан · не раскадрован", "story written · not storyboarded")
+                        : t("пустая серия", "empty episode")}
+                  </div>
                 </div>
-                <div className="mt-1 font-mono text-[10px] text-t400">
-                  {ep.shotsTotal
-                    ? t(
-                        `${ep.shotsApproved} из ${ep.shotsTotal} шотов утверждено`,
-                        `${ep.shotsApproved} of ${ep.shotsTotal} shots approved`,
-                      )
-                    : ep.synopsisMd
-                      ? t("сюжет написан · не раскадрован", "story written · not storyboarded")
-                      : t("пустая серия", "empty episode")}
-                </div>
-              </div>
-            </Link>
-          </LongPressMenu>
+              </Link>
+            </LongPressMenu>
+            {/* сиблинг карточки (не внутри Link) — события не мешают навигации/long-press */}
+            <ExportButton episodeId={ep.id} />
+          </div>
         ))}
 
         {episodes.length === 0 && (

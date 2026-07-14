@@ -27,6 +27,64 @@ function runFfmpeg(bin: string, args: string[]): Promise<void> {
   });
 }
 
+// stderr от `ffmpeg -i <file>` (без выходного файла) содержит инфо о потоках;
+// код выхода при этом ненулевой — не считаем это ошибкой, отдаём собранный stderr
+function ffmpegStderr(bin: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    proc.stderr.on("data", (d: Buffer) => {
+      err += d.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", () => resolve(err));
+  });
+}
+
+async function ffmpegBinary(): Promise<string | null> {
+  try {
+    return (await import("ffmpeg-static")).default;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Метаданные видео (длительность в микросекундах + размеры кадра) через ffmpeg —
+ * для укладки клипов на таймлайн CapCut. null, если ffmpeg недоступен/не распарсили.
+ */
+export async function probeVideo(
+  storagePath: string,
+): Promise<{ durationUs: number; width: number; height: number } | null> {
+  const ffmpegPath = await ffmpegBinary();
+  if (!ffmpegPath) return null;
+  const supabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  let tempInput: string | null = null;
+  try {
+    let inputPath: string;
+    if (supabase) {
+      const bytes = await readFile(storagePath);
+      tempInput = path.join(os.tmpdir(), `ss-probe-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
+      await fs.writeFile(tempInput, bytes);
+      inputPath = tempInput;
+    } else {
+      inputPath = resolveLocalPath(storagePath);
+    }
+    const stderr = await ffmpegStderr(ffmpegPath, ["-hide_banner", "-i", inputPath]);
+    const dm = stderr.match(/Duration:\s*(\d+):(\d+):(\d+)\.(\d+)/);
+    // Duration печатается в сотых долях секунды → в микросекунды (1 сс = 10000 мкс)
+    const durationUs = dm
+      ? Math.round(((+dm[1] * 3600 + +dm[2] * 60 + +dm[3]) * 100 + +dm[4]) * 10000)
+      : 0;
+    const rm = stderr.match(/Video:.*?(\d{2,5})x(\d{2,5})/);
+    return { durationUs, width: rm ? +rm[1] : 0, height: rm ? +rm[2] : 0 };
+  } catch {
+    return null;
+  } finally {
+    if (tempInput) await fs.rm(tempInput, { force: true }).catch(() => {});
+  }
+}
+
 /**
  * Извлечь первый кадр видео в JPEG-постер рядом с видео. Best-effort: любой сбой
  * (ffmpeg не установлен — напр. production-install без devDeps, битый файл, не
@@ -67,6 +125,34 @@ export async function generateVideoPoster(videoStoragePath: string): Promise<str
     return null;
   } finally {
     await fs.rm(tempOut, { force: true }).catch(() => {});
+    if (tempInput) await fs.rm(tempInput, { force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Извлечь первый кадр видео в JPEG по ПРОИЗВОЛЬНОМУ пути (обложка CapCut-черновика
+ * draft_cover.jpg). Best-effort → boolean.
+ */
+export async function extractFrameTo(storagePath: string, outputAbsPath: string): Promise<boolean> {
+  const ffmpegPath = await ffmpegBinary();
+  if (!ffmpegPath) return false;
+  const supabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  let tempInput: string | null = null;
+  try {
+    let inputPath: string;
+    if (supabase) {
+      const bytes = await readFile(storagePath);
+      tempInput = path.join(os.tmpdir(), `ss-frame-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
+      await fs.writeFile(tempInput, bytes);
+      inputPath = tempInput;
+    } else {
+      inputPath = resolveLocalPath(storagePath);
+    }
+    await runFfmpeg(ffmpegPath, ["-y", "-i", inputPath, "-frames:v", "1", "-q:v", "3", outputAbsPath]);
+    return true;
+  } catch {
+    return false;
+  } finally {
     if (tempInput) await fs.rm(tempInput, { force: true }).catch(() => {});
   }
 }
