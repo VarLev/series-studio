@@ -7,6 +7,7 @@ import { displayGroupNumbers } from "@/lib/beats";
 import { getT } from "@/lib/i18n-server";
 import { availableImageModels } from "@/lib/generation";
 import { getFileUrl } from "@/lib/storage";
+import { thumbForResult } from "@/lib/poster";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
 import EpisodeTabs from "@/components/episode/EpisodeTabs";
@@ -72,12 +73,11 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     const winners = arr.filter((g) => g.winner);
     bestByShot.set(s.id, winners.length ? winners[winners.length - 1] : arr[0]);
   }
-  const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
+  // миниатюра: постер-jpg видео, если есть рядом, иначе само видео (thumbForResult)
   const thumbByShot = new Map<string, { url: string; isVideo: boolean }>();
   await Promise.all(
     [...bestByShot.entries()].map(async ([sid, g]) => {
-      const path = g.resultStoragePath!;
-      thumbByShot.set(sid, { url: await getFileUrl(path), isVideo: VIDEO_EXT.test(path) });
+      thumbByShot.set(sid, await thumbForResult(g.resultStoragePath!));
     }),
   );
 

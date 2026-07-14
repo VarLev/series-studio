@@ -1,6 +1,6 @@
 import { drizzle as drizzlePglite, type PgliteDatabase } from "drizzle-orm/pglite";
 import { drizzle as drizzlePostgres, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as schema from "./schema";
 
 export type DB = PgliteDatabase<typeof schema> | PostgresJsDatabase<typeof schema>;
@@ -197,7 +197,55 @@ CREATE INDEX IF NOT EXISTS prompts_shot_idx ON prompts (shot_id);
 CREATE INDEX IF NOT EXISTS shot_anchors_anchor_idx ON shot_anchors (anchor_id);
 `;
 
+/**
+ * Версионированные миграции схемы. На холодном старте прогоняются ТОЛЬКО ещё не
+ * применённые версии (текущая хранится в settings.schema_version), а не все ~70
+ * стейтментов каждый раз — включая data-fix UPDATE/DELETE, которые теперь
+ * выполняются ровно один раз. Миграция №0 — исходный SCHEMA_SQL целиком: она
+ * идемпотентна (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS, а её data-fix
+ * идемпотентны по факту предыдущего состояния), поэтому существующие БД переживут
+ * её один раз без вреда. Заморожена: НОВЫЕ изменения схемы добавлять отдельными
+ * элементами массива — списком стейтментов (НЕ режем по ";", поэтому точка с
+ * запятой внутри строкового литерала больше ничего не ломает).
+ */
+const MIGRATIONS: string[][] = [
+  // v0 — заморожена; правки схемы идут новыми версиями ниже
+  SCHEMA_SQL.split(";")
+    .map((s) => s.trim())
+    .filter(Boolean),
+];
+
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };
+
+async function runMigrations(db: DB): Promise<void> {
+  const latest = MIGRATIONS.length - 1;
+  // текущая версия схемы; если settings ещё нет (совсем новая БД) или ключа нет —
+  // стартуем с нуля (прогоняем всё). Мусор в значении тоже трактуем как «с нуля».
+  let current = -1;
+  try {
+    const [row] = await db
+      .select()
+      .from(schema.settings)
+      .where(eq(schema.settings.key, "schema_version"));
+    if (row?.value != null) {
+      const v = Number(row.value);
+      if (Number.isInteger(v) && v >= 0) current = v;
+    }
+  } catch {
+    current = -1; // таблицы settings ещё не существует — совсем новая БД
+  }
+  for (let v = current + 1; v <= latest; v++) {
+    for (const stmt of MIGRATIONS[v]) {
+      if (stmt) await db.execute(sql.raw(stmt));
+    }
+  }
+  if (current < latest) {
+    await db
+      .insert(schema.settings)
+      .values({ key: "schema_version", value: String(latest) })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value: String(latest) } });
+  }
+}
 
 async function createDb(): Promise<DB> {
   let db: DB;
@@ -215,10 +263,7 @@ async function createDb(): Promise<DB> {
     const client = new PGlite(dataDir);
     db = drizzlePglite(client, { schema });
   }
-  for (const stmt of SCHEMA_SQL.split(";")) {
-    const trimmed = stmt.trim();
-    if (trimmed) await db.execute(sql.raw(trimmed));
-  }
+  await runMigrations(db);
   return db;
 }
 

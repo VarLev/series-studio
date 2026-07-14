@@ -84,6 +84,46 @@ export async function latestPromptVersion(shotId: string): Promise<number> {
   return row?.version ?? 0;
 }
 
+/**
+ * Полный список версий трека (Seedance/Kling) в клиентской форме — для кнопки
+ * «показать ещё» в истории версий. На страницу шота уезжают только последние ~10
+ * версий + текущие каждого трека (экономия пейлоада через туннель); остальные
+ * подгружаются этим экшеном по требованию. Без ревалидации.
+ */
+export async function listPromptVersions(
+  shotId: string,
+  family: PromptFamily,
+): Promise<
+  Array<{
+    id: string;
+    version: number;
+    text: string;
+    negativePrompt: string;
+    targetModel: string;
+    feedbackNote: string;
+    createdAt: string;
+  }>
+> {
+  await requireAuth();
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(prompts)
+    .where(eq(prompts.shotId, shotId))
+    .orderBy(desc(prompts.version));
+  return rows
+    .filter((v) => promptFamily(v.targetModel) === family)
+    .map((v) => ({
+      id: v.id,
+      version: v.version,
+      text: v.text,
+      negativePrompt: v.negativePrompt ?? "",
+      targetModel: v.targetModel,
+      feedbackNote: v.feedbackNote ?? "",
+      createdAt: v.createdAt.toISOString(),
+    }));
+}
+
 /** U2 — сгенерировать промпт шота (промпт-фабрика). llmModel — какая ИИ пишет промпт. */
 export async function generateShotPrompt(
   shotId: string,

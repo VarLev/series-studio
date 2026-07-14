@@ -13,6 +13,7 @@ import {
   shotEntities,
 } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
+import { thumbForResult } from "@/lib/poster";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
 import { getTechniquesByIds, listTechniques } from "@/lib/director";
@@ -104,7 +105,7 @@ export default async function ShotPage(ctx: {
           ),
         )
     : [];
-  const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
+  // миниатюра киноленты: постер-jpg видео, если есть рядом, иначе само видео
   const videoThumbByShot = new Map<string, { url: string; isVideo: boolean }>();
   for (const s of allShots) {
     const arr = stripGens
@@ -113,10 +114,7 @@ export default async function ShotPage(ctx: {
     if (!arr.length) continue;
     const winners = arr.filter((g) => g.winner);
     const best = winners.length ? winners[winners.length - 1] : arr[0];
-    videoThumbByShot.set(s.id, {
-      url: await getFileUrl(best.resultStoragePath!),
-      isVideo: VIDEO_EXT.test(best.resultStoragePath!),
-    });
+    videoThumbByShot.set(s.id, await thumbForResult(best.resultStoragePath!));
   }
   // номер группы в серии: вставные группы (isInsert) в нумерацию не входят
   const displayNoById = displayGroupNumbers(allShots);
@@ -236,20 +234,34 @@ export default async function ShotPage(ctx: {
     .from(prompts)
     .where(eq(prompts.shotId, shotId))
     .orderBy(desc(prompts.version));
-  const versions = versionRows.map((v) => ({
-    id: v.id,
-    version: v.version,
-    text: v.text,
-    negativePrompt: v.negativePrompt ?? "",
-    targetModel: v.targetModel,
-    feedbackNote: v.feedbackNote ?? "",
-    createdAt: v.createdAt.toISOString(),
-  }));
   const promptVersionById = new Map(versionRows.map((v) => [v.id, v.version]));
-  // промпт-треки: текущая (последняя) версия каждого семейства
+  // промпт-треки: текущая (последняя) версия каждого семейства (по ПОЛНОМУ списку)
   const currentByFamily = {
     seedance: versionRows.find((v) => promptFamily(v.targetModel) === "seedance") ?? null,
     kling: versionRows.find((v) => promptFamily(v.targetModel) === "kling") ?? null,
+  };
+  // На клиент уезжают только последние ~10 версий + гарантированно текущие каждого
+  // трека — полные тексты ВСЕХ версий были бы лишним пейлоадом через туннель.
+  // currentByFamily/promptVersionById считаются выше по ПОЛНОМУ versionRows, поэтому
+  // не ломаются; остальные версии подгружает listPromptVersions по «показать ещё».
+  const RECENT_VERSIONS = 10;
+  const keepIds = new Set(versionRows.slice(0, RECENT_VERSIONS).map((v) => v.id));
+  if (currentByFamily.seedance) keepIds.add(currentByFamily.seedance.id);
+  if (currentByFamily.kling) keepIds.add(currentByFamily.kling.id);
+  const versions = versionRows
+    .filter((v) => keepIds.has(v.id))
+    .map((v) => ({
+      id: v.id,
+      version: v.version,
+      text: v.text,
+      negativePrompt: v.negativePrompt ?? "",
+      targetModel: v.targetModel,
+      feedbackNote: v.feedbackNote ?? "",
+      createdAt: v.createdAt.toISOString(),
+    }));
+  const versionCountByFamily = {
+    seedance: versionRows.filter((v) => promptFamily(v.targetModel) === "seedance").length,
+    kling: versionRows.filter((v) => promptFamily(v.targetModel) === "kling").length,
   };
 
   const genRows = await db
@@ -605,6 +617,7 @@ export default async function ShotPage(ctx: {
               shotId={shotId}
               episodeId={episodeId}
               versions={versions}
+              versionCountByFamily={versionCountByFamily}
               tokens={tokens}
               tokenImages={tokenImages}
               llmModel={settings.llm_model}

@@ -8,7 +8,7 @@
  * эпизода для переиспользования (прикрепить/удалить). Прикреплённые якоря —
  * ОБЯЗАТЕЛЬНЫЕ пометки в видео-промпте, Enhance и Rework.
  */
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
 import { createAnchor, attachAnchor, detachAnchor, deleteAnchor } from "@/lib/actions/anchors";
 import { toast } from "@/components/Toaster";
@@ -41,11 +41,28 @@ export default function AnchorsSection({
   const [detailFor, setDetailFor] = useState<AnchorItem | null>(null);
   const [draft, setDraft] = useState("");
   const [pending, startTransition] = useTransition();
+  // оптимистичные чипы: прикрепление/создание/открепление применяются к списку
+  // мгновенно, сервер догоняет через revalidatePath. Ошибка экшена откатывает
+  // (useOptimistic возвращается к базовому `attached`) и run() показывает toast.
+  const [optimisticAttached, applyOptimistic] = useOptimistic(
+    attached,
+    (state: AnchorItem[], action: { type: "add"; anchor: AnchorItem } | { type: "remove"; id: string }) =>
+      action.type === "add"
+        ? state.some((a) => a.id === action.anchor.id)
+          ? state
+          : [...state, action.anchor]
+        : state.filter((a) => a.id !== action.id),
+  );
 
-  function run(fn: () => Promise<void>, done?: string) {
+  function run(
+    fn: () => Promise<void>,
+    optimistic?: { type: "add"; anchor: AnchorItem } | { type: "remove"; id: string },
+    done?: string,
+  ) {
     // no-refresh: экшены якорей уже делают revalidatePath — Next применит свежее
     // RSC-дерево из ответа экшена сам, второй round-trip (router.refresh) не нужен
     startTransition(async () => {
+      if (optimistic) applyOptimistic(optimistic);
       try {
         await fn();
         if (done) toast(done);
@@ -61,13 +78,15 @@ export default function AnchorsSection({
     if (!text) return;
     setDraft("");
     setAddOpen(false);
-    run(() => createAnchor(shotId, text), t("Якорь добавлен", "Anchor added"));
+    // временный id для оптимистичного чипа — заменится реальным при ревалидации
+    const optimistic: AnchorItem = { id: `tmp-${Date.now()}`, text, source: "manual" };
+    run(() => createAnchor(shotId, text), { type: "add", anchor: optimistic }, t("Якорь добавлен", "Anchor added"));
   }
 
   return (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        {attached.map((a) => (
+        {optimisticAttached.map((a) => (
           <span
             key={a.id}
             className="inline-flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-ink-600 py-1 pl-2 pr-1"
@@ -89,7 +108,7 @@ export default function AnchorsSection({
             <button
               aria-label={t("Открепить якорь", "Detach anchor")}
               disabled={pending}
-              onClick={() => run(() => detachAnchor(shotId, a.id))}
+              onClick={() => run(() => detachAnchor(shotId, a.id), { type: "remove", id: a.id })}
               className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger disabled:opacity-50"
             >
               ×
@@ -145,7 +164,11 @@ export default function AnchorsSection({
                       disabled={pending}
                       onClick={() => {
                         setAddOpen(false);
-                        run(() => attachAnchor(shotId, a.id), t("Якорь прикреплён", "Anchor attached"));
+                        run(
+                          () => attachAnchor(shotId, a.id),
+                          { type: "add", anchor: a },
+                          t("Якорь прикреплён", "Anchor attached"),
+                        );
                       }}
                       className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:text-violet-100 disabled:opacity-50"
                     >
@@ -155,7 +178,13 @@ export default function AnchorsSection({
                     <button
                       aria-label={t("Удалить из эпизода", "Delete from episode")}
                       disabled={pending}
-                      onClick={() => run(() => deleteAnchor(shotId, a.id), t("Якорь удалён", "Anchor deleted"))}
+                      onClick={() =>
+                        run(
+                          () => deleteAnchor(shotId, a.id),
+                          { type: "remove", id: a.id },
+                          t("Якорь удалён", "Anchor deleted"),
+                        )
+                      }
                       className="flex h-7 w-7 items-center justify-center rounded-md text-t400 hover:bg-ink-600 hover:text-danger disabled:opacity-50"
                     >
                       🗑
@@ -185,7 +214,7 @@ export default function AnchorsSection({
                 onClick={() => {
                   const id = detailFor.id;
                   setDetailFor(null);
-                  run(() => detachAnchor(shotId, id), t("Якорь откреплён", "Anchor detached"));
+                  run(() => detachAnchor(shotId, id), { type: "remove", id }, t("Якорь откреплён", "Anchor detached"));
                 }}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] text-[11px] font-semibold uppercase tracking-[0.08em] text-t200 hover:border-[var(--border-strong)] disabled:opacity-50"
               >
@@ -196,7 +225,7 @@ export default function AnchorsSection({
                 onClick={() => {
                   const id = detailFor.id;
                   setDetailFor(null);
-                  run(() => deleteAnchor(shotId, id), t("Якорь удалён", "Anchor deleted"));
+                  run(() => deleteAnchor(shotId, id), { type: "remove", id }, t("Якорь удалён", "Anchor deleted"));
                 }}
                 className="min-h-10 flex-1 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold uppercase tracking-[0.08em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
               >

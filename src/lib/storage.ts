@@ -52,6 +52,25 @@ export async function getFileUrl(storagePath: string): Promise<string> {
   return `/api/files/${safeKey}`;
 }
 
+/** Есть ли файл в хранилище (для постеров видео — проверка по конвенции имени). */
+export async function fileExists(storagePath: string): Promise<boolean> {
+  const safeKey = sanitizeKey(storagePath);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    const slash = safeKey.lastIndexOf("/");
+    const dir = slash === -1 ? "" : safeKey.slice(0, slash);
+    const name = slash === -1 ? safeKey : safeKey.slice(slash + 1);
+    const { data, error } = await supabase.storage.from(BUCKET).list(dir, { search: name, limit: 1 });
+    return !error && Boolean(data?.some((f) => f.name === name));
+  }
+  try {
+    await fs.stat(resolveLocalPath(storagePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Абсолютный путь файла в локальном хранилище (с защитой от выхода за корень). */
 export function resolveLocalPath(storagePath: string): string {
   const filePath = path.join(LOCAL_ROOT(), sanitizeKey(storagePath));

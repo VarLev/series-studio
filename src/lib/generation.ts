@@ -29,6 +29,7 @@ import {
 import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
+import { generateVideoPoster } from "@/lib/poster";
 import { toProviderJpeg } from "@/lib/image";
 import { imageModelMeta, type ImageModelMeta } from "@/lib/imageModels";
 import { promptFamily } from "@/lib/llm/models";
@@ -1195,6 +1196,10 @@ async function pollActiveGenerationsInner(onlyIds?: string[]): Promise<{
         } else {
           throw new Error("Провайдер завершил задачу без URL результата");
         }
+        // постер первого кадра (best-effort): миниатюры страниц отдаются лёгким
+        // jpg, а не range-запросами mp4 через туннель. Сбой извлечения не роняет
+        // приземление — миниатюра просто фолбэкнется на само видео.
+        await generateVideoPoster(storagePath).catch(() => null);
         await db
           .update(generations)
           .set({

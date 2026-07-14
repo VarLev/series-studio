@@ -1,8 +1,9 @@
 ﻿import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // PGlite тянет wasm-ассеты — бандлинг ломает его файловую систему
-  serverExternalPackages: ["@electric-sql/pglite"],
+  // PGlite тянет wasm-ассеты — бандлинг ломает его файловую систему;
+  // ffmpeg-static — путь к бинарю ffmpeg (постеры видео), бандлить нельзя
+  serverExternalPackages: ["@electric-sql/pglite", "ffmpeg-static"],
   // /knowledge читается в рантайме (база знаний промпт-фабрики) — включаем в деплой
   outputFileTracingIncludes: {
     "/costs": ["./knowledge/**/*"],
