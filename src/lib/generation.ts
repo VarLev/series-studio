@@ -1049,15 +1049,85 @@ async function pollActiveGenerationsInner(onlyIds?: string[]): Promise<{
     .where(inArray(generations.status, [...ACTIVE]));
   if (onlyIds?.length) rows = rows.filter((r) => onlyIds.includes(r.id));
 
-  let updated = 0;
-  for (const gen of rows) {
+  // Фаза 1: опрос статуса у провайдера ПАРАЛЛЕЛЬНО, чанками по 4. getStatus — самый
+  // медленный шаг (MCP-вызов); последовательно 5 задач × медленный провайдер = тик
+  // дольше интервала поллинга. Приземление/записи (фаза 2) оставляем
+  // ПОСЛЕДОВАТЕЛЬНЫМИ по исходному порядку: так не возникает гонок, которые внёс бы
+  // параллельный landing — выдача одинакового REF-токена двум референсам одного
+  // эпизода и застревание статуса шота при пересчёте, когда две его модели
+  // (Seedance+Kling) завершаются одновременно.
+  type StatusResult = Awaited<ReturnType<GenerationProvider["getStatus"]>>;
+  type Fetched =
+    | { tag: "placeholder" }
+    | { tag: "skip" }
+    | { tag: "ok"; status: StatusResult; bundle: UrlBundle }
+    | { tag: "err"; error: unknown; bundle: UrlBundle };
+
+  async function fetchFor(gen: (typeof rows)[number]): Promise<Fetched> {
+    if (!gen.providerJobId) return { tag: "placeholder" };
     // image-задачи опрашивает image-провайдер; видео — провайдер задачи
     // (маршрутизация по generations.provider: higgsfield-mcp / kling-mcp / …)
     const provider =
       gen.kind === "reference"
         ? imageProvider
         : ((await videoProviderByName(gen.provider)) ?? videoProvider);
-    if (!gen.providerJobId) {
+    if (gen.provider !== provider.name) return { tag: "skip" };
+    const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
+    try {
+      const status = await provider.getStatus({
+        jobId: gen.providerJobId,
+        statusUrl: bundle._urls?.statusUrl,
+        cancelUrl: bundle._urls?.cancelUrl,
+      });
+      return { tag: "ok", status, bundle };
+    } catch (error) {
+      return { tag: "err", error, bundle };
+    }
+  }
+
+  // сетевые сбои поллинга не роняют цикл; протухшие мок-задачи закрываем
+  async function handlePollError(
+    gen: (typeof rows)[number],
+    bundle: UrlBundle,
+    e: unknown,
+  ): Promise<number> {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("Мок-задача не найдена")) {
+      await db
+        .update(generations)
+        .set({ status: "failed", error: message })
+        .where(eq(generations.id, gen.id));
+      if (gen.shotId) await recalcShotStatus(gen.shotId);
+      return 1;
+    }
+    // ошибка связи НЕ глотается молча: пишем в _poll — карточка покажет
+    // «нет связи с Higgsfield» вместо вечной «очереди» (инцидент 2026-07-11)
+    bundle._poll = {
+      at: Date.now(),
+      error: message.slice(0, 200),
+      fails: (bundle._poll?.fails ?? 0) + 1,
+    };
+    await db
+      .update(generations)
+      .set({ paramsJson: JSON.stringify(bundle) })
+      .where(eq(generations.id, gen.id));
+    return 1;
+  }
+
+  const fetched: Fetched[] = [];
+  const POLL_CONCURRENCY = 4;
+  for (let i = 0; i < rows.length; i += POLL_CONCURRENCY) {
+    // fetchFor не бросает (ошибки заворачиваются в tag:"err") — Promise.all безопасен
+    fetched.push(...(await Promise.all(rows.slice(i, i + POLL_CONCURRENCY).map(fetchFor))));
+  }
+
+  // Фаза 2: последовательная обработка результатов в исходном порядке
+  let updated = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const gen = rows[i];
+    const f = fetched[i];
+    if (f.tag === "skip") continue;
+    if (f.tag === "placeholder") {
       // плейсхолдер видео-задачи ещё отправляется в фоне (submitJobs). Если завис
       // дольше 3 минут (например, сервер перезапускался в момент отправки) —
       // помечаем ошибкой, чтобы не крутился вечный «в очереди».
@@ -1074,14 +1144,13 @@ async function pollActiveGenerationsInner(onlyIds?: string[]): Promise<{
       }
       continue;
     }
-    if (gen.provider !== provider.name) continue;
-    const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
+    const bundle = f.bundle;
+    if (f.tag === "err") {
+      updated += await handlePollError(gen, bundle, f.error);
+      continue;
+    }
     try {
-      const status = await provider.getStatus({
-        jobId: gen.providerJobId,
-        statusUrl: bundle._urls?.statusUrl,
-        cancelUrl: bundle._urls?.cancelUrl,
-      });
+      const status = f.status;
       // связь с провайдером ок — снимаем предупреждение, если оно было
       if (bundle._poll?.error) {
         bundle._poll = { at: Date.now() };
@@ -1149,29 +1218,7 @@ async function pollActiveGenerationsInner(onlyIds?: string[]): Promise<{
       }
       updated++;
     } catch (e) {
-      // сетевые сбои поллинга не роняют цикл; протухшие мок-задачи закрываем
-      const message = e instanceof Error ? e.message : String(e);
-      if (message.includes("Мок-задача не найдена")) {
-        await db
-          .update(generations)
-          .set({ status: "failed", error: message })
-          .where(eq(generations.id, gen.id));
-        if (gen.shotId) await recalcShotStatus(gen.shotId);
-        updated++;
-      } else {
-        // ошибка связи НЕ глотается молча: пишем в _poll — карточка покажет
-        // «нет связи с Higgsfield» вместо вечной «очереди» (инцидент 2026-07-11)
-        bundle._poll = {
-          at: Date.now(),
-          error: message.slice(0, 200),
-          fails: (bundle._poll?.fails ?? 0) + 1,
-        };
-        await db
-          .update(generations)
-          .set({ paramsJson: JSON.stringify(bundle) })
-          .where(eq(generations.id, gen.id));
-        updated++;
-      }
+      updated += await handlePollError(gen, bundle, e);
     }
   }
 

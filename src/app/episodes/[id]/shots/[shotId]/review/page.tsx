@@ -3,6 +3,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, prompts, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
+import { safeParse } from "@/lib/params";
 import ReviewPlayer from "@/components/review/ReviewPlayer";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +28,11 @@ export default async function ReviewPage(ctx: {
     .orderBy(desc(prompts.version));
   const promptVersionById = new Map(versionRows.map((v) => [v.id, v.version]));
   const latest = versionRows[0] ?? null;
-  const latestParams = latest
-    ? (JSON.parse(latest.paramsJson || "{}") as {
-        aspect_ratio?: string;
-        duration?: number;
-        quality?: string;
-      })
-    : {};
+  const latestParams = safeParse<{
+    aspect_ratio?: string;
+    duration?: number;
+    quality?: string;
+  }>(latest?.paramsJson, {});
 
   const genRows = await db
     .select()

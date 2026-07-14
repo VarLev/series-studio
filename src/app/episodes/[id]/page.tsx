@@ -195,18 +195,21 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
     )),
   ];
 
-  // активные задачи-листы (для полосы «рисуется» и автообновления страницы)
+  // активные задачи эпизода ОБОИХ видов (узкие колонки): и референсы-листы, и видео
+  // шотов — иначе, пока пользователь на списке групп, статусы «генерируется» у шотов
+  // замирают (провайдера никто не опрашивает). Видео-задачи имеют episode_id.
   const activeGenRows = await db
-    .select()
+    .select({ id: generations.id, kind: generations.kind, paramsJson: generations.paramsJson })
     .from(generations)
     .where(
       and(
         eq(generations.episodeId, id),
-        eq(generations.kind, "reference"),
         inArray(generations.status, ["queued", "running"]),
       ),
     );
+  // полоса «рисуется» на вкладке раскадровки — только листы-референсы (storyboard)
   const pendingStoryboards = activeGenRows.filter((g) => {
+    if (g.kind !== "reference") return false;
     try {
       return (JSON.parse(g.paramsJson || "{}") as { source_tag?: string }).source_tag === "storyboard";
     } catch {

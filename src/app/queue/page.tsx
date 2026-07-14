@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, shots } from "@/lib/db";
 import { ScreenHeader, EmptyState } from "@/components/ui";
 import { getT } from "@/lib/i18n-server";
+import { safeParse } from "@/lib/params";
 import GenPoller from "@/components/GenPoller";
 import QueueList from "@/components/queue/QueueList";
 
@@ -41,10 +42,10 @@ export default async function QueuePage() {
   const toItem = (g: (typeof gens)[number]) => {
     const shot = g.shotId ? shotById.get(g.shotId) : undefined;
     const ep = shot ? epById.get(shot.episodeId) : g.episodeId ? epById.get(g.episodeId) : undefined;
-    const params = JSON.parse(g.paramsJson || "{}") as {
-      estimate?: number | null;
-      _poll?: { error?: string };
-    };
+    const params = safeParse<{ estimate?: number | null; _poll?: { error?: string } }>(
+      g.paramsJson,
+      {},
+    );
     const label =
       g.kind === "reference"
         ? t(

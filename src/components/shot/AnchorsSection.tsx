@@ -9,7 +9,6 @@
  * ОБЯЗАТЕЛЬНЫЕ пометки в видео-промпте, Enhance и Rework.
  */
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { createAnchor, attachAnchor, detachAnchor, deleteAnchor } from "@/lib/actions/anchors";
 import { toast } from "@/components/Toaster";
@@ -38,17 +37,17 @@ export default function AnchorsSection({
   available: AnchorItem[];
 }) {
   const t = useT();
-  const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [detailFor, setDetailFor] = useState<AnchorItem | null>(null);
   const [draft, setDraft] = useState("");
   const [pending, startTransition] = useTransition();
 
   function run(fn: () => Promise<void>, done?: string) {
+    // no-refresh: экшены якорей уже делают revalidatePath — Next применит свежее
+    // RSC-дерево из ответа экшена сам, второй round-trip (router.refresh) не нужен
     startTransition(async () => {
       try {
         await fn();
-        router.refresh();
         if (done) toast(done);
       } catch (err) {
         console.error("anchor action failed:", err);
