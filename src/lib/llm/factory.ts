@@ -21,8 +21,9 @@ import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives
 import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { effectiveOutfit } from "@/lib/wardrobe";
-import { promptFamily, visionModelFrom } from "./models";
-import { runJson } from "./client";
+import { promptFamily, visionModelFrom, CHEAPEST_LLM, isClaudeModel } from "./models";
+import { runJson, type LlmCall } from "./client";
+import type { z } from "zod";
 import {
   breakdownSchema,
   enhanceGroupSchema,
@@ -1007,6 +1008,48 @@ export async function llmRevisePrompt(
   ).then(enforceTemplateInvariants);
 }
 
+/** Транзиентная ошибка провайдера (перегрузка/таймаут/сеть) — стоит повторить. */
+function isTransientLlmError(e: unknown): boolean {
+  const status = (e as { status?: number })?.status;
+  if (typeof status === "number" && [408, 409, 425, 429, 500, 502, 503, 504, 529].includes(status)) {
+    return true;
+  }
+  const name = e instanceof Error ? e.name : "";
+  if (name === "TimeoutError" || name === "AbortError") return true;
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return /overload|unavailable|try again|rate limit|timeout|timed out|econnreset|etimedout|fetch failed|socket hang up|503|502|529/.test(
+    msg,
+  );
+}
+
+/**
+ * Vision-анализ с отказоустойчивостью. Выбранная «простая» vision-модель бывает
+ * недоступна — Gemini free tier часто отдаёт 503/overloaded. Анализ референсов
+ * best-effort, но одна перегрузка чужого провайдера не должна оставлять референс
+ * без описания: (1) при транзиентной ошибке — один повтор той же моделью с паузой;
+ * (2) если всё ещё не вышло и модель не Anthropic — повтор на гарантированной
+ * vision-модели (Haiku).
+ */
+async function runVisionJson<T>(call: LlmCall, schema: z.ZodType<T>): Promise<T> {
+  try {
+    return await runJson(call, schema);
+  } catch (e) {
+    if (isTransientLlmError(e)) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        return await runJson(call, schema);
+      } catch {
+        // не вышло и со второй попытки — уходим на фолбэк ниже
+      }
+    }
+    if (isClaudeModel(call.model)) throw e; // уже на Anthropic — фолбэкать некуда
+    console.warn(
+      `vision «${call.model}» недоступна (${e instanceof Error ? e.message.slice(0, 120) : e}); повтор на ${CHEAPEST_LLM}`,
+    );
+    return await runJson({ ...call, model: CHEAPEST_LLM }, schema);
+  }
+}
+
 /**
  * Кнопка «Анализ» в библии: vision-модель описывает референс персонажа. Весь
  * результат ТОЛЬКО на английском и переводит ВСЕ текстовые поля сущности — имя,
@@ -1059,7 +1102,7 @@ export async function llmAnalyzeCharacterRef(
       "\n"
     : "";
 
-  return runJson(
+  return runVisionJson(
     {
       kind: "analysis",
       model,
@@ -1117,7 +1160,7 @@ export async function llmAnalyzeShotReference(refId: string): Promise<ReferenceA
   const settings = await getAllSettings();
   const model = visionModelFrom(settings.llm_simple_model);
 
-  return runJson(
+  return runVisionJson(
     {
       kind: "analysis",
       model,
