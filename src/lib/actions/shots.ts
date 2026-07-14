@@ -231,9 +231,10 @@ async function doReviseGroup(
 
 /**
  * Enhance (кнопка на группе): Opus через CLI переоценивает группу целиком и
- * применяет результат — переписывает/добавляет/удаляет шоты с таймингом,
- * закрепляет за шотами режиссёрские приёмы, уточняет локацию/погоду/тон и
- * умно синхронизирует персонажей в кадре (их референсы идут в генерацию).
+ * УЛУЧШАЕТ существующие основные шоты (Main), НЕ пересобирая сюжет: шлифует планы/
+ * камеру, дозаполняет поля, при нехватке времени разбивает шот, закрепляет приёмы,
+ * уточняет локацию/погоду/тон и синхронизирует персонажей в кадре. Черновики (Draft)
+ * не читаются и не трогаются — сохраняются как есть.
  * ВСЕГДА Opus + CLI (подписка) — это задано в llmEnhanceGroup, не настройкой.
  */
 export async function enhanceGroup(
@@ -249,6 +250,10 @@ export async function enhanceGroup(
       const raw = JSON.parse(shot.beatsJson || "[]");
       if (Array.isArray(raw)) currentBeats = raw as GroupShot[];
     } catch {}
+    // Enhance работает ТОЛЬКО с основными шотами (Main): улучшает существующее, не
+    // пересобирает. Черновики (Draft) полностью игнорируются и сохраняются как есть.
+    const mainCurrent = currentBeats.filter((b) => !b.draft);
+    const draftCurrent = currentBeats.filter((b) => b.draft);
 
     const allRows = await db
       .select()
@@ -284,30 +289,27 @@ export async function enhanceGroup(
       shotId,
       groupTitle: shot.title,
       durationSec: shot.durationSec,
-      beats: currentBeats,
+      beats: mainCurrent,
       location: chainLocation(allRows, shotId),
       timeWeather: chainTimeWeather(allRows, shotId),
       emotionalTone: shot.emotionalTone,
       sceneContext,
     });
-    // Opus может вернуть черновики отдельным массивом shots_draft вместо
-    // draft:true внутри shots (реальный инцидент) — сливаем оба формата в один
-    // список; для shots_draft флаг draft форсируем
-    const allReturned: GroupShot[] = [
-      ...res.shots,
-      ...res.shots_draft.map((s) => ({ ...s, draft: true })),
-    ];
-    // группа обязана иметь хотя бы один ОСНОВНОЙ шот — черновики одни видео не дают
-    if (!allReturned.some((s) => !s.draft)) {
+    // Enhance только улучшает Main: все возвращённые шоты — основные (draft:false),
+    // shots_draft игнорируем полностью (черновиков Enhance не создаёт)
+    const improvedMain: GroupShot[] = res.shots.map((s) => ({ ...s, draft: false }));
+    if (!improvedMain.length) {
       return { ok: false, error: "Модель не вернула ни одного основного шота" };
     }
 
     // приёмы: оставляем только реально существующие в библиотеке id, максимум 1 на шот
     const knownTech = new Set((await listTechniques()).map((t) => t.id));
-    const cleanShots = allReturned.map((s) => ({
+    const cleanMain = improvedMain.map((s) => ({
       ...s,
       technique_id: s.technique_id && knownTech.has(s.technique_id) ? s.technique_id : "",
     }));
+    // объединяем улучшенные основные с НЕТРОНУТЫМИ черновиками пользователя
+    const cleanShots = [...cleanMain, ...draftCurrent];
 
     const { beats, durationSec } = normalizeBeats(cleanShots, res.duration_sec);
     const finalTitle = res.title.trim() || shot.title;
@@ -343,7 +345,7 @@ export async function enhanceGroup(
     await syncLocationEntities(
       shotId,
       res.location.trim() || shot.location,
-      cleanShots.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
+      cleanMain.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
     );
 
     await recomputeEpisodeTimecodes(shot.episodeId);

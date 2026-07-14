@@ -109,8 +109,8 @@ export default function EnhanceButton({ shotId }: { shotId: string }) {
       onClick={onEnhance}
       disabled={busy}
       title={t(
-        "Opus переоценит группу: перепишет шоты (Main ≤15с, излишек — в черновики), подберёт режиссёрские приёмы, заполнит локацию/погоду/тон и определит, кто в кадре. Через подписку (CLI).",
-        "Opus re-evaluates the group: rewrites shots (Main ≤15s, overflow → drafts), picks director techniques, fills location/weather/tone and detects who's in frame. Via subscription (CLI).",
+        "Opus улучшит основные шоты (Main), НЕ пересобирая сюжет: уточнит планы/камеру, дозаполнит локацию/погоду/тон, при нехватке времени разобьёт шот, подберёт приёмы и определит, кто в кадре. Черновики (Draft) не трогает. Через подписку (CLI).",
+        "Opus improves the Main shots WITHOUT rebuilding the plot: refines framing/camera, fills location/weather/tone, splits a shot if time is tight, picks techniques and detects who's in frame. Leaves Drafts untouched. Via subscription (CLI).",
       )}
       className="flex min-h-9 shrink-0 items-center gap-1.5 self-start rounded-full border border-[var(--violet-400)] bg-[rgba(139,95,176,.12)] px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-violet-100 hover:bg-[rgba(139,95,176,.2)] disabled:opacity-60"
       style={{ boxShadow: "var(--glow-violet-sm)" }}

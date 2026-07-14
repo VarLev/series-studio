@@ -74,9 +74,9 @@ export default function PromptDrawer({ children }: { children: React.ReactNode }
           onClick={() => setOpen(false)}
         />
         <aside
-          className={`absolute inset-y-0 right-0 flex w-[95%] flex-col border-l border-[var(--border-default)] bg-ink-800 shadow-2xl transition-transform duration-200 ease-out ${
-            open ? "transform-none" : "translate-x-full"
-          } lg:static lg:w-auto lg:transform-none lg:border-l-0 lg:bg-transparent lg:shadow-none lg:transition-none`}
+          className={`absolute inset-y-0 right-0 flex w-[95%] flex-col border-l border-[var(--border-default)] bg-ink-800 shadow-2xl transition-[translate] duration-200 ease-out ${
+            open ? "translate-x-0" : "translate-x-full"
+          } lg:static lg:w-auto lg:translate-x-0 lg:border-l-0 lg:bg-transparent lg:shadow-none lg:transition-none`}
         >
           <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-3 lg:hidden">
             <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-t100">

@@ -1319,17 +1319,21 @@ export default function GroupShotsEditor({
                   </div>
                   <span className="font-mono text-[9.5px] text-t400">{t("сек", "sec")}</span>
                 </div>
-                <input
+                {/* framing/camera — тоже textarea c resize-y (как action/dialogue):
+                    поле можно тянуть по высоте. rows=1 держит компактный дефолт */}
+                <textarea
                   value={b.framing}
                   onChange={(e) => patch(i, { framing: e.target.value })}
+                  rows={1}
                   placeholder={t("План и ракурс", "Framing & angle")}
-                  className={`${fieldCls} font-mono text-[10.5px] text-t300`}
+                  className={`${fieldCls} resize-y font-mono text-[10.5px] leading-relaxed text-t300`}
                 />
-                <input
+                <textarea
                   value={b.camera}
                   onChange={(e) => patch(i, { camera: e.target.value })}
+                  rows={1}
                   placeholder={t("Что видит камера", "What the camera sees")}
-                  className={`${fieldCls} font-mono text-[10.5px] text-t300`}
+                  className={`${fieldCls} resize-y font-mono text-[10.5px] leading-relaxed text-t300`}
                 />
                 <textarea
                   value={b.action}

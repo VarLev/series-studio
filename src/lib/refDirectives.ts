@@ -69,9 +69,43 @@ export function referenceDirectiveLines(refs: DirectiveRef[], family: PromptFami
 // персонажей и локаций сюда НЕ попадают)
 const REF_ANCHOR_RE = /@(?:Comp\d+|Start|Image1)\b/i;
 
+// вольные упоминания стартового кадра БЕЗ якоря, которые модель раскидывает по телу
+// промпта (напр. «Match starting frame composition exactly …», «continues from the
+// starting frame»). Формулировки разные — общий устойчивый признак — «start(ing) frame»,
+// который в видео-промпте появляется только когда подразумевается стартовый кадр.
+const START_FRAME_MENTION_RE = /\bstart(?:ing)?[ -]?frame\b/i;
+
 /** Есть ли в тексте строки-директивы референса (по якорям). */
 export function hasReferenceDirectives(text: string): boolean {
   return text.split(/\r?\n/).some((l) => REF_ANCHOR_RE.test(l));
+}
+
+/**
+ * Вычищает вольные упоминания стартового кадра из тела промпта — на случай, когда
+ * стартового кадра БОЛЬШЕ НЕТ (сменили тип на композицию/layout или открепили), а
+ * модель оставила по тексту фразы вроде «Match starting frame composition exactly».
+ *
+ * Режем ПОСЕНТЕНСНО: строку делим на предложения по .!? (тире/точку-с-запятой
+ * границей НЕ считаем — иначе от «… exactly — same angle, same light.» остался бы
+ * обрывок) и выкидываем ТОЛЬКО предложения с упоминанием стартового кадра. Если
+ * строка целиком была про стартовый кадр — она исчезает. Идемпотентно.
+ */
+export function stripStartFrameMentions(text: string): string {
+  const out: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!START_FRAME_MENTION_RE.test(line)) {
+      out.push(line); // строки без упоминания (в т.ч. пустые) — как есть
+      continue;
+    }
+    const kept = line
+      .split(/(?<=[.!?])\s+/)
+      .filter((s) => !START_FRAME_MENTION_RE.test(s))
+      .join(" ")
+      .trim();
+    if (kept) out.push(kept); // пусто → строка была целиком про стартовый кадр, убираем
+  }
+  // схлопываем тройные пустые строки, которые могли появиться после вырезания
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 /**
@@ -85,24 +119,34 @@ export function applyReferenceDirectives(
   family: PromptFamily,
 ): string {
   const desired = referenceDirectiveLines(refs, family);
+  const hasStart = refs.some((r) => r.role === "start_frame");
   const lines = text.split(/\r?\n/);
   const firstAnchorIdx = lines.findIndex((l) => REF_ANCHOR_RE.test(l));
   const hadAnchor = firstAnchorIdx >= 0;
-  // нечего менять: директив нет и не должно быть
-  if (!hadAnchor && desired.length === 0) return text;
 
-  const kept = lines.filter((l) => !REF_ANCHOR_RE.test(l));
-  if (desired.length === 0) {
-    // референсов не осталось — просто вырезаем строки-директивы
-    return kept.join("\n");
+  // 1) реконсиляция строк-директив по якорю → result
+  let result: string;
+  if (!hadAnchor && desired.length === 0) {
+    result = text;
+  } else {
+    const kept = lines.filter((l) => !REF_ANCHOR_RE.test(l));
+    if (desired.length === 0) {
+      // референсов не осталось — просто вырезаем строки-директивы
+      result = kept.join("\n");
+    } else {
+      // вставляем на позицию, где были старые директивы (сохраняем возможный заголовок
+      // над ними); при первом добавлении — в самое начало
+      const insertAt = hadAnchor
+        ? lines.slice(0, firstAnchorIdx).filter((l) => !REF_ANCHOR_RE.test(l)).length
+        : 0;
+      result = [...kept.slice(0, insertAt), ...desired, ...kept.slice(insertAt)].join("\n");
+    }
   }
-  // вставляем на позицию, где были старые директивы (сохраняем возможный заголовок
-  // над ними); при первом добавлении — в самое начало
-  const insertAt = hadAnchor
-    ? lines.slice(0, firstAnchorIdx).filter((l) => !REF_ANCHOR_RE.test(l)).length
-    : 0;
-  const result = [...kept.slice(0, insertAt), ...desired, ...kept.slice(insertAt)];
-  return result.join("\n");
+
+  // 2) стартового кадра больше нет → дочищаем вольные упоминания стартового кадра
+  // из тела промпта (без якоря). Каноничные строки composition/layout слово
+  // «starting frame» не содержат, поэтому под нож не попадают.
+  return hasStart ? result : stripStartFrameMentions(result);
 }
 
 /**
