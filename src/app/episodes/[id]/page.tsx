@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { getDb, episodes, generations, references, shots, shotEntities, entities } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
@@ -44,13 +44,24 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
 
   // Миниатюра группы = кадр лучшего результата: последний утверждённый (★),
   // иначе первый готовый. Видео показываем стоп-кадром, картинку — как есть.
+  // узкие колонки (не тянем килобайтные params_json) + фильтр «готовый результат» в SQL
   const resultRows = shotRows.length
-    ? (
-        await db
-          .select()
-          .from(generations)
-          .where(inArray(generations.shotId, shotRows.map((s) => s.id)))
-      ).filter((g) => g.shotId && g.status === "done" && g.resultStoragePath)
+    ? await db
+        .select({
+          shotId: generations.shotId,
+          status: generations.status,
+          winner: generations.winner,
+          createdAt: generations.createdAt,
+          resultStoragePath: generations.resultStoragePath,
+        })
+        .from(generations)
+        .where(
+          and(
+            inArray(generations.shotId, shotRows.map((s) => s.id)),
+            eq(generations.status, "done"),
+            isNotNull(generations.resultStoragePath),
+          ),
+        )
     : [];
   const bestByShot = new Map<string, (typeof resultRows)[number]>();
   for (const s of shotRows) {

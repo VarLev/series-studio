@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
-import { pollActiveGenerations } from "@/lib/generation";
+import { activityFingerprint, pollActiveGenerations } from "@/lib/generation";
 
 export const maxDuration = 60;
 
@@ -16,5 +16,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const result = await pollActiveGenerations();
-  return NextResponse.json(result);
+  // отпечаток состояния — клиент (GenPoller) рефрешит страницу только при его смене
+  const fp = await activityFingerprint();
+  return NextResponse.json({ ...result, fp });
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import {
   getDb,
@@ -72,19 +72,37 @@ export default async function ShotPage(ctx: {
   const shotRefsAll = shotIds.length
     ? await db.select().from(references).where(inArray(references.shotId, shotIds))
     : [];
-  // референс-миниатюра шота (фолбэк, если готового видео ещё нет)
+  // референс-миниатюра шота (фолбэк, если готового видео ещё нет).
+  // slice() — чтобы не мутировать массив (ниже он ещё нужен для shotRefRows);
+  // валидный компаратор: start_frame вперёд (битый однорукий давал случайный порядок)
   const thumbByShot = new Map<string, string>();
-  for (const ref of shotRefsAll.sort((a) => (a.role === "start_frame" ? -1 : 0))) {
+  for (const ref of shotRefsAll
+    .slice()
+    .sort((a, b) => (a.role === "start_frame" ? -1 : 0) - (b.role === "start_frame" ? -1 : 0))) {
     if (ref.shotId && !thumbByShot.has(ref.shotId)) {
       thumbByShot.set(ref.shotId, await getFileUrl(ref.storagePath));
     }
   }
   // основная миниатюра киноленты = кадр ФАКТИЧЕСКОГО видео: последний утверждённый
   // (★), иначе первый готовый результат (совпадает с логикой списка шотов серии)
+  // узкие колонки (не тянем килобайтные params_json) + фильтр «готовый результат» в SQL
   const stripGens = shotIds.length
-    ? (await db.select().from(generations).where(inArray(generations.shotId, shotIds))).filter(
-        (g) => g.shotId && g.status === "done" && g.resultStoragePath,
-      )
+    ? await db
+        .select({
+          shotId: generations.shotId,
+          status: generations.status,
+          winner: generations.winner,
+          createdAt: generations.createdAt,
+          resultStoragePath: generations.resultStoragePath,
+        })
+        .from(generations)
+        .where(
+          and(
+            inArray(generations.shotId, shotIds),
+            eq(generations.status, "done"),
+            isNotNull(generations.resultStoragePath),
+          ),
+        )
     : [];
   const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
   const videoThumbByShot = new Map<string, { url: string; isVideo: boolean }>();

@@ -3,7 +3,8 @@
  * поллинг статусов, приземление результатов (M5). Используется server actions,
  * cron-роутом и вебхуком.
  */
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import {
   getDb,
   entities,
@@ -990,6 +991,17 @@ async function landReferenceResult(
     ext === ".png" ? "image/png" : "image/jpeg",
   );
   const { width, height } = await probeImageSize(data);
+  // Захват задачи: помечаем done ТОЛЬКО пока она ещё активна. Параллельный поллер
+  // (вебхук / синхронный проход), уже приземливший её, оставит нам 0 строк — тогда
+  // выходим, НЕ вставляя второй референс (иначе одна картинка задваивалась бы в
+  // библиотеке — landReferenceResult генерит новый id на каждый заход). Скачивание
+  // выше делаем ДО захвата, чтобы его сбой оставлял задачу активной для ретрая.
+  const claimed = await db
+    .update(generations)
+    .set({ status: "done", resultStoragePath: storagePath })
+    .where(and(eq(generations.id, gen.id), inArray(generations.status, [...ACTIVE])))
+    .returning();
+  if (!claimed.length) return;
   await db.insert(references).values({
     id: refId,
     episodeId: gen.episodeId,
@@ -1002,13 +1014,29 @@ async function landReferenceResult(
     grid: params.sb_grid ?? null,
     sbShotId: params.sb_shot_id ?? null,
   });
-  await db
-    .update(generations)
-    .set({ status: "done", resultStoragePath: storagePath })
-    .where(eq(generations.id, gen.id));
 }
 
-export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
+// Полный проход поллинга — один на процесс. Телефон + десктоп + cron + вебхук,
+// дёргающие poll одновременно, переиспользуют этот запуск: PGlite — один WASM-поток,
+// два параллельных прохода только толкались бы за него и задваивали приземление
+// (в т.ч. вставку референсов). Точечный проход (onlyIds, синхронный Google) не
+// коалесцируем — он обязан приземлить свою свежесозданную задачу; от гонки его
+// защищает условный claim в landReferenceResult.
+let pollInFlight: Promise<{ active: number; updated: number }> | null = null;
+
+export function pollActiveGenerations(onlyIds?: string[]): Promise<{
+  active: number;
+  updated: number;
+}> {
+  if (onlyIds?.length) return pollActiveGenerationsInner(onlyIds);
+  if (pollInFlight) return pollInFlight;
+  pollInFlight = pollActiveGenerationsInner().finally(() => {
+    pollInFlight = null;
+  });
+  return pollInFlight;
+}
+
+async function pollActiveGenerationsInner(onlyIds?: string[]): Promise<{
   active: number;
   updated: number;
 }> {
@@ -1147,18 +1175,47 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
     }
   }
 
-  const stillActive = await db
-    .select()
+  // счётчик оставшихся активных — узкий count(*), а не выборка килобайтных строк
+  const [{ n: active }] = await db
+    .select({ n: sql<number>`count(*)` })
     .from(generations)
     .where(inArray(generations.status, [...ACTIVE]));
-  return { active: stillActive.length, updated };
+  return { active: Number(active), updated };
+}
+
+/**
+ * Отпечаток «живого» состояния задач — для GenPoller: клиент рефрешит тяжёлую
+ * страницу ТОЛЬКО когда отпечаток сменился (а не безусловно каждые 6 с). Берём
+ * активные + завершённые за последние 2 минуты задачи узкими колонками. Считается
+ * ПОСЛЕ pollActiveGenerations, поэтому ловит и изменения вне ответа poll: фоново
+ * проставленный jobId, провал отправки, и быстрые (синхронные) задачи, успевшие
+ * создаться и завершиться между тиками клиента.
+ */
+export async function activityFingerprint(): Promise<string> {
+  const db = await getDb();
+  const since = new Date(Date.now() - 120_000);
+  const rows = await db
+    .select({
+      id: generations.id,
+      status: generations.status,
+      providerJobId: generations.providerJobId,
+      error: generations.error,
+      resultStoragePath: generations.resultStoragePath,
+    })
+    .from(generations)
+    .where(or(inArray(generations.status, [...ACTIVE]), gte(generations.createdAt, since)))
+    .orderBy(asc(generations.id));
+  const serialized = rows
+    .map((r) => `${r.id}:${r.status}:${r.providerJobId ?? ""}:${r.error ?? ""}:${r.resultStoragePath ?? ""}`)
+    .join("|");
+  return createHash("sha1").update(serialized).digest("hex");
 }
 
 export async function countActiveGenerations(): Promise<number> {
   const db = await getDb();
-  const rows = await db
-    .select()
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)` })
     .from(generations)
     .where(inArray(generations.status, [...ACTIVE]));
-  return rows.length;
+  return Number(n);
 }

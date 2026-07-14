@@ -186,6 +186,15 @@ CREATE TABLE IF NOT EXISTS shot_anchors (
   anchor_id text NOT NULL,
   PRIMARY KEY (shot_id, anchor_id)
 );
+CREATE INDEX IF NOT EXISTS shots_episode_idx ON shots (episode_id);
+CREATE INDEX IF NOT EXISTS generations_shot_idx ON generations (shot_id);
+CREATE INDEX IF NOT EXISTS generations_episode_idx ON generations (episode_id);
+CREATE INDEX IF NOT EXISTS generations_status_idx ON generations (status);
+CREATE INDEX IF NOT EXISTS references_shot_idx ON "references" (shot_id);
+CREATE INDEX IF NOT EXISTS references_entity_idx ON "references" (entity_id);
+CREATE INDEX IF NOT EXISTS references_episode_idx ON "references" (episode_id);
+CREATE INDEX IF NOT EXISTS prompts_shot_idx ON prompts (shot_id);
+CREATE INDEX IF NOT EXISTS shot_anchors_anchor_idx ON shot_anchors (anchor_id);
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };
