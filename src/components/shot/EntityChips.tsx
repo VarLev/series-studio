@@ -1,9 +1,16 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { EntityAvatar, ENTITY_TYPE_LABEL } from "@/components/ui";
-import { addShotEntity, removeShotEntity, setShotEntityOutfit } from "@/lib/actions/shots";
+import {
+  addShotEntity,
+  createEntityFromUnlinked,
+  dismissUnlinkedChar,
+  removeShotEntity,
+  setShotEntityOutfit,
+} from "@/lib/actions/shots";
 import { effectiveOutfit } from "@/lib/wardrobe";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
@@ -29,16 +36,24 @@ type Source = "bible" | "generated";
 export default function EntityChips({
   shotId,
   entities,
+  unlinked = [],
 }: {
   shotId: string;
   entities: ChipEntity[];
+  /** персонажи из разбивки, которых нет в библии — красные чипы-заготовки */
+  unlinked?: string[];
 }) {
   const t = useT();
+  const router = useRouter();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [outfitFor, setOutfitFor] = useState<ChipEntity | null>(null);
   const [outfitText, setOutfitText] = useState("");
   const [source, setSource] = useState<Source>("bible");
   const [pending, startTransition] = useTransition();
+  // шторка «завести в библию» для чипа-заготовки
+  const [newFor, setNewFor] = useState<string | null>(null);
+  const [newDesc, setNewDesc] = useState("");
+  const [newWardrobe, setNewWardrobe] = useState("");
   // добавление/удаление чипа отражается мгновенно, сервер догоняет в фоне
   // (без этого на медленной сети — напр. через туннель — клик выглядит «не работает»)
   const [optimisticEntities, setLinked] = useOptimistic(
@@ -108,6 +123,50 @@ export default function EntityChips({
             </span>
           );
         })}
+        {/* Заготовки: модель назвала персонажа, в библии его нет. Красный чип без
+            картинки — тап заводит в библию, × снимает (тогда видеомодель нарисует
+            его без референса). */}
+        {unlinked.map((name) => (
+          <span
+            key={`u-${name}`}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border py-1 pl-2 pr-1.5"
+            style={{ borderColor: "var(--danger)", background: "rgba(194,71,106,.10)" }}
+          >
+            <button
+              onClick={() => {
+                setNewFor(name);
+                setNewDesc("");
+                setNewWardrobe("");
+              }}
+              title={t(
+                "Нет в библии — тап, чтобы добавить персонажа (иначе видео нарисует его без референса)",
+                "Not in the bible — tap to add this character (otherwise video renders them with no reference)",
+              )}
+              className="inline-flex items-center gap-1.5"
+            >
+              <span className="text-[11px] leading-none text-danger">⚠</span>
+              <span className="text-[12px] font-medium" style={{ color: "#e08aa4" }}>
+                {name}
+              </span>
+              <span className="rounded-[3px] bg-[rgba(194,71,106,.18)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-danger">
+                {t("нет в библии", "not in bible")}
+              </span>
+            </button>
+            <button
+              aria-label={`${t("Убрать", "Remove")} ${name}`}
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  await dismissUnlinkedChar(shotId, name);
+                  router.refresh();
+                })
+              }
+              className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger disabled:opacity-50"
+            >
+              ×
+            </button>
+          </span>
+        ))}
         <button
           aria-label="Добавить сущность"
           onClick={() => setSheetOpen(true)}
@@ -153,6 +212,74 @@ export default function EntityChips({
             </button>
           ))}
         </div>
+      </Sheet>
+
+      {/* Заготовка → библия: имя уже есть, остальное можно дозаполнить позже */}
+      <Sheet
+        open={Boolean(newFor)}
+        onClose={() => setNewFor(null)}
+        title={`${t("В библию", "Add to bible")} · ${newFor ?? ""}`}
+      >
+        {newFor && (
+          <div className="flex flex-col gap-3 pb-2">
+            <p className="text-[11.5px] leading-relaxed text-t400">
+              {t(
+                "Этого персонажа назвал сюжет, но в библии его нет — значит, у него не будет референса, и видеомодель нарисует его случайным. Заведите его здесь: чип станет обычным во всех группах эпизода, где встречается это имя. Референс и внешность можно добавить позже в «Библии».",
+                "The story named this character but the bible has no entry — so they have no reference and the video model will invent them. Create them here: the chip turns normal in every group of the episode that mentions this name. Reference and looks can be added later in the Bible.",
+              )}
+            </p>
+            <label className="flex flex-col gap-1">
+              <span className="section-label">{t("Внешность (EN, коротко)", "Looks (EN, short)")}</span>
+              <textarea
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+                rows={2}
+                spellCheck={false}
+                placeholder={t(
+                  "напр. «tired woman in her 40s, short dark hair» — можно оставить пустым",
+                  "e.g. “tired woman in her 40s, short dark hair” — may be left empty",
+                )}
+                className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t100 outline-none focus:border-[var(--border-strong)]"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="section-label">{t("Базовый гардероб (EN)", "Base wardrobe (EN)")}</span>
+              <textarea
+                value={newWardrobe}
+                onChange={(e) => setNewWardrobe(e.target.value)}
+                rows={2}
+                spellCheck={false}
+                placeholder={t(
+                  "напр. «light blue scrubs» — уйдёт в промпты как одежда по умолчанию",
+                  "e.g. “light blue scrubs” — goes into prompts as the default outfit",
+                )}
+                className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[12px] leading-relaxed text-t100 outline-none focus:border-[var(--border-strong)]"
+              />
+            </label>
+            <button
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const res = await createEntityFromUnlinked({
+                    shotId,
+                    name: newFor,
+                    description: newDesc,
+                    wardrobe: newWardrobe,
+                  });
+                  if (res.ok) {
+                    toast(t(`${newFor} добавлен в библию`, `${newFor} added to the bible`));
+                    setNewFor(null);
+                    router.refresh();
+                  } else toast(res.error);
+                })
+              }
+              className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.1em] text-white hover:bg-violet-400 disabled:opacity-50"
+              style={{ boxShadow: "var(--glow-violet-sm)" }}
+            >
+              {pending ? t("Создание…", "Creating…") : t("Добавить в библию", "Add to bible")}
+            </button>
+          </div>
+        )}
       </Sheet>
 
       {/* Одежда персонажа в группе: 2 блока (библия / сценарий) + выбор источника */}

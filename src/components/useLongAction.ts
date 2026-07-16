@@ -78,5 +78,18 @@ export function useLongAction<T>() {
     });
   }
 
-  return { busy, elapsed, start };
+  /**
+   * Перестать ждать: гасим таймеры и отпускаем кнопку. Серверный вызов при этом
+   * НЕ отменяется (его нельзя отозвать) и спокойно дозревает в тайник — поэтому
+   * повторный запуск с тем же токеном не создаст вторую платную задачу.
+   * Нужно там, где ожидание идёт минутами: сидеть до потолка без выхода — плохо.
+   */
+  function cancel() {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    cleanup();
+    setBusy(false);
+  }
+
+  return { busy, elapsed, start, cancel };
 }

@@ -221,6 +221,9 @@ const MIGRATIONS: string[][] = [
     `ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_panels text`,
     `ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_panel integer`,
   ],
+  // v2 — персонажи из разбивки, которых нет в библии: раньше они молча терялись,
+  // теперь висят на группе красными чипами-заготовками до решения пользователя
+  [`ALTER TABLE shots ADD COLUMN IF NOT EXISTS unlinked_chars_json text NOT NULL DEFAULT '[]'`],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

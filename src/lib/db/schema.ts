@@ -92,6 +92,11 @@ export const shots = pgTable("shots", {
   // сцены, но живёт отдельно — свои локация/погода/референсы, своя шкала времени
   // от 00:00; в сквозной таймкод эпизода и сюжетную связку сцены НЕ входит
   isInsert: boolean("is_insert").notNull().default(false),
+  // персонажи, которых разбивка назвала в этой группе, но в библии их не нашлось
+  // (JSON-массив имён). Живут как красные чипы-заготовки: их можно завести в
+  // библию одним тапом или снять — тогда видеомодель просто нарисует «какую-то
+  // медсестру» без референса. Без этого списка такие персонажи молча пропадали.
+  unlinkedCharsJson: text("unlinked_chars_json").notNull().default("[]"),
   winnerGenerationId: text("winner_generation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

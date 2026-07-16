@@ -21,7 +21,7 @@ import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives
 import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
 import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
 import { effectiveOutfit } from "@/lib/wardrobe";
-import { promptFamily, visionModelFrom, CHEAPEST_LLM, isClaudeModel } from "./models";
+import { promptFamily, visionModelFrom, maxOutputTokens, CHEAPEST_LLM, isClaudeModel } from "./models";
 import { runJson, type LlmCall } from "./client";
 import type { z } from "zod";
 import {
@@ -114,6 +114,15 @@ async function knowledgeContext(targetModel: string): Promise<string> {
 }
 
 /**
+ * Потолок ожидания разбивки. Общие 180 с рассчитаны на шот и правку; разбивка
+ * пишет всю серию одним проходом и на реальных эпизодах шла ~170 с — то есть
+ * впритык. Через CLI поверх этого идёт ещё «мышление» Claude Code (~12k токенов),
+ * которое разбивке НЕ режут намеренно (см. cli.ts). 10 минут — с запасом; ждать
+ * столько не страшно: SynopsisEditor показывает счётчик и даёт «Отменить».
+ */
+const BREAKDOWN_TIMEOUT_MS = 600_000;
+
+/**
  * M2 — разбить готовый литературный сюжет на группы шотов (JSON).
  * Творческое задание — редактируемый шаблон заказчика (tpl_breakdown, настройки);
  * JSON-контракт добавляется программно и не зависит от правок шаблона.
@@ -137,12 +146,19 @@ export async function llmBreakdown(
     .replaceAll("{{DURATION}}", durPhrase)
     // старые сохранённые шаблоны с зашитым «N–M минут» — подменяем на выбранный диапазон
     .replace(/(продолжительность эпизода:\s*)\d+\s*[–—-]\s*\d+\s*минут/i, `$1${durPhrase}`);
+  const bdModel = modelOverride || model;
   return runJson(
     {
       kind: "breakdown",
-      model: modelOverride || model,
+      model: bdModel,
       episodeId,
-      maxTokens: 24000,
+      // Разбивка — единственный вызов, который реально упирается в потолок и в
+      // таймаут: она пишет всю серию разом (замеры: сюжет ~10k символов → 6.5–12k
+      // токенов, минуты работы). Берём полный лимит модели и отдельный запас по
+      // времени вместо общих 180 с — дробить проход не хотим, модель должна
+      // видеть весь сюжет сразу, значит проход обязан помещаться.
+      maxTokens: maxOutputTokens(bdModel),
+      timeoutMs: BREAKDOWN_TIMEOUT_MS,
       system:
         `${rules}\n\n${bible}\n\n` +
         "Выполни задание пользователя (раскадровка эпизода), но результат верни НЕ markdown-текстом, " +
@@ -176,11 +192,11 @@ export async function llmBreakdown(
         "сюжет одежду не упоминает — outfit пустой. Когда сцена (scene_start: false) " +
         "продолжается, а сюжет ранее задал наряд — повтори тот же наряд ДОСЛОВНО во всех " +
         "группах этой сцены; на границе сцены обновляй, только если сюжет описал переодевание.\n" +
-        "Соответствие формату задания: группа = «# ГРУППА NN» (не длиннее 15 секунд, пригодна для " +
-        "отдельной AI-видеогенерации), shots = «### Шот N» внутри группы, duration_sec — длительность " +
-        "группы в секундах. Время шотов (shots[].time) отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот " +
-        "каждой группы начинается с 00:00. Время группы (time) — сквозное по эпизоду. " +
-        "Все правила задания (хронометраж, реплики, планы) действуют.\n" +
+        "Соответствие формату задания: группа (не длиннее 15 секунд, пригодна для отдельной " +
+        "AI-видеогенерации) — элемент groups[], её шоты — элементы shots[] внутри неё, " +
+        "duration_sec — длительность группы в секундах. Время шотов (shots[].time) отсчитывается " +
+        "ОТ НАЧАЛА ГРУППЫ: первый шот каждой группы начинается с 00:00. Время группы (time) — " +
+        "сквозное по эпизоду. Все правила задания (хронометраж, реплики, планы) действуют.\n" +
         `Целевая продолжительность всего эпизода: ${durPhrase}. Это значение приоритетно — оно ` +
         "заменяет любую другую длительность эпизода, упомянутую в задании; распредели события так, " +
         "чтобы суммарный хронометраж уложился в этот диапазон.\n" +

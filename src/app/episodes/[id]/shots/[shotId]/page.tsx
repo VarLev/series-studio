@@ -18,6 +18,7 @@ import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
 import { getTechniquesByIds, listTechniques } from "@/lib/director";
 import type { GroupShot } from "@/lib/llm/contracts";
+import { stripAt } from "@/lib/entityName";
 import { promptFamily } from "@/lib/llm/models";
 import { getT } from "@/lib/i18n-server";
 import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
@@ -186,6 +187,20 @@ export default async function ShotPage(ctx: {
   }));
   // стили в чипы сущностей не попадают («Наборы стилей» убраны как неиспользуемые)
   const entityChips = chipData.filter((c) => c.type !== "style");
+  // персонажи из разбивки, которых нет в библии — красные чипы-заготовки.
+  // Имя, успевшее появиться в библии другим путём, заготовкой больше не считаем.
+  const bibleNames = new Set(
+    allEntities.flatMap((e) => [stripAt(e.name), stripAt(e.elementName)]),
+  );
+  let unlinkedChars: string[] = [];
+  try {
+    const raw = JSON.parse(shot.unlinkedCharsJson || "[]");
+    if (Array.isArray(raw)) {
+      unlinkedChars = (raw as string[]).filter(
+        (n) => typeof n === "string" && n.trim() && !bibleNames.has(stripAt(n)),
+      );
+    }
+  } catch {}
 
   // референсы шота (с ролями); порядок createdAt = порядок якорей @Comp1..N
   // (тот же порядок использует generation.ts при прикреплении картинок к задаче)
@@ -445,7 +460,7 @@ export default async function ShotPage(ctx: {
         >
           {t("Сущности", "Entities")}
         </SectionLabel>
-        <EntityChips shotId={shotId} entities={entityChips} />
+        <EntityChips shotId={shotId} entities={entityChips} unlinked={unlinkedChars} />
       </div>
 
       {/* «Наборы стилей» убраны — фича не используется (замечание заказчика) */}

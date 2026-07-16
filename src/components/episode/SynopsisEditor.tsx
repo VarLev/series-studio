@@ -14,7 +14,7 @@ import { useLongAction } from "@/components/useLongAction";
 import { toast } from "@/components/Toaster";
 import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
-import { estTextUsd, estTokens, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
+import { estTextUsd, estTokens, estBreakdownOutTokens, fmtUsd } from "@/lib/pricing";
 import BreakdownPreview from "./BreakdownPreview";
 import DualRange from "@/components/DualRange";
 import { SectionLabel } from "@/components/ui";
@@ -61,6 +61,7 @@ export default function SynopsisEditor({
   initialSynopsis,
   shotsCount,
   shotTitles = [],
+  shotActions = [],
   breakdownModel,
   onBreakdownModelChange,
   useCli = false,
@@ -71,6 +72,8 @@ export default function SynopsisEditor({
   initialSynopsis: string;
   shotsCount: number;
   shotTitles?: string[];
+  /** действия первых шотов существующих групп — признак дубля при повторной разбивке */
+  shotActions?: string[];
   breakdownModel: string;
   onBreakdownModelChange: (m: string) => void;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
@@ -216,10 +219,12 @@ export default function SynopsisEditor({
         return res.ok ? { ok: true, value: res.breakdown } : res;
       },
       pollMs: 5000,
-      ceilingSec: 360,
+      // потолок ожидания клиента должен быть НЕ меньше серверного (10 мин), иначе
+      // клиент сдаётся раньше, чем приходит настоящий ответ или внятная ошибка
+      ceilingSec: 660,
       ceilingMsg: t(
-        "Ответа нет дольше 6 минут. Раскадровка могла не создаться — попробуйте ещё раз или выберите более быструю модель.",
-        "No response for over 6 minutes. The breakdown may not have been created — try again or pick a faster model.",
+        "Ответа нет дольше 11 минут. Раскадровка могла не создаться — проверьте «Console» или попробуйте ещё раз.",
+        "No response for over 11 minutes. The breakdown may not have been created — check the Console or try again.",
       ),
       onOk: stashPreview,
       onErr: setError,
@@ -290,6 +295,9 @@ export default function SynopsisEditor({
       <BreakdownPreview
         breakdown={preview}
         existingTitles={shotTitles}
+        existingActions={shotActions}
+        synopsis={synopsis}
+        durationRange={[durMin, durMax]}
         onCancel={() => stashPreview(null)}
         onConfirm={onConfirmBreakdown}
         onEdited={(b) => {
@@ -395,7 +403,13 @@ export default function SynopsisEditor({
                   const cost =
                     useCli && isClaudeModel(breakdownModel)
                       ? "(CLI)"
-                      : `~${fmtUsd(estTextUsd(breakdownModel, estTokens(synopsis) + 1500, OUT_TOKENS.breakdown))}`;
+                      : `~${fmtUsd(
+                          estTextUsd(
+                            breakdownModel,
+                            estTokens(synopsis) + 1500,
+                            estBreakdownOutTokens(synopsis),
+                          ),
+                        )}`;
                   return shotsCount > 0
                     ? t(
                         `Раскадровать (готовые не дублируются) · ${cost}`,
@@ -404,6 +418,25 @@ export default function SynopsisEditor({
                     : t(`Разбить на группы шотов · ${cost}`, `Break into shot groups · ${cost}`);
                 })()}
           </button>
+          {/* Разбивка идёт минутами — сидеть до потолка без выхода нельзя.
+              Отмена только перестаёт ждать: вызов дозреет в тайник, и повтор с тем
+              же токеном подберёт готовый результат, а не оплатит второй прогон. */}
+          {bd.busy && (
+            <button
+              onClick={() => {
+                bd.cancel();
+                setError(
+                  t(
+                    "Ожидание отменено. Разбивка на сервере продолжается — повторный запуск подберёт её результат, если она успеет.",
+                    "Stopped waiting. The breakdown is still running on the server — a retry will pick up its result if it finishes.",
+                  ),
+                );
+              }}
+              className="min-h-11 w-full rounded-lg border border-[var(--border-default)] text-[11px] font-semibold uppercase tracking-[0.1em] text-t300 hover:bg-ink-500"
+            >
+              {t("Отменить ожидание", "Stop waiting")}
+            </button>
+          )}
         </div>
       )}
     </div>

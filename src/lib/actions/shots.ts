@@ -660,6 +660,94 @@ export async function countEpisodeShots(episodeId: string): Promise<number> {
   return rows.length;
 }
 
+/** Имена-заготовки группы: персонажи из разбивки, которых нет в библии. */
+function parseUnlinked(json: string): string[] {
+  try {
+    const raw = JSON.parse(json || "[]");
+    return Array.isArray(raw) ? (raw as string[]).filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function setUnlinked(shotId: string, names: string[]): Promise<void> {
+  const db = await getDb();
+  await db.update(shots).set({ unlinkedCharsJson: JSON.stringify(names) }).where(eq(shots.id, shotId));
+}
+
+/**
+ * Снять чип-заготовку: персонаж остаётся в тексте шотов, но в библию не идёт —
+ * видеомодель нарисует его без референса (осознанный выбор для эпизодников
+ * вроде медсестры). Обратимо только повторной разбивкой.
+ */
+export async function dismissUnlinkedChar(shotId: string, name: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  const key = stripAt(name);
+  await setUnlinked(
+    shotId,
+    parseUnlinked(shot.unlinkedCharsJson).filter((n) => stripAt(n) !== key),
+  );
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Завести персонажа-заготовку в библию и привязать к группе. Чип перестаёт быть
+ * красным во ВСЕХ группах эпизода, где встречалось это имя: заготовка — маркер
+ * «в библии нет», и как только персонаж там появился, маркер снимается везде,
+ * а группы получают настоящую привязку (иначе пришлось бы обходить их руками).
+ */
+export async function createEntityFromUnlinked(input: {
+  shotId: string;
+  name: string;
+  elementName?: string;
+  description?: string;
+  wardrobe?: string;
+}): Promise<{ ok: true; entityId: string } | { ok: false; error: string }> {
+  await requireAuth();
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "Имя пустое" };
+  try {
+    const db = await getDb();
+    const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
+    if (!shot) return { ok: false, error: "Группа не найдена" };
+
+    const { createEntity } = await import("@/lib/actions/entities");
+    const entityId = await createEntity({
+      type: "character",
+      name,
+      elementName: input.elementName?.trim() || undefined,
+      description: input.description?.trim() || "",
+    });
+    if (input.wardrobe?.trim()) {
+      await db
+        .update(entities)
+        .set({ wardrobe: input.wardrobe.trim() })
+        .where(eq(entities.id, entityId));
+    }
+
+    // все группы эпизода, где это имя висело заготовкой: снимаем маркер и
+    // привязываем свежую сущность
+    const key = stripAt(name);
+    const episodeShots = await db.select().from(shots).where(eq(shots.episodeId, shot.episodeId));
+    for (const s of episodeShots) {
+      const names = parseUnlinked(s.unlinkedCharsJson);
+      if (!names.some((n) => stripAt(n) === key)) continue;
+      await setUnlinked(s.id, names.filter((n) => stripAt(n) !== key));
+      await db.insert(shotEntities).values({ shotId: s.id, entityId, auto: true }).onConflictDoNothing();
+    }
+    revalidatePath(shotPath(shot.episodeId, input.shotId));
+    revalidatePath(`/episodes/${shot.episodeId}`);
+    revalidatePath("/bible");
+    return { ok: true, entityId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Не удалось создать персонажа" };
+  }
+}
+
 /** Начало новой сюжетной сцены: связности с предыдущей группой нет (кроме библии). */
 export async function setSceneStart(shotId: string, value: boolean): Promise<void> {
   await requireAuth();

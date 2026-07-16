@@ -75,6 +75,8 @@ export default function EpisodeTabs({
           initialSynopsis={initialSynopsis}
           shotsCount={shots.length}
           shotTitles={shots.map((s) => s.title)}
+          // действие первого шота группы — второй признак дубля при повторной разбивке
+          shotActions={shots.map((s) => s.beats[0] ?? s.action)}
           breakdownModel={bdModel}
           onBreakdownModelChange={setBdModel}
           useCli={useCli}
