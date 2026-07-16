@@ -43,7 +43,21 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
+/**
+ * Слот @panel: вкладки нижнего таб-бара (кроме «Серий») перехватываются
+ * intercepting-роутами @panel/(.)* и рендерятся правым слайдером ПОВЕРХ текущего
+ * экрана. Основной экран (children) при этом не размонтируется и не теряет
+ * состояние — уходим от переоткрытия экранов. Слот живёт именно в КОРНЕВОМ
+ * layout, потому что панель должна открываться поверх любого экрана, а не только
+ * поверх эпизода (у /episodes/[id] свой слот @drawer для REF и Галереи).
+ */
+export default async function RootLayout({
+  children,
+  panel,
+}: {
+  children: React.ReactNode;
+  panel: React.ReactNode;
+}) {
   const settings = await getAllSettings();
   return (
     <html lang={settings.ui_lang} data-theme={settings.ui_theme}>
@@ -54,6 +68,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <NavHistoryTracker />
           <AppNav />
           <ContentShell>{children}</ContentShell>
+          {panel}
           <Toaster />
           <SwRegister />
         </I18nProvider>

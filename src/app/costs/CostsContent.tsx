@@ -23,9 +23,13 @@ import ConfirmButton from "@/components/ConfirmButton";
 import SettingsTabs from "@/components/settings/SettingsTabs";
 import { deleteKnowledgeDoc, clearKnowledge } from "@/lib/actions/deletes";
 
-export const dynamic = "force-dynamic";
-
-export default async function CostsPage() {
+/**
+ * Тело «Затрат» — общее для полной страницы (/costs) и правой панели
+ * (@panel/(.)costs). В панели (bare) свою шапку не рисует: заголовок и закрытие
+ * там даёт слайдер. Подвкладки «Настройки/Затраты» остаются в обоих режимах —
+ * оба их адреса перехвачены, поэтому переключение не выкидывает из панели.
+ */
+export default async function CostsContent({ bare = false }: { bare?: boolean }) {
   await requireAuth();
   const db = await getDb();
   const settings = await getAllSettings();
@@ -110,14 +114,22 @@ export default async function CostsPage() {
   ];
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <SettingsHeader
-        title={t("Затраты", "Costs")}
-        subtitle={t(
-          "Балансы, расходы по эпизодам и каталог моделей.",
-          "Balances, per-episode costs and the model catalog.",
-        )}
-      />
+    <main
+      className={
+        bare
+          ? "flex w-full flex-col"
+          : "mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl"
+      }
+    >
+      {!bare && (
+        <SettingsHeader
+          title={t("Затраты", "Costs")}
+          subtitle={t(
+            "Балансы, расходы по эпизодам и каталог моделей.",
+            "Balances, per-episode costs and the model catalog.",
+          )}
+        />
+      )}
       <SettingsTabs />
       <div className="flex flex-col gap-6 p-4 pb-12">
         {/* Живые балансы кредитов подписок */}
