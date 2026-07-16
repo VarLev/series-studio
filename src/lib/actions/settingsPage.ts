@@ -45,21 +45,33 @@ export async function saveTechnique(input: {
     return { ok: false, error: "Название и промпт обязательны" };
   }
   await upsertTechniqueRow(input);
-  revalidatePath("/settings");
+  revalidatePath("/knowledge");
   return { ok: true };
 }
 
 export async function deleteTechnique(id: string): Promise<void> {
   await requireAuth();
   await deleteTechniqueRow(id);
-  revalidatePath("/settings");
+  revalidatePath("/knowledge");
+}
+
+/**
+ * Вкл/выкл ВСЕЙ библиотеки приёмов. Выключенная библиотека остаётся на месте
+ * (карточки, поиск, правка), но в модель не уходит совсем: ни индекса Enhance,
+ * ни приёмов в промпте шота, ни пикера на карточке шота.
+ */
+export async function toggleTechniquesEnabled(enabled: boolean): Promise<void> {
+  await requireAuth();
+  await setSetting("techniques_enabled", enabled ? "1" : "0");
+  revalidatePath("/knowledge");
+  revalidatePath("/episodes", "layout"); // пикер приёмов на карточках шотов
 }
 
 /** «Удалить все» приёмы — библиотека остаётся пустой и не пересеивается вольтом. */
 export async function deleteAllTechniques(): Promise<void> {
   await requireAuth();
   await deleteAllTechniqueRows();
-  revalidatePath("/settings");
+  revalidatePath("/knowledge");
 }
 
 /** Язык интерфейса / тема — применяются через корневой layout. */

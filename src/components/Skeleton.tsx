@@ -63,6 +63,34 @@ export function SkCards({ count = 5, height = 76 }: { count?: number; height?: n
   );
 }
 
+/** Кинолента карточки группы — полоса миниатюр 9:16 (мобайл). */
+export function SkFilmStrip({ count = 8 }: { count?: number }) {
+  return (
+    <div className="flex gap-1.5 overflow-hidden border-b border-[var(--border-subtle)] bg-ink-900 px-3.5 py-2">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="w-[38px] shrink-0">
+          <Sk className="block aspect-[9/16] w-full rounded" />
+          <Sk className="mx-auto mt-0.5 h-2 w-4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Master-колонка карточки группы — список шотов серии (десктоп). */
+export function SkMasterColumn({ count = 8 }: { count?: number }) {
+  return (
+    <aside className="hidden overflow-hidden border-r border-[var(--border-subtle)] p-3 lg:block">
+      <Sk className="mb-2 h-2.5 w-24" />
+      <div className="flex flex-col gap-1.5">
+        {Array.from({ length: count }).map((_, i) => (
+          <Sk key={i} className="h-9 w-full rounded-lg" />
+        ))}
+      </div>
+    </aside>
+  );
+}
+
 /** Сетка миниатюр (галерея, референсы). */
 export function SkGrid({ count = 9 }: { count?: number }) {
   return (

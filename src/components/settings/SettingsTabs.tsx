@@ -5,11 +5,12 @@ import { usePathname } from "next/navigation";
 import { useT } from "@/components/I18nProvider";
 
 /**
- * Подвкладки раздела «Пульт»: Настройки и Затраты (бывшая вкладка «Cost»,
- * переехавшая внутрь Настроек). Живут на /settings и /costs.
+ * Подвкладки раздела «Пульт»: Настройки, База знаний и Затраты. Живут на
+ * /settings, /knowledge и /costs (все три перехвачены правой панелью).
  */
 const TABS = [
   { href: "/settings", ru: "Настройки", en: "Settings" },
+  { href: "/knowledge", ru: "База знаний", en: "Knowledge" },
   { href: "/costs", ru: "Затраты", en: "Costs" },
 ];
 

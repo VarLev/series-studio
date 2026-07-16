@@ -182,6 +182,9 @@ export const knowledgeDocs = pgTable("knowledge_docs", {
   sourceFile: text("source_file").notNull(),
   contentMd: text("content_md").notNull(),
   tags: text("tags").notNull().default(""), // comma-separated: kling,seedance,camera,realism...
+  // выключенный документ остаётся в базе, но НЕ подмешивается в промпт-фабрику
+  // (вкладка «База знаний» в настройках, переключатель у каждого документа)
+  enabled: boolean("enabled").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -222,6 +225,7 @@ export const techniques = pgTable("techniques", {
   prompt: text("prompt").notNull(),
   negative: text("negative").notNull().default(""),
   custom: boolean("custom").notNull().default(false), // добавлен пользователем
+  // вкл/выкл — не у карточки, а у всей библиотеки разом: settings.techniques_enabled
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

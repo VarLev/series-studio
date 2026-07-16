@@ -4,7 +4,6 @@ import {
   getDb,
   episodes,
   generations,
-  knowledgeDocs,
   llmUsage,
   shots,
   videoModels,
@@ -13,21 +12,19 @@ import { getAllSettings } from "@/lib/settings";
 import { getT } from "@/lib/i18n-server";
 import { saveSettings, logoutAction } from "@/lib/actions/settings";
 import { SectionLabel, EmptyState } from "@/components/ui";
-import KnowledgeIngest from "@/components/costs/KnowledgeIngest";
 import CatalogRefresh from "@/components/costs/CatalogRefresh";
 import SettingsHeader from "@/components/settings/SettingsHeader";
 import LimitStepper from "@/components/costs/LimitStepper";
 import HiggsfieldBalance from "@/components/costs/HiggsfieldBalance";
 import KlingBalance from "@/components/costs/KlingBalance";
-import ConfirmButton from "@/components/ConfirmButton";
 import SettingsTabs from "@/components/settings/SettingsTabs";
-import { deleteKnowledgeDoc, clearKnowledge } from "@/lib/actions/deletes";
 
 /**
  * Тело «Затрат» — общее для полной страницы (/costs) и правой панели
  * (@panel/(.)costs). В панели (bare) свою шапку не рисует: заголовок и закрытие
  * там даёт слайдер. Подвкладки «Настройки/Затраты» остаются в обоих режимах —
  * оба их адреса перехвачены, поэтому переключение не выкидывает из панели.
+ * База знаний переехала на свою вкладку (/knowledge).
  */
 export default async function CostsContent({ bare = false }: { bare?: boolean }) {
   await requireAuth();
@@ -37,8 +34,7 @@ export default async function CostsContent({ bare = false }: { bare?: boolean })
   const priceIn = Number(settings.llm_price_in) || 0;
   const priceOut = Number(settings.llm_price_out) || 0;
 
-  const [docs, usage, gens, shotRows, epRows, models] = await Promise.all([
-    db.select().from(knowledgeDocs).orderBy(desc(knowledgeDocs.createdAt)),
+  const [usage, gens, shotRows, epRows, models] = await Promise.all([
     db.select().from(llmUsage).orderBy(desc(llmUsage.createdAt)).limit(2000),
     db.select().from(generations),
     db.select().from(shots),
@@ -321,50 +317,6 @@ export default async function CostsContent({ bare = false }: { bare?: boolean })
             {t("Сохранить настройки", "Save settings")}
           </button>
         </form>
-
-        {/* База знаний */}
-        <div className="flex flex-col gap-2">
-          <SectionLabel hint={t("папка /knowledge в проекте (.md, .txt)", "the /knowledge folder in the project (.md, .txt)")}>
-            {t("База знаний промпт-фабрики", "Prompt factory knowledge base")}
-          </SectionLabel>
-          {docs.length ? (
-            <div className="flex flex-col gap-1.5">
-              {docs.map((d) => (
-                <div
-                  key={d.id}
-                  className="flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-t200">{d.title}</span>
-                  <span className="font-mono text-[9.5px] text-violet-300">{d.tags}</span>
-                  <ConfirmButton
-                    action={deleteKnowledgeDoc.bind(null, d.id)}
-                    label="🗑"
-                    confirmLabel={t("Удалить?", "Delete?")}
-                    className="rounded px-1 text-[11px] text-t400 hover:text-danger disabled:opacity-50"
-                    armedClassName="text-danger"
-                  />
-                </div>
-              ))}
-              {docs.length > 1 && (
-                <ConfirmButton
-                  action={clearKnowledge}
-                  label={t(`Очистить базу знаний (${docs.length})`, `Clear knowledge base (${docs.length})`)}
-                  confirmLabel={t("Точно очистить всю базу знаний?", "Really clear the whole knowledge base?")}
-                  doneToast={t("База знаний очищена", "Knowledge base cleared")}
-                  className="mt-1 min-h-10 rounded-lg border border-[rgba(194,71,106,.35)] text-[11px] font-semibold uppercase tracking-[0.1em] text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
-                />
-              )}
-            </div>
-          ) : (
-            <EmptyState>
-              {t(
-                "Положите свои PDF-материалы (конвертированные в .md) в папку /knowledge и нажмите «Обновить».",
-                "Put your PDF materials (converted to .md) into the /knowledge folder and press Refresh.",
-              )}
-            </EmptyState>
-          )}
-          <KnowledgeIngest />
-        </div>
 
         {authEnabled() && (
           <form action={logoutAction}>

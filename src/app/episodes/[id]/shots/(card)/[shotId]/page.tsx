@@ -1,29 +1,26 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import {
   getDb,
   entities,
-  episodes,
   generations,
   prompts,
   references,
   shots,
   shotEntities,
 } from "@/lib/db";
-import { getFileUrl, getFileUrls } from "@/lib/storage";
-import { thumbForResult } from "@/lib/poster";
+import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
 import { getCatalog, availableImageModels } from "@/lib/generation";
-import { getTechniquesByIds, listTechniques } from "@/lib/director";
+import { getTechniquesByIds, listEnabledTechniques } from "@/lib/director";
 import type { GroupShot } from "@/lib/llm/contracts";
 import { stripAt } from "@/lib/entityName";
 import { promptFamily } from "@/lib/llm/models";
 import { getT } from "@/lib/i18n-server";
-import { ScreenHeader, StatusPill, SectionLabel, EmptyState, SHOT_STATUS } from "@/components/ui";
+import { StatusPill, SectionLabel, EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
-import { deleteAllGenerations, deleteShot } from "@/lib/actions/deletes";
+import { deleteAllGenerations } from "@/lib/actions/deletes";
 import EntityChips from "@/components/shot/EntityChips";
 import AnchorsSection from "@/components/shot/AnchorsSection";
 import ShotRefs from "@/components/shot/ShotRefs";
@@ -36,10 +33,9 @@ import EnhanceButton from "@/components/shot/EnhanceButton";
 import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
 import SceneToggle from "@/components/shot/SceneToggle";
 import ResultsStrip from "@/components/shot/ResultsStrip";
-import ShotHotkeys from "@/components/shot/ShotHotkeys";
 import GenPoller from "@/components/GenPoller";
-import FilmStrip from "@/components/FilmStrip";
 import { chainLocation, chainTimeWeather, displayGroupNumbers } from "@/lib/beats";
+import { getEpisodeShotRows } from "@/lib/shotChrome";
 import { listShotAnchors, listEpisodeAnchors } from "@/lib/anchors";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +49,6 @@ export default async function ShotPage(ctx: {
 
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot || shot.episodeId !== episodeId) notFound();
-  const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
 
   // шоты внутри группы (раскадровка v2); у старых групп beats_json пуст
   let beats: GroupShot[] = [];
@@ -64,85 +59,14 @@ export default async function ShotPage(ctx: {
   // основные шоты (Main): длительность/промпт/счётчики; черновики — запаски
   const mainBeats = beats.filter((b) => !b.draft);
 
-  // все шоты серии — кинолента + master-список (spec §2.3/§4)
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(eq(shots.episodeId, episodeId))
-    .orderBy(asc(shots.orderIndex));
-  const shotIds = allShots.map((s) => s.id);
-  const shotRefsAll = shotIds.length
-    ? await db.select().from(references).where(inArray(references.shotId, shotIds))
-    : [];
-  // референс-миниатюра шота (фолбэк, если готового видео ещё нет): по одному рефу
-  // на шот (start_frame вперёд), URL'ы — одним батчем (getFileUrls), а не циклом
-  // последовательных подписей. slice() — чтобы не мутировать массив (ниже он ещё
-  // нужен для shotRefRows); валидный компаратор (битый однорукий давал случайный
-  // порядок — миниатюрой мог стать не start_frame).
-  const thumbRefByShot = new Map<string, string>(); // shotId → storage_path
-  for (const ref of shotRefsAll
-    .slice()
-    .sort((a, b) => (a.role === "start_frame" ? -1 : 0) - (b.role === "start_frame" ? -1 : 0))) {
-    if (ref.shotId && !thumbRefByShot.has(ref.shotId)) {
-      thumbRefByShot.set(ref.shotId, ref.storagePath);
-    }
-  }
-  const thumbEntries = [...thumbRefByShot.entries()];
-  const thumbUrls = await getFileUrls(thumbEntries.map(([, p]) => p));
-  const thumbByShot = new Map<string, string>(
-    thumbEntries.map(([shotId], i) => [shotId, thumbUrls[i]]),
-  );
-  // основная миниатюра киноленты = кадр ФАКТИЧЕСКОГО видео: последний утверждённый
-  // (★), иначе первый готовый результат (совпадает с логикой списка шотов серии)
-  // узкие колонки (не тянем килобайтные params_json) + фильтр «готовый результат» в SQL
-  const stripGens = shotIds.length
-    ? await db
-        .select({
-          shotId: generations.shotId,
-          status: generations.status,
-          winner: generations.winner,
-          createdAt: generations.createdAt,
-          resultStoragePath: generations.resultStoragePath,
-        })
-        .from(generations)
-        .where(
-          and(
-            inArray(generations.shotId, shotIds),
-            eq(generations.status, "done"),
-            isNotNull(generations.resultStoragePath),
-          ),
-        )
-    : [];
-  // миниатюра киноленты: постер-jpg видео, если есть рядом, иначе само видео
-  const videoThumbByShot = new Map<string, { url: string; isVideo: boolean }>();
-  for (const s of allShots) {
-    const arr = stripGens
-      .filter((g) => g.shotId === s.id)
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    if (!arr.length) continue;
-    const winners = arr.filter((g) => g.winner);
-    const best = winners.length ? winners[winners.length - 1] : arr[0];
-    videoThumbByShot.set(s.id, await thumbForResult(best.resultStoragePath!));
-  }
+  // Шоты серии — узкий select: цепочки локации/времени, номер группы и сосед
+  // слева для тумблера сцены. Кинолента, master-колонка и их миниатюры считаются
+  // в shots/(card)/layout.tsx — общее для серии, при смене группы не меняется.
+  const rows = await getEpisodeShotRows(episodeId);
   // номер группы в серии: вставные группы (isInsert) в нумерацию не входят
-  const displayNoById = displayGroupNumbers(allShots);
-  const stripShots = allShots.map((s, i) => {
-    const vt = videoThumbByShot.get(s.id);
-    return {
-      id: s.id,
-      orderIndex: s.orderIndex,
-      displayNo: displayNoById.get(s.id) ?? 0,
-      isInsert: s.isInsert,
-      status: s.status,
-      // сперва кадр видео, иначе референс шота
-      thumbUrl: vt?.url ?? thumbByShot.get(s.id) ?? null,
-      thumbIsVideo: vt?.isVideo ?? false,
-      sceneStart: i === 0 || s.sceneStart,
-    };
-  });
-  const shotIdx = allShots.findIndex((s) => s.id === shotId);
-  const prevShot = allShots[shotIdx - 1] ?? null;
-  const nextShot = allShots[shotIdx + 1] ?? null;
+  const displayNoById = displayGroupNumbers(rows);
+  const shotIdx = rows.findIndex((s) => s.id === shotId);
+  const prevShot = rows[shotIdx - 1] ?? null;
 
   // якоря: прикреплённые к группе + пул эпизода для переиспользования (не прикреплённые)
   const attachedAnchors = await listShotAnchors(shotId);
@@ -204,9 +128,11 @@ export default async function ShotPage(ctx: {
 
   // референсы шота (с ролями); порядок createdAt = порядок якорей @Comp1..N
   // (тот же порядок использует generation.ts при прикреплении картинок к задаче)
-  const shotRefRows = shotRefsAll
-    .filter((r) => r.shotId === shotId)
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const shotRefRows = await db
+    .select()
+    .from(references)
+    .where(eq(references.shotId, shotId))
+    .orderBy(asc(references.createdAt));
   let compNo = 0;
   const anchorByRefId = new Map(
     shotRefRows.map((r) => [r.id, r.role === "start_frame" ? "@Start" : `@Comp${++compNo}`]),
@@ -343,7 +269,6 @@ export default async function ShotPage(ctx: {
   const catalog = await getCatalog("video");
   const defaultModelIds = settings.target_models.split(",").map((m) => m.trim()).filter(Boolean);
 
-  const epN = String(episode?.number ?? 0).padStart(2, "0");
   const grpN = shot.isInsert ? "✦" : String(displayNoById.get(shotId) ?? 0).padStart(2, "0");
   const hasStartFrame = shotRefs.some((r) => r.role === "start_frame");
   const tokens = [
@@ -424,15 +349,14 @@ export default async function ShotPage(ctx: {
   ];
   const defaultStartFrame = shotRefs.find((r) => r.role === "start_frame") ?? null;
 
-  const shotHref = (s: { id: string }) => `/episodes/${episodeId}/shots/${s.id}`;
-
   const imageModelsList = await availableImageModels();
-  const grpLabel = shot.isInsert ? t("Вставка", "Insert") : `${t("Группа", "Group")} ${grpN}`;
 
   // библиотека режиссёрских приёмов — компактный список для ручного закрепления
   // приёма за шотом (пикер в GroupShotsEditor). Enhance проставляет их сам, но
   // теперь приём можно и добавить руками, не только снять (замечание заказчика).
-  const techniqueLibrary = (await listTechniques()).map((tq) => ({
+  // Выключенные в библиотеке приёмы в пикер не попадают: в промпт они всё равно
+  // не уедут, предлагать их нечестно.
+  const techniqueLibrary = (await listEnabledTechniques()).map((tq) => ({
     id: tq.id,
     title: tq.title,
     category: tq.category,
@@ -483,102 +407,14 @@ export default async function ShotPage(ctx: {
   );
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl lg:h-dvh lg:min-h-0 lg:max-w-none lg:overflow-hidden">
-      <ScreenHeader
-        backHref={`/episodes/${episodeId}`}
-        eyebrow={`${t("Серия", "Episode")} ${epN} · ${grpLabel}`}
-        title={shot.title || t("Группа шотов", "Shot group")}
-        right={
-          // очередь убрана из шапки — нижний таб-бар с бейджем теперь на всех экранах
-          shot.isInsert ? (
-            <ConfirmButton
-              action={deleteShot.bind(null, shotId)}
-              label={t("Удалить вставку", "Delete insert")}
-              confirmLabel={t("Точно удалить эту вставную группу?", "Really delete this insert group?")}
-              className="min-h-8 rounded-full border border-[rgba(194,71,106,.4)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
-              armedClassName="border-danger bg-[rgba(194,71,106,.15)] text-[#e08aa4]"
-            />
-          ) : undefined
-        }
-      />
+    // Шапка, кинолента и master-колонка — в shots/(card)/layout.tsx: они общие
+    // для серии и при переключении групп не перерисовываются. Здесь — только
+    // деталь текущей группы.
+    <PromptTrackProvider initialFamily={initialPromptFamily}>
       <GenPoller activeCount={activeCount} />
-      <ShotHotkeys
-        prevHref={prevShot ? shotHref(prevShot) : null}
-        nextHref={nextShot ? shotHref(nextShot) : null}
-        editorHref={`${shotHref(shot)}/editor`}
-        backHref={`/episodes/${episodeId}`}
-      />
 
-      {/* кинолента — только на мобиле; на десктопе шоты в master-колонке (не дублируем) */}
-      <div className="lg:hidden">
-        <FilmStrip episodeId={episodeId} shots={stripShots} currentShotId={shotId} />
-      </div>
-
-      <PromptTrackProvider initialFamily={initialPromptFamily}>
-      <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[280px_1fr]">
-        {/* master-колонка (spec §4, десктоп) */}
-        <aside className="hidden overflow-y-auto border-r border-[var(--border-subtle)] p-3 lg:block">
-          <div className="section-label mb-2">{t("Шоты серии", "Episode shots")}</div>
-          <div className="flex flex-col gap-1.5">
-            {allShots.map((s) => {
-              const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
-              const active = s.id === shotId;
-              const sLabel = s.isInsert ? "✦" : String(displayNoById.get(s.id) ?? 0).padStart(2, "0");
-              return (
-                <Link
-                  key={s.id}
-                  href={shotHref(s)}
-                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
-                    s.isInsert ? "border-dashed" : ""
-                  }`}
-                  style={{
-                    borderColor: active
-                      ? "var(--border-strong)"
-                      : s.isInsert
-                        ? "rgba(139,95,176,.5)"
-                        : "var(--border-subtle)",
-                    background: active
-                      ? "var(--ink-600)"
-                      : s.isInsert
-                        ? "rgba(139,95,176,.08)"
-                        : "none",
-                  }}
-                >
-                  <span
-                    className="chrome-text font-display text-[13px] font-bold"
-                    style={s.isInsert ? { color: "var(--violet-300)" } : undefined}
-                  >
-                    {sLabel}
-                  </span>
-                  {s.isInsert ? (
-                    <span
-                      className="rounded bg-[rgba(139,95,176,.18)] px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em] text-violet-200"
-                      title={t("Вставная группа", "Insert group")}
-                    >
-                      {t("вставка", "insert")}
-                    </span>
-                  ) : (
-                    (s.sceneStart || allShots[0]?.id === s.id) && (
-                      <span className="text-[10px] leading-none" title={t("Начало сцены", "Scene start")}>
-                        🎬
-                      </span>
-                    )
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-t200">
-                    {s.title || s.actionMd.slice(0, 30)}
-                  </span>
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.status === "generating" ? "pulse-amber" : ""}`}
-                    style={{ background: st.color }}
-                  />
-                </Link>
-              );
-            })}
-          </div>
-        </aside>
-
-        {/* detail (на десктопе справа резервируем место под панель действий) */}
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32 lg:pb-6 lg:pr-[212px]">
+      {/* detail (на десктопе справа резервируем место под панель действий) */}
+      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32 lg:pb-6 lg:pr-[212px]">
           <div className="flex items-center gap-3.5">
             <div className="chrome-text font-display text-[46px] font-bold leading-[0.9] tracking-[0.03em]">
               {grpN}
@@ -638,8 +474,8 @@ export default async function ShotPage(ctx: {
                 shotId={shotId}
                 initialBeats={beats}
                 llmModel={settings.llm_model}
-                location={chainLocation(allShots, shotId)}
-                timeWeather={chainTimeWeather(allShots, shotId)}
+                location={chainLocation(rows, shotId)}
+                timeWeather={chainTimeWeather(rows, shotId)}
                 emotionalTone={shot.emotionalTone}
                 techniqueLibrary={techniqueLibrary}
                 topSlot={entitiesRefs}
@@ -699,9 +535,10 @@ export default async function ShotPage(ctx: {
               </EmptyState>
             )}
           </div>
-        </div>
       </div>
 
+      {/* обе кнопки ActionBar — position:fixed, поэтому в сетке layout'а он вне
+          потока и колонок не занимает */}
       <ActionBar
         episodeId={episodeId}
         shotId={shotId}
@@ -717,7 +554,6 @@ export default async function ShotPage(ctx: {
         aspectRatio={promptAspect}
         defaultStartFrameId={defaultStartFrame?.id ?? null}
       />
-      </PromptTrackProvider>
-    </main>
+    </PromptTrackProvider>
   );
 }

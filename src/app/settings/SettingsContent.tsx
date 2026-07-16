@@ -1,6 +1,5 @@
 import { requireAuth } from "@/lib/auth";
 import { getAllSettings } from "@/lib/settings";
-import { listTechniques } from "@/lib/director";
 import { isConnected } from "@/lib/higgsfieldMcp";
 import { isConnected as isKlingConnected } from "@/lib/klingMcp";
 import SettingsClient from "@/components/settings/SettingsClient";
@@ -14,7 +13,6 @@ import SettingsTabs from "@/components/settings/SettingsTabs";
 export default async function SettingsContent() {
   await requireAuth();
   const settings = await getAllSettings();
-  const techniques = await listTechniques();
   const hfConnected = await isConnected();
   const klingConnected = await isKlingConnected();
 
@@ -31,18 +29,6 @@ export default async function SettingsContent() {
         storyboardTemplate={settings.tpl_storyboard}
         videoTemplate={settings.tpl_video}
         klingVideoTemplate={settings.tpl_video_kling}
-        techniques={techniques.map((t) => ({
-          id: t.id,
-          title: t.title,
-          category: t.category,
-          camera: t.camera,
-          lens: t.lens,
-          lighting: t.lighting,
-          tags: t.tags,
-          prompt: t.prompt,
-          negative: t.negative,
-          custom: t.custom,
-        }))}
       />
     </>
   );

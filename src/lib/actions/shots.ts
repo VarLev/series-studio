@@ -17,7 +17,7 @@ import { createEpisodeAnchor, getShotAnchorTexts } from "@/lib/anchors";
 import { ensureShotRefsAnalyzed } from "@/lib/refs";
 import { reconcileShotPromptRefs } from "@/lib/refDirectives";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
-import { listTechniques } from "@/lib/director";
+import { listEnabledTechniques } from "@/lib/director";
 import { stripAt } from "@/lib/entityName";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
@@ -309,8 +309,8 @@ export async function enhanceGroup(
       return { ok: false, error: "Модель не вернула ни одного основного шота" };
     }
 
-    // приёмы: оставляем только реально существующие в библиотеке id, максимум 1 на шот
-    const knownTech = new Set((await listTechniques()).map((t) => t.id));
+    // приёмы: оставляем только существующие и ВКЛЮЧЁННЫЕ id, максимум 1 на шот
+    const knownTech = new Set((await listEnabledTechniques()).map((t) => t.id));
     const cleanMain = improvedMain.map((s) => ({
       ...s,
       technique_id: s.technique_id && knownTech.has(s.technique_id) ? s.technique_id : "",

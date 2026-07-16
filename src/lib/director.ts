@@ -6,6 +6,7 @@
  */
 import { asc, eq } from "drizzle-orm";
 import { getDb, settings, techniques } from "@/lib/db";
+import { getAllSettings } from "@/lib/settings";
 
 export interface TechniqueRow {
   id: string;
@@ -74,6 +75,7 @@ export async function deleteAllTechniqueRows(): Promise<void> {
   ensured = true;
 }
 
+/** ВСЕ приёмы — для библиотеки на вкладке «База знаний» (она видна и выключенной). */
 export async function listTechniques(): Promise<TechniqueRow[]> {
   await ensureTechniques();
   const db = await getDb();
@@ -81,11 +83,33 @@ export async function listTechniques(): Promise<TechniqueRow[]> {
   return rows;
 }
 
+/** Включена ли библиотека приёмов целиком (выключатель на вкладке «База знаний»). */
+export async function techniquesEnabled(): Promise<boolean> {
+  return (await getAllSettings()).techniques_enabled !== "0";
+}
+
+/**
+ * Приёмы, которым разрешено доехать до модели. Всё, что кормит LLM или предлагает
+ * приём пользователю (индекс Enhance, пикер на карточке шота, валидация ответа
+ * Enhance), обязано ходить сюда: библиотека выключена — приёмы не уходят совсем.
+ */
+export async function listEnabledTechniques(): Promise<TechniqueRow[]> {
+  if (!(await techniquesEnabled())) return [];
+  return listTechniques();
+}
+
+/** Поиск по id среди ВСЕХ приёмов — для показа истории (бейджи 🎥 прошлых версий). */
 export async function getTechniquesByIds(ids: string[]): Promise<TechniqueRow[]> {
   if (!ids.length) return [];
   const all = await listTechniques();
   const byId = new Map(all.map((t) => [t.id, t]));
   return ids.map((id) => byId.get(id)).filter((t): t is TechniqueRow => Boolean(t));
+}
+
+/** То же, но пусто при выключенной библиотеке — что реально можно вплести в промпт. */
+export async function getEnabledTechniquesByIds(ids: string[]): Promise<TechniqueRow[]> {
+  if (!(await techniquesEnabled())) return [];
+  return getTechniquesByIds(ids);
 }
 
 /** Компактный индекс для LLM-подбора (id · название · камера · теги · категория). */

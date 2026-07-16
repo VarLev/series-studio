@@ -19,7 +19,8 @@ import { getShotAnchorTexts } from "@/lib/anchors";
 import { refAnalysisText } from "@/lib/refAnalysis";
 import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives";
 import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
-import { listTechniques, techniqueIndex, getTechniquesByIds } from "@/lib/director";
+import { KNOWLEDGE_EXCERPT_CHARS } from "@/lib/knowledgeTags";
+import { listEnabledTechniques, techniqueIndex, getEnabledTechniquesByIds } from "@/lib/director";
 import { effectiveOutfit } from "@/lib/wardrobe";
 import { promptFamily, visionModelFrom, maxOutputTokens, CHEAPEST_LLM, isClaudeModel } from "./models";
 import { runJson, type LlmCall } from "./client";
@@ -98,17 +99,27 @@ async function bibleContext(
   );
 }
 
+/** Семейства целевых моделей: док с тегом чужого семейства к текущему не подмешивается. */
+const KNOWLEDGE_FAMILY_KEYS = ["kling", "seedance"];
+
 async function knowledgeContext(targetModel: string): Promise<string> {
   const db = await getDb();
   const docs = await db.select().from(knowledgeDocs);
   const modelKey = targetModel.toLowerCase().split(/[-\s]/)[0]; // kling / seedance / grok...
   const relevant = docs.filter((d) => {
+    if (!d.enabled) return false; // выключен на вкладке «База знаний»
     const tags = d.tags.toLowerCase();
+    // док, помеченный ЧУЖИМ семейством (напр. seedance-док при сборке Kling-промпта),
+    // не протаскиваем через общие теги camera/general — правила семейств конфликтуют
+    const foreignFamily = KNOWLEDGE_FAMILY_KEYS.some(
+      (k) => k !== modelKey && tags.includes(k) && !tags.includes(modelKey),
+    );
+    if (foreignFamily) return false;
     return tags.includes(modelKey) || tags.includes("general") || tags.includes("camera");
   });
   if (!relevant.length) return "";
   const excerpts = relevant
-    .map((d) => `### ${d.title}\n${d.contentMd.slice(0, 6000)}`)
+    .map((d) => `### ${d.title}\n${d.contentMd.slice(0, KNOWLEDGE_EXCERPT_CHARS)}`)
     .join("\n\n");
   return `База знаний по промптам:\n${excerpts}`;
 }
@@ -440,7 +451,8 @@ export async function llmEnhanceGroup(input: {
       "в референсах, ни в описаниях энтити/гардеробе. Если да — предложи их КОРОТКО по-русски в поле " +
       "\"anchors\" (по одной детали на строку массива, 2–6 слов). Если добавлять нечего — \"anchors\": []. " +
       "НЕ дублируй то, что уже описано в шотах, референсах или гардеробе; не выдумывай сюжетных событий.\n";
-  const all = await listTechniques();
+  // выключенные приёмы модель не видит вовсе — их нет в индексе
+  const all = await listEnabledTechniques();
   const techIndexBlock = all.length
     ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (id | название | камера | теги | категория) — " +
       "для каждого шота выбери НЕ БОЛЕЕ ОДНОГО приёма (technique_id), только если он ПОДХОДИТ к сути " +
@@ -861,7 +873,10 @@ export async function llmShotPrompt(
   const attachedTechIds = [
     ...new Set(beats.map((b) => b.technique_id).filter((id): id is string => Boolean(id))),
   ];
-  const candidates = await getTechniquesByIds(attachedTechIds);
+  // приём, выключенный в библиотеке, в промпт не вплетается: закреплённый за шотом
+  // id остаётся в раскадровке (включат обратно — снова заработает), но в модель
+  // не уходит и в бейджах 🎥 использованных не показывается
+  const candidates = await getEnabledTechniquesByIds(attachedTechIds);
   const techLabel = new Map(candidates.map((t) => [t.id, t.title]));
   // Приём даёт ТОЛЬКО грамматику камеры (движение + оптика). Свободный текст приёма
   // НЕ вливаем: его проза (жесты/реквизит/второй человек/локация — «the hands betray
@@ -920,12 +935,13 @@ export async function llmShotPrompt(
       model,
       episodeId: shot.episodeId,
       maxTokens: 8000,
-      // шаблон видео-промпта заказчика + правила сериала не зависят от конкретного
-      // шота — кэшируемый префикс (см. cacheableSystemPrefix в client.ts), экономит
-      // на каждом следующем шоте эпизода вместо повторной полной оплаты
-      cacheableSystemPrefix: `${videoTemplate}\n\n${rules}`,
+      // шаблон видео-промпта заказчика + правила сериала + база знаний не зависят
+      // от конкретного шота — кэшируемый префикс (см. cacheableSystemPrefix в
+      // client.ts), экономит на каждом следующем шоте эпизода вместо повторной
+      // полной оплаты (база знаний может весить 10–18К символов)
+      cacheableSystemPrefix: `${videoTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${knowledge}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
@@ -963,9 +979,9 @@ export async function llmShotPrompt(
   )
     .then(enforceTemplateInvariants)
     .then((res) => {
-      // приёмы для бейджей 🎥 — детерминированно из закреплённых за шотами
-      // (не из ответа модели): что закреплено Enhance, то и показываем/храним
-      res.used_technique_ids = attachedTechIds;
+      // приёмы для бейджей 🎥 — детерминированно из тех, что реально уехали в
+      // промпт (не из ответа модели): закреплённые за шотами минус выключенные
+      res.used_technique_ids = candidates.map((t) => t.id);
       return res;
     });
 }
@@ -1004,9 +1020,10 @@ export async function llmRevisePrompt(
       model,
       episodeId: shot?.episodeId,
       maxTokens: 8000,
-      cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}`,
+      // база знаний в кэшируемом префиксе — как в llmShotPrompt
+      cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${reviseStartBlock}\n\n${reviseStyleBlock}\n\n${knowledge}\n\n` +
+        `${reviseStartBlock}\n\n${reviseStyleBlock}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. Промпт на английском, не длиннее 3500 символов, без " +
         "дублирующихся правил и тавтологичных identity-строк (одна на персонажа). Имена персонажей " +

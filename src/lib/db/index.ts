@@ -224,6 +224,16 @@ const MIGRATIONS: string[][] = [
   // v2 — персонажи из разбивки, которых нет в библии: раньше они молча терялись,
   // теперь висят на группе красными чипами-заготовками до решения пользователя
   [`ALTER TABLE shots ADD COLUMN IF NOT EXISTS unlinked_chars_json text NOT NULL DEFAULT '[]'`],
+  // v3 — вкл/выкл документов базы знаний: выключенный док остаётся в базе,
+  // но не подмешивается в промпт-фабрику (вкладка «База знаний» в настройках)
+  [`ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true`],
+  // v4 — заготовка поштучного вкл/выкл приёмов; отменена в v5 (выключатель нужен
+  // один на всю библиотеку). Версию не удаляем: на БД, где v4 уже применилась,
+  // изменение её текста задним числом не выполнится — чинит только следующая версия
+  [`ALTER TABLE techniques ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true`],
+  // v5 — вкл/выкл библиотеки приёмов целиком живёт в settings.techniques_enabled,
+  // поштучная колонка не нужна
+  [`ALTER TABLE techniques DROP COLUMN IF EXISTS enabled`],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

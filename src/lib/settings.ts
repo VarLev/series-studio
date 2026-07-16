@@ -36,6 +36,10 @@ export const DEFAULT_SETTINGS = {
   tpl_storyboard: DEFAULT_STORYBOARD_TEMPLATE,
   tpl_video: DEFAULT_VIDEO_TEMPLATE, // трек Seedance
   tpl_video_kling: DEFAULT_KLING_VIDEO_TEMPLATE, // трек Kling (<<<image_N>>>, нативный звук)
+  // "0" → библиотека режиссёрских приёмов выключена целиком: приёмы не уходят в
+  // модель совсем (ни в индекс Enhance, ни в промпт шота, ни в пикер на карточке).
+  // Выключатель — на вкладке «База знаний», над библиотекой
+  techniques_enabled: "1",
   // интерфейс
   ui_lang: "ru", // ru | en
   ui_theme: "stigma", // stigma (фиолетовый) | vault (графит + янтарь)
