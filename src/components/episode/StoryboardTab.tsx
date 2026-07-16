@@ -11,9 +11,16 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import ConfirmButton from "@/components/ConfirmButton";
 import { toast } from "@/components/Toaster";
-import { generateStoryboard, sliceStoryboard } from "@/lib/actions/storyboard";
+import {
+  assignFrameStartFrame,
+  assignSheetStartFrames,
+  generateStoryboard,
+  pollStoryboardResult,
+  sliceStoryboard,
+} from "@/lib/actions/storyboard";
 import { upscaleReference, editReference } from "@/lib/actions/generate";
 import { deleteReference } from "@/lib/actions/entities";
+import { useLongAction } from "@/components/useLongAction";
 import { SectionLabel, EmptyState } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
 import { formatImageCost, type ImageModelMeta } from "@/lib/imageModels";
@@ -24,11 +31,14 @@ export interface StoryboardItem {
   url: string;
   token: string | null;
   caption: string;
+  /** группа кадра (панель листа); null у листов и кадров без карты панелей */
+  sbShotId: string | null;
+  /** номер панели кадра на листе (1..grid) */
+  panel: number | null;
 }
 
 export interface StoryboardSheetData extends StoryboardItem {
   grid: number; // 4 | 9
-  sbShotId: string | null;
   frames: StoryboardItem[];
 }
 
@@ -53,10 +63,12 @@ export interface StoryboardData {
 }
 
 const FRAME_OPTIONS = [4, 9] as const;
+// цена показывается через formatImageCost (реальная, из каталога модели) — своих
+// чисел у списка нет: захардкоженные кредиты тут врали при смене модели
 const RESOLUTIONS = [
-  { id: "1k", label: "1K", credits: 4 },
-  { id: "2k", label: "2K", credits: 6 },
-  { id: "4k", label: "4K", credits: 10 },
+  { id: "1k", label: "1K" },
+  { id: "2k", label: "2K" },
+  { id: "4k", label: "4K" },
 ] as const;
 
 function trimText(s: string, max: number): string {
@@ -86,6 +98,10 @@ function beatTrim(raw: string, max = 220): string {
  * быть столько же, сколько кадров на листе — не больше и не меньше).
  * Избыток — равномерная выборка; недостаток — ключевые биты дублируются
  * другим ракурсом, сохраняя порядок истории.
+ *
+ * Бит помнит свою группу: промпт обещает «panel N depicts beat N», значит панель
+ * N — это кадр группы, из которой взят бит N. Эта связь уезжает на сервер картой
+ * панелей и потом делает кадры листа стартовыми кадрами их групп.
  */
 const ANGLE_VARIANTS = [
   "the same moment from a closer angle",
@@ -94,11 +110,16 @@ const ANGLE_VARIANTS = [
   "a reaction close-up within the same moment",
 ];
 
-function exactBeats(pool: string[], n: number): string[] {
+interface Beat {
+  shotId: string;
+  text: string;
+}
+
+function exactBeats(pool: Beat[], n: number): Beat[] {
   if (!pool.length) return [];
   if (pool.length >= n) {
     if (pool.length === n) return pool;
-    const out: string[] = [];
+    const out: Beat[] = [];
     for (let i = 0; i < n; i++) {
       out.push(pool[Math.round((i * (pool.length - 1)) / (n - 1))]);
     }
@@ -106,12 +127,12 @@ function exactBeats(pool: string[], n: number): string[] {
   }
   const base = Math.floor(n / pool.length);
   const extra = n % pool.length;
-  const out: string[] = [];
+  const out: Beat[] = [];
   pool.forEach((p, i) => {
     const copies = base + (i < extra ? 1 : 0);
     out.push(p);
     for (let j = 1; j < copies; j++) {
-      out.push(`${p} — ${ANGLE_VARIANTS[(j - 1) % ANGLE_VARIANTS.length]}.`);
+      out.push({ ...p, text: `${p.text} — ${ANGLE_VARIANTS[(j - 1) % ANGLE_VARIANTS.length]}.` });
     }
   });
   return out;
@@ -148,28 +169,37 @@ function refLine(n: number, r: AttachRef): string {
   }
 }
 
-function buildStory(scope: ShotListItem | null, frames: number, shots: ShotListItem[]): string {
+function buildStory(
+  scope: ShotListItem | null,
+  frames: number,
+  shots: ShotListItem[],
+): { text: string; panelShotIds: string[] } {
   // пул битов: шоты групп (чистые описания), группа без шотов даёт один бит
-  const pool: string[] = [];
+  const pool: Beat[] = [];
   const source = scope ? [scope] : shots;
   for (const s of source) {
     const beats = s.beats.length ? s.beats : [s.action];
+    // тон группы — в каждый её бит: без него панели диалоговых сцен рисуются
+    // нейтральными лицами, а половина сериала — именно разговоры
+    const mood = s.emotionalTone.trim() ? ` (mood: ${s.emotionalTone.trim()})` : "";
     for (const b of beats) {
       const text = beatTrim(b);
-      if (text) pool.push(`${s.title ? s.title + " — " : ""}${text}`);
+      if (text) pool.push({ shotId: s.id, text: `${s.title ? s.title + " — " : ""}${text}${mood}` });
     }
   }
-  const lines = exactBeats(pool, frames).map((b, i) => `${i + 1}. ${b}`);
-  if (!lines.length) return "[опишите историю — по биту на панель]";
+  const picked = exactBeats(pool, frames);
+  if (!picked.length) return { text: "[опишите историю — по биту на панель]", panelShotIds: [] };
   const header = scope
     ? `A single scene (${scope.durationSec}s) shown moment by moment:\n`
     : "";
-  return (
-    header +
-    lines.join("\n") +
-    `\nExactly one numbered beat per panel, in order: panel N depicts beat N. ` +
-    `Do not add extra sub-scenes and do not split one beat across several panels.`
-  );
+  return {
+    text:
+      header +
+      picked.map((b, i) => `${i + 1}. ${b.text}`).join("\n") +
+      `\nExactly one numbered beat per panel, in order: panel N depicts beat N. ` +
+      `Do not add extra sub-scenes and do not split one beat across several panels.`,
+    panelShotIds: picked.map((b) => b.shotId),
+  };
 }
 
 /** Сборка промпта листа из шаблона настроек: плейсхолдеры → значения. */
@@ -179,45 +209,57 @@ function buildPrompt(
   frames: number,
   shots: ShotListItem[],
   attached: AttachRef[],
-): string {
+): { prompt: string; panelShotIds: string[] } {
   const refLines = attached.map((r, i) => refLine(i + 1, r)).join("\n");
   const story = buildStory(scope, frames, shots);
   const fill: Record<string, string> = {
     "{{GRID}}": frames === 9 ? "3x3" : "2x2",
     "{{PANELS}}": String(frames),
     "{{REFERENCES}}": refLines,
-    "{{STORY}}": story,
+    "{{STORY}}": story.text,
     "{{PANEL_STRUCTURE}}": frames === 9 ? PANEL_STRUCTURE_9 : PANEL_STRUCTURE_4,
   };
   let out = template;
   for (const [key, value] of Object.entries(fill)) out = out.split(key).join(value);
   // шаблон без плейсхолдеров не должен терять сюжет и референсы
-  if (!template.includes("{{STORY}}")) out += `\n\nStory to visualize:\n${story}`;
+  if (!template.includes("{{STORY}}")) out += `\n\nStory to visualize:\n${story.text}`;
   if (!template.includes("{{REFERENCES}}") && refLines) out += `\n\n${refLines}`;
-  return out.replace(/\n{3,}/g, "\n\n").trim();
+  return { prompt: out.replace(/\n{3,}/g, "\n\n").trim(), panelShotIds: story.panelShotIds };
 }
 
 export default function StoryboardTab({
   episodeId,
   shots,
   data,
+  scopeId,
+  onScopeChange,
 }: {
   episodeId: string;
   shots: ShotListItem[];
   data: StoryboardData;
+  /** область листа ("" = вся серия); живёт в EpisodeTabs — её задаёт и «▦» на группе */
+  scopeId: string;
+  onScopeChange: (shotId: string) => void;
 }) {
   const router = useRouter();
   const t = useT();
   const en = t("ru", "en") === "en";
-  const [scopeId, setScopeId] = useState<string>(""); // "" = вся серия
   const [frames, setFrames] = useState<(typeof FRAME_OPTIONS)[number]>(9);
   const [resolution, setResolution] = useState<(typeof RESOLUTIONS)[number]["id"]>("2k");
   const [model, setModel] = useState(data.imageModels[0]?.id ?? "");
-  const [promptEdited, setPromptEdited] = useState<string | null>(null);
+  // ручная правка промпта помнит, к какой области и сетке она относится: смена
+  // любой из них делает её неактуальной, и промпт сам пересобирается из шотов
+  // (раньше это делали ручные сбросы — и их забывал вызвать всякий новый путь,
+  // например «▦» на карточке группы)
+  const [edited, setEdited] = useState<{ key: string; text: string } | null>(null);
   const [attach, setAttach] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const [slicing, setSlicing] = useState<string | null>(null);
+  const [trimGutters, setTrimGutters] = useState(false);
+  // постановка листа идёт десятки секунд (Google рисует прямо в запросе) — ответ
+  // экшена через туннель теряется, поэтому результат добираем поллингом тайника
+  const gen = useLongAction<null>();
 
   // детальный просмотр кадра/листа + правка
   const [detail, setDetail] = useState<StoryboardItem | null>(null);
@@ -232,41 +274,76 @@ export default function StoryboardTab({
         .filter((r): r is AttachRef => Boolean(r)),
     [attach, data.attachRefs],
   );
-  const autoPrompt = useMemo(
+  const auto = useMemo(
     () => buildPrompt(data.template, scope, frames, shots, attachedRefs),
     [data.template, scope, frames, shots, attachedRefs],
   );
-  const prompt = promptEdited ?? autoPrompt;
+  const promptKey = `${scopeId}:${frames}`;
+  const isEdited = edited?.key === promptKey;
+  const prompt = isEdited ? edited.text : auto.prompt;
   const activeModel = data.imageModels.find((m) => m.id === model) ?? data.imageModels[0];
   const cost = activeModel ? formatImageCost(activeModel.id, resolution, en) : "";
+  // ручная правка могла выкинуть строки-директивы: картинки всё равно уедут в
+  // задачу, но модель не узнает их ролей — молчать об этом нельзя
+  const orphanRefs = useMemo(
+    () =>
+      !isEdited
+        ? []
+        : attachedRefs
+            .map((r, i) => ({ r, n: i + 1 }))
+            .filter(({ n }) => !new RegExp(`reference image ${n}\\b`, "i").test(prompt)),
+    [isEdited, attachedRefs, prompt],
+  );
 
   function submit() {
     setError("");
-    startTransition(async () => {
-      const res = await generateStoryboard({
-        episodeId,
-        shotId: scopeId || null,
-        model: activeModel?.id,
-        frames,
-        resolution,
-        prompt,
-        refIds: attach,
-      });
-      if (res.ok) {
+    // токен запуска: сервер кладёт исход в тайник под ним, и даже если ответ
+    // экшена потеряется в туннеле, поллинг его доберёт; повтор с тем же токеном
+    // не создаст вторую платную задачу
+    const token = crypto.randomUUID();
+    gen.start({
+      run: async () => {
+        const res = await generateStoryboard({
+          episodeId,
+          shotId: scopeId || null,
+          model: activeModel?.id,
+          frames,
+          resolution,
+          prompt,
+          refIds: attach,
+          panelShotIds: auto.panelShotIds,
+          token,
+        });
+        return res.ok ? { ok: true, value: null } : res;
+      },
+      poll: async () => {
+        const res = await pollStoryboardResult(episodeId, token);
+        if (!res) return null;
+        return res.ok ? { ok: true, value: null } : res;
+      },
+      pollMs: 4000,
+      ceilingSec: 240,
+      ceilingMsg: t(
+        "Ответа нет дольше 4 минут. Лист мог не поставиться — проверьте «Очередь», прежде чем платить за повтор.",
+        "No response for over 4 minutes. The sheet may not have been queued — check the Queue before paying for a retry.",
+      ),
+      onOk: () => {
         toast(
           t(
             `Раскадровка поставлена · ${cost} — лист появится здесь и в референсах`,
             `Storyboard queued · ${cost} — the sheet will appear here and in references`,
           ),
         );
-      } else setError(res.error);
+        router.refresh();
+      },
+      onErr: setError,
     });
   }
 
   function doSlice(sheet: StoryboardSheetData) {
     setSlicing(sheet.id);
     startTransition(async () => {
-      const res = await sliceStoryboard(sheet.id);
+      const res = await sliceStoryboard(sheet.id, trimGutters);
       setSlicing(null);
       if (res.ok) {
         toast(
@@ -275,7 +352,38 @@ export default function StoryboardTab({
             `Sheet sliced into ${res.created} frames — each got a REF token`,
           ),
         );
+        router.refresh();
       } else toast(res.error);
+    });
+  }
+
+  function doAssignSheet(sheet: StoryboardSheetData) {
+    startTransition(async () => {
+      const res = await assignSheetStartFrames(sheet.id);
+      toast(
+        res.ok
+          ? t(
+              `Стартовый кадр назначен · групп: ${res.assigned}`,
+              `Start frame assigned · groups: ${res.assigned}`,
+            )
+          : res.error,
+      );
+      if (res.ok) router.refresh();
+    });
+  }
+
+  function doAssignFrame(item: StoryboardItem) {
+    startTransition(async () => {
+      const res = await assignFrameStartFrame(item.id);
+      toast(
+        res.ok
+          ? t("Кадр стал стартовым для группы", "Frame is now the group's start frame")
+          : res.error,
+      );
+      if (res.ok) {
+        setDetail(null);
+        router.refresh();
+      }
     });
   }
 
@@ -337,10 +445,7 @@ export default function StoryboardTab({
             <span className="section-label">{t("Область", "Scope")}</span>
             <select
               value={scopeId}
-              onChange={(e) => {
-                setScopeId(e.target.value);
-                setPromptEdited(null); // новая область — пересобрать промпт
-              }}
+              onChange={(e) => onScopeChange(e.target.value)}
               className="min-h-10 w-full rounded-md border border-[var(--border-default)] bg-ink-600 px-2 text-[12px] text-t100 outline-none"
             >
               <option value="">{t("Вся серия", "Whole episode")}</option>
@@ -357,10 +462,7 @@ export default function StoryboardTab({
               {FRAME_OPTIONS.map((n) => (
                 <button
                   key={n}
-                  onClick={() => {
-                    setFrames(n);
-                    setPromptEdited(null);
-                  }}
+                  onClick={() => setFrames(n)}
                   className="flex min-h-10 min-w-[64px] flex-col items-center justify-center rounded-md border"
                   style={{
                     borderColor: frames === n ? "var(--border-strong)" : "var(--border-subtle)",
@@ -436,9 +538,9 @@ export default function StoryboardTab({
         <div className="flex flex-col gap-1">
           <SectionLabel
             right={
-              promptEdited !== null ? (
+              isEdited ? (
                 <button
-                  onClick={() => setPromptEdited(null)}
+                  onClick={() => setEdited(null)}
                   className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-t400 hover:text-violet-200"
                 >
                   {t("↻ пересобрать из шотов", "↻ rebuild from shots")}
@@ -454,11 +556,25 @@ export default function StoryboardTab({
           </SectionLabel>
           <textarea
             value={prompt}
-            onChange={(e) => setPromptEdited(e.target.value)}
+            onChange={(e) => setEdited({ key: promptKey, text: e.target.value })}
             rows={6}
             spellCheck={false}
             className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
           />
+          <span className="font-mono text-[9px] text-t400">
+            {t(
+              "+ фиксация одежды персонажей из библии добавляется к промпту автоматически",
+              "+ a wardrobe lock from the bible is appended to the prompt automatically",
+            )}
+          </span>
+          {orphanRefs.length > 0 && (
+            <div className="text-[10.5px] leading-relaxed text-warning">
+              {t(
+                `Промпт правился вручную: референс(ы) ${orphanRefs.map((x) => x.n).join(", ")} в тексте не упомянуты — картинки уедут в задачу, но модель не узнает их ролей.`,
+                `Prompt was hand-edited: reference(s) ${orphanRefs.map((x) => x.n).join(", ")} are not mentioned in the text — the images still go with the job, but the model won't know their roles.`,
+              )}
+            </div>
+          )}
         </div>
 
         {data.attachRefs.length > 0 && (
@@ -503,12 +619,12 @@ export default function StoryboardTab({
         {error && <div className="text-[11.5px] text-danger">{error}</div>}
         <button
           onClick={submit}
-          disabled={pending || !prompt.trim()}
+          disabled={gen.busy || pending || !prompt.trim()}
           className="min-h-[52px] w-full rounded-lg bg-violet-500 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-50"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
-          {pending
-            ? t("Отправка…", "Submitting…")
+          {gen.busy
+            ? t(`Ставим лист… ${gen.elapsed}с`, `Queueing the sheet… ${gen.elapsed}s`)
             : t(`Сгенерировать раскадровку · ${cost}`, `Generate storyboard · ${cost}`)}
         </button>
       </div>
@@ -564,6 +680,23 @@ export default function StoryboardTab({
             <img src={sheet.url} alt={sheet.caption} className="max-h-[46dvh] w-auto object-contain" />
           </button>
 
+          {/* Nano Banana иногда рисует рамки/гаттеры между панелями — резка по
+              идеальным третям тогда цепляет края соседних кадров */}
+          {sheet.frames.length === 0 && (
+            <label className="flex cursor-pointer items-center gap-2 self-start text-[10.5px] text-t300">
+              <input
+                type="checkbox"
+                checked={trimGutters}
+                onChange={(e) => setTrimGutters(e.target.checked)}
+                className="h-4 w-4 accent-[var(--violet-400)]"
+              />
+              {t(
+                "обрезать рамки между панелями (−2% с каждой стороны)",
+                "trim panel gutters (−2% on each side)",
+              )}
+            </label>
+          )}
+
           <div className="flex flex-wrap gap-1.5">
             {sheet.frames.length === 0 ? (
               <button
@@ -575,6 +708,21 @@ export default function StoryboardTab({
                 {slicing === sheet.id
                   ? t("Режу…", "Slicing…")
                   : t(`✂ Разрезать на ${sheet.grid} кадров`, `✂ Slice into ${sheet.grid} frames`)}
+              </button>
+            ) : sheet.frames.some((f) => f.sbShotId) ? (
+              // кадры знают свои группы (карта панелей листа) — стартовые кадры
+              // ставятся одним тапом вместо похода в каждую группу руками
+              <button
+                onClick={() => doAssignSheet(sheet)}
+                disabled={pending}
+                className="min-h-10 flex-1 rounded-lg bg-violet-500 px-3 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-white hover:bg-violet-400 disabled:opacity-50"
+                style={{ boxShadow: "var(--glow-violet-sm)" }}
+                title={t(
+                  "Каждой группе — её первый кадр с этого листа как стартовый",
+                  "Give every group its first panel from this sheet as the start frame",
+                )}
+              >
+                {t("▶ Назначить стартовыми", "▶ Set as start frames")}
               </button>
             ) : (
               <span className="flex min-h-10 flex-1 items-center justify-center rounded-lg border border-[var(--border-subtle)] font-mono text-[10px] text-t400">
@@ -621,10 +769,19 @@ export default function StoryboardTab({
                 <button
                   key={f.id}
                   onClick={() => setDetail(f)}
+                  title={f.caption}
                   className="w-[58px] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black text-left hover:border-[var(--border-strong)]"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={f.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
+                  <span className="relative block">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={f.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
+                    {/* чей это кадр — видно, не открывая его */}
+                    {f.sbShotId && (
+                      <span className="absolute left-0 top-0 rounded-br bg-[rgba(6,5,9,.82)] px-1 py-0.5 font-mono text-[7px] font-semibold text-violet-200">
+                        {scopeLabel(f.sbShotId)}
+                      </span>
+                    )}
+                  </span>
                   <span className="block truncate px-1 py-0.5 text-center font-mono text-[7.5px] text-violet-200">
                     {f.token}
                   </span>
@@ -674,6 +831,20 @@ export default function StoryboardTab({
               style={{ background: "#000" }}
             />
             <div className="font-mono text-[10px] text-t400">{detail.caption}</div>
+            {/* кадр знает свою группу — ручное подтверждение привязки: карта панелей
+                это предложение, а не приговор (промпт мог правиться руками) */}
+            {detail.sbShotId && detail.panel != null && (
+              <button
+                onClick={() => doAssignFrame(detail)}
+                disabled={pending}
+                className="min-h-[46px] w-full rounded-lg border border-[rgba(192,138,62,.55)] bg-[rgba(192,138,62,.08)] text-[10.5px] font-semibold uppercase tracking-[0.06em] text-warning hover:bg-[rgba(192,138,62,.16)] disabled:opacity-50"
+              >
+                {t(
+                  `▶ Стартовый кадр · ${scopeLabel(detail.sbShotId)}`,
+                  `▶ Start frame · ${scopeLabel(detail.sbShotId)}`,
+                )}
+              </button>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={() => doUpscale(detail)}

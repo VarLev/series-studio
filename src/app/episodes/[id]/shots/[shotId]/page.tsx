@@ -217,12 +217,26 @@ export default async function ShotPage(ctx: {
     )
     .orderBy(asc(references.createdAt));
   const seriesRefs = await Promise.all(
-    seriesRefRows.map(async (r) => ({
-      id: r.id,
-      url: await getFileUrl(r.storagePath),
-      label: r.token ?? r.caption ?? "REF",
-      sub: r.caption,
-    })),
+    seriesRefRows
+      // кадр раскадровки ЭТОЙ группы — вперёд: раньше он лежал где-то среди
+      // десятков референсов серии по дате, и «свой» кадр приходилось искать
+      // скроллингом вслепую
+      .slice()
+      .sort(
+        (a, b) =>
+          Number(b.sbShotId === shotId) - Number(a.sbShotId === shotId) ||
+          (a.sbPanel ?? 0) - (b.sbPanel ?? 0),
+      )
+      .map(async (r) => ({
+        id: r.id,
+        url: await getFileUrl(r.storagePath),
+        label: r.token ?? r.caption ?? "REF",
+        sub: r.caption,
+        /** кадр раскадровки этой группы — бейдж и приоритет в пикерах */
+        sb: r.sbShotId === shotId && r.source === "storyboard-frame",
+        /** лист-сетка: как стартовый кадр 3×3-сетка бессмысленна */
+        isSheet: r.grid === 4 || r.grid === 9,
+      })),
   );
 
   const bibleRefs = await Promise.all(
@@ -375,19 +389,28 @@ export default async function ShotPage(ctx: {
     kling: await techniquesOf(currentByFamily.kling),
   };
 
-  // start-frame кандидаты: рефы шота (start_frame первым) + референсы серии
+  const t = await getT();
+
+  // start-frame кандидаты: рефы шота (start_frame первым) + референсы серии.
+  // Листы-сетки исключены: 2×2/3×3 как первый кадр вертикального видео — брак.
   const startFrames = [
     ...shotRefs
       .slice()
       .sort((a, b) => (a.role === "start_frame" ? -1 : 0) - (b.role === "start_frame" ? -1 : 0))
       .map((r) => ({ id: r.id, url: r.url, label: r.caption || r.role })),
-    ...seriesRefs.map((r) => ({ id: r.id, url: r.url, label: r.label })),
+    ...seriesRefs
+      .filter((r) => !r.isSheet)
+      .map((r) => ({
+        id: r.id,
+        url: r.url,
+        label: r.label,
+        badge: r.sb ? t("раскадровка", "storyboard") : undefined,
+      })),
   ];
   const defaultStartFrame = shotRefs.find((r) => r.role === "start_frame") ?? null;
 
   const shotHref = (s: { id: string }) => `/episodes/${episodeId}/shots/${s.id}`;
 
-  const t = await getT();
   const imageModelsList = await availableImageModels();
   const grpLabel = shot.isInsert ? t("Вставка", "Insert") : `${t("Группа", "Group")} ${grpN}`;
 

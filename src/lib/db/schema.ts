@@ -42,6 +42,12 @@ export const references = pgTable("references", {
   grid: integer("grid"), // лист: сколько кадров в сетке (4 = 2×2, 9 = 3×3)
   sbShotId: text("sb_shot_id"), // раскадровка конкретного шота (null = вся серия)
   parentId: text("parent_id"), // кадр: id листа, из которого вырезан
+  // лист «вся серия»: карта «панель → группа» (JSON-массив shot_id по номерам
+  // панелей). Промпт листа обещает «panel N depicts beat N», а бит N взят из
+  // конкретной группы — карта позволяет разрезке проставить кадрам их группы,
+  // а тем — стать стартовыми кадрами этих групп в один тап
+  sbPanels: text("sb_panels"),
+  sbPanel: integer("sb_panel"), // кадр: номер его панели на листе (1..grid)
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -31,6 +31,8 @@ interface PickerRef {
   url: string;
   label: string;
   sub: string;
+  /** кадр раскадровки ЭТОЙ группы — идёт первым и помечен бейджем */
+  sb?: boolean;
 }
 
 const ROLE_LABEL = {
@@ -271,10 +273,21 @@ export default function ShotRefs({
                 <button
                   key={r.id}
                   onClick={() => attach(r.id)}
-                  className="overflow-hidden rounded-md border border-[var(--border-subtle)] bg-ink-600 text-left hover:border-[var(--border-strong)]"
+                  title={r.sub}
+                  className="overflow-hidden rounded-md border bg-ink-600 text-left hover:border-[var(--border-strong)]"
+                  style={{
+                    borderColor: r.sb ? "var(--violet-400)" : "var(--border-subtle)",
+                  }}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
+                  <div className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={r.url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
+                    {r.sb && (
+                      <span className="absolute left-0 top-0 rounded-br bg-[rgba(6,5,9,.82)] px-1 py-0.5 font-mono text-[7.5px] font-semibold text-violet-200">
+                        ▦ {t("раскадровка", "storyboard")}
+                      </span>
+                    )}
+                  </div>
                   <div className="truncate px-1.5 py-1 font-mono text-[9px] text-violet-200">
                     {r.label}
                   </div>

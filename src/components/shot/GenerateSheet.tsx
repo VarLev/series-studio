@@ -25,6 +25,8 @@ export interface StartFrameOption {
   id: string;
   url: string;
   label: string;
+  /** пометка кандидата («раскадровка») — кадр листа именно этой группы */
+  badge?: string;
 }
 
 // фолбэк-коэффициенты (сверены с живым get_cost 2026-07-12); точные цены — preflight
@@ -427,16 +429,26 @@ export default function GenerateSheet({
               className="w-[76px] shrink-0"
             >
               <span
-                className="block h-11 overflow-hidden rounded-md border-2"
+                className="relative block h-11 overflow-hidden rounded-md border-2"
                 style={{
-                  borderColor: startFrame === f.id ? "var(--warning)" : "var(--border-subtle)",
+                  borderColor:
+                    startFrame === f.id
+                      ? "var(--warning)"
+                      : f.badge
+                        ? "var(--violet-400)"
+                        : "var(--border-subtle)",
                 }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={f.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                {f.badge && (
+                  <span className="absolute left-0 top-0 rounded-br bg-[rgba(6,5,9,.82)] px-1 font-mono text-[7px] font-semibold text-violet-200">
+                    ▦
+                  </span>
+                )}
               </span>
               <span className="mt-0.5 block truncate text-center font-mono text-[8px] text-t400">
-                {f.label}
+                {f.badge ?? f.label}
               </span>
             </button>
           ))}

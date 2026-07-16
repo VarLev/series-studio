@@ -803,8 +803,20 @@ export interface ReferenceJobInput {
   /** цена в $ для Google-провайдера (Higgsfield считает в кредитах). */
   usd?: number | null;
   /** Лист раскадровки: сколько кадров в сетке (4 | 9) и к какому шоту относится. */
-  sbGrid?: number;
+  sbGrid?: number | null;
   sbShotId?: string | null;
+  /** Кадр листа: id листа-родителя и номер панели (правка/апскейл их наследуют). */
+  sbParentId?: string | null;
+  sbPanel?: number | null;
+  /** Лист «вся серия»: карта «панель → группа» (id групп по номерам панелей). */
+  sbPanels?: string[] | null;
+  /**
+   * Чем пометить готовый референс (references.source). По умолчанию — sourceTag,
+   * но правка/апскейл ЛИСТА обязаны оставить его листом, а КАДРА — кадром: иначе
+   * результат выпадает со вкладки «Раскадровка» и его нельзя ни разрезать, ни
+   * подставить стартовым кадром группы.
+   */
+  refSource?: string | null;
   caption?: string;
 }
 
@@ -880,6 +892,10 @@ export async function submitReferenceJob(input: ReferenceJobInput): Promise<void
     usd: google ? input.usd ?? null : null,
     sb_grid: input.sbGrid ?? null,
     sb_shot_id: input.sbShotId ?? null,
+    sb_parent_id: input.sbParentId ?? null,
+    sb_panel: input.sbPanel ?? null,
+    sb_panels: input.sbPanels?.length ? JSON.stringify(input.sbPanels) : null,
+    ref_source: input.refSource ?? null,
     caption: input.caption ?? null,
     _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
   };
@@ -966,6 +982,10 @@ async function landReferenceResult(
     aspect_ratio?: string;
     sb_grid?: number | null;
     sb_shot_id?: string | null;
+    sb_parent_id?: string | null;
+    sb_panel?: number | null;
+    sb_panels?: string | null;
+    ref_source?: string | null;
     caption?: string | null;
   };
   let data: Buffer;
@@ -1008,12 +1028,17 @@ async function landReferenceResult(
     episodeId: gen.episodeId,
     storagePath,
     caption: params.caption ?? "",
-    source: params.source_tag ?? "nano-banana",
+    // ref_source задают правка/апскейл раскадровки: результат остаётся тем же,
+    // чем был исходник (лист — листом, кадр — кадром), а не становится "edit"
+    source: params.ref_source ?? params.source_tag ?? "nano-banana",
     token: await nextRefToken(gen.episodeId!),
     width,
     height,
     grid: params.sb_grid ?? null,
     sbShotId: params.sb_shot_id ?? null,
+    parentId: params.sb_parent_id ?? null,
+    sbPanel: params.sb_panel ?? null,
+    sbPanels: params.sb_panels ?? null,
   });
 }
 

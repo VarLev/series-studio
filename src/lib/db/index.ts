@@ -213,6 +213,14 @@ const MIGRATIONS: string[][] = [
   SCHEMA_SQL.split(";")
     .map((s) => s.trim())
     .filter(Boolean),
+  // v1 — раскадровка знает, какая панель про какую группу: лист хранит карту
+  // «панель → группа» (sb_panels), кадр — свой номер панели (sb_panel). Отсюда
+  // разрезка проставляет кадрам их группы, а кадры становятся стартовыми
+  // кадрами этих групп в один тап.
+  [
+    `ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_panels text`,
+    `ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_panel integer`,
+  ],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

@@ -6,7 +6,7 @@ import { getAllSettings } from "@/lib/settings";
 import { displayGroupNumbers } from "@/lib/beats";
 import { getT } from "@/lib/i18n-server";
 import { availableImageModels } from "@/lib/generation";
-import { getFileUrl } from "@/lib/storage";
+import { getFileUrls } from "@/lib/storage";
 import { thumbForResult } from "@/lib/poster";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
@@ -84,6 +84,19 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
   // номер группы в серии: вставные группы (isInsert) в нумерацию не входят
   const displayNoById = displayGroupNumbers(shotRows);
 
+  // у каких групп уже есть кадр раскадровки — бейдж в списке групп: покрытие
+  // эпизода раскадровкой должно читаться одним взглядом, без открытия вкладки
+  const storyboardShotIds = new Set(
+    (
+      await db
+        .select({ sbShotId: references.sbShotId })
+        .from(references)
+        .where(and(eq(references.episodeId, id), eq(references.source, "storyboard-frame")))
+    )
+      .map((r) => r.sbShotId)
+      .filter((sid): sid is string => Boolean(sid)),
+  );
+
   const shotItems: ShotListItem[] = shotRows.map((s) => {
     // чистые визуальные описания шотов группы — промпт листа раскадровки
     // не должен содержать «Шот N (00:00–00:05):» и обрезанные хвосты
@@ -119,6 +132,8 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         .map((l) => entityById.get(l.entityId)?.name ?? "")
         .filter(Boolean),
       beats,
+      emotionalTone: s.emotionalTone,
+      hasStoryboard: storyboardShotIds.has(s.id),
       thumbUrl: thumbByShot.get(s.id)?.url ?? null,
       thumbIsVideo: thumbByShot.get(s.id)?.isVideo ?? false,
     };
@@ -138,61 +153,68 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
   const frameRows = seriesRefRows.filter((r) => r.source === "storyboard-frame");
   const sheetIds = new Set(sheetRows.map((r) => r.id));
 
-  const toItem = async (r: (typeof seriesRefRows)[number]) => ({
-    id: r.id,
-    url: await getFileUrl(r.storagePath),
-    token: r.token,
-    caption: r.caption,
-  });
-
-  const sheets: StoryboardSheetData[] = await Promise.all(
-    sheetRows.map(async (r) => ({
-      ...(await toItem(r)),
-      grid: r.grid!,
-      sbShotId: r.sbShotId,
-      frames: await Promise.all(
-        frameRows
-          .filter((f) => f.parentId === r.id)
-          .sort((a, b) => a.caption.localeCompare(b.caption, "ru", { numeric: true }))
-          .map(toItem),
-      ),
-    })),
-  );
-  const orphanFrames = await Promise.all(
-    frameRows.filter((f) => !f.parentId || !sheetIds.has(f.parentId)).map(toItem),
-  );
-
   // «приложить референсы»: аватары сущностей серии + обычные референсы серии (не листы/кадры).
   // kind/name нужны для авто-строк промпта «Use reference image N as …» (роль по порядку)
-  const entityAvatarRefs = entityIds.length
-    ? await db.select().from(references).where(inArray(references.entityId, entityIds))
-    : [];
+  const entityAvatarRows = (
+    entityIds.length
+      ? await db.select().from(references).where(inArray(references.entityId, entityIds))
+      : []
+  ).filter((r) => r.entityId && !r.shotId);
+
+  // подписи URL — ОДНИМ батчем (getFileUrls) на листы, кадры и «приложить»:
+  // поштучный getFileUrl на каждый референс складывался в заметную паузу при
+  // каждом открытии серии (у Supabase это отдельный сетевой вызов на картинку)
+  const urlRows = [...seriesRefRows, ...entityAvatarRows];
+  const urlList = await getFileUrls(urlRows.map((r) => r.storagePath));
+  const urlByPath = new Map(urlRows.map((r, i) => [r.storagePath, urlList[i]]));
+  const urlOf = (storagePath: string) => urlByPath.get(storagePath) ?? "";
+
+  const toItem = (r: (typeof seriesRefRows)[number]) => ({
+    id: r.id,
+    url: urlOf(r.storagePath),
+    token: r.token,
+    caption: r.caption,
+    sbShotId: r.sbShotId,
+    panel: r.sbPanel,
+  });
+
+  const sheets: StoryboardSheetData[] = sheetRows.map((r) => ({
+    ...toItem(r),
+    grid: r.grid!,
+    frames: frameRows
+      .filter((f) => f.parentId === r.id)
+      // по номеру панели, а не по подписи: у правок/апскейлов кадра подпись с
+      // суффиксом, и сортировка строкой ставила их в случайные места листа
+      .sort(
+        (a, b) =>
+          (a.sbPanel ?? 0) - (b.sbPanel ?? 0) || a.createdAt.getTime() - b.createdAt.getTime(),
+      )
+      .map(toItem),
+  }));
+  const orphanFrames = frameRows
+    .filter((f) => !f.parentId || !sheetIds.has(f.parentId))
+    .map(toItem);
+
   const attachRefs = [
-    ...(await Promise.all(
-      entityAvatarRefs
-        .filter((r) => r.entityId && !r.shotId)
-        .map(async (r) => {
-          const entity = entityById.get(r.entityId!);
-          return {
-            id: r.id,
-            url: await getFileUrl(r.storagePath),
-            label: entity?.name ?? "сущность",
-            kind: entity?.type ?? "character",
-            name: entity?.name ?? "",
-          };
-        }),
-    )),
-    ...(await Promise.all(
-      seriesRefRows
-        .filter((r) => !r.grid && r.source !== "storyboard-frame")
-        .map(async (r) => ({
-          id: r.id,
-          url: await getFileUrl(r.storagePath),
-          label: r.token ?? r.caption ?? "REF",
-          kind: "series",
-          name: r.token ?? r.caption ?? "REF",
-        })),
-    )),
+    ...entityAvatarRows.map((r) => {
+      const entity = entityById.get(r.entityId!);
+      return {
+        id: r.id,
+        url: urlOf(r.storagePath),
+        label: entity?.name ?? "сущность",
+        kind: entity?.type ?? "character",
+        name: entity?.name ?? "",
+      };
+    }),
+    ...seriesRefRows
+      .filter((r) => !r.grid && r.source !== "storyboard-frame")
+      .map((r) => ({
+        id: r.id,
+        url: urlOf(r.storagePath),
+        label: r.token ?? r.caption ?? "REF",
+        kind: "series",
+        name: r.token ?? r.caption ?? "REF",
+      })),
   ];
 
   // активные задачи эпизода ОБОИХ видов (узкие колонки): и референсы-листы, и видео
