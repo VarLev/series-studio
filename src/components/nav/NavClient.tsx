@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useT } from "@/components/I18nProvider";
+import { isPanelRoute, markReplace } from "@/components/nav/NavHistory";
 
 const ITEMS = [
   { href: "/episodes", ru: "Серии", en: "Episodes", icon: "▤" },
@@ -27,6 +28,16 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
   // /review — иммерсивный экран плеера: навигацию не показываем (выход — «←» в шапке)
   if (pathname === "/login" || pathname.includes("/review")) return null;
 
+  // Уже в панели → следующая вкладка идёт REPLACE: панель это один слой, и
+  // прыжки по её вкладкам не должны копиться в истории (иначе «×» отматывает на
+  // соседнюю вкладку вместо закрытия).
+  // метку ставим только если переход реально будет: клик по своей же вкладке
+  // ничего не навигирует, а повисшая метка съела бы глубину следующего push
+  const inPanel = isPanelRoute(pathname);
+  const onNav = (href: string) => () => {
+    if (inPanel && pathname !== href) markReplace();
+  };
+
   const isActive = (href: string) =>
     href === "/episodes" ? pathname === "/episodes" || pathname.startsWith("/episodes/") : pathname.startsWith(href);
 
@@ -47,6 +58,8 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
               <Link
                 key={item.href}
                 href={item.href}
+                replace={inPanel}
+                onClick={onNav(item.href)}
                 className="relative flex min-h-[58px] flex-1 flex-col items-center justify-center gap-1"
                 style={{ color: active ? "var(--violet-200)" : "var(--text-400)" }}
               >
@@ -81,6 +94,8 @@ export default function NavClient({ activeJobs }: { activeJobs: number }) {
               <Link
                 key={item.href}
                 href={item.href}
+                replace={inPanel}
+                onClick={onNav(item.href)}
                 className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-[12.5px] font-medium"
                 style={{
                   background: active ? "var(--ink-600)" : "none",

@@ -19,7 +19,26 @@ import { useEffect } from "react";
 
 let depth = 0;
 let expectBack = false;
+let expectReplace = false;
 let lastPath: string | null = null;
+let lastBasePath: string | null = null;
+
+/**
+ * Маршруты вкладок, которые ВНУТРИ приложения открываются правой панелью
+ * (перехват @panel/(.)*). По прямому URL и перезагрузке те же адреса — обычные
+ * полные страницы, поэтому список нужен именно для навигации: панель это ОДИН
+ * слой поверх экрана, а не череда экранов.
+ */
+const PANEL_ROUTES = ["/bible", "/queue", "/console", "/settings", "/costs", "/knowledge", "/rules"];
+
+export function isPanelRoute(path: string): boolean {
+  return PANEL_ROUTES.some((r) => path === r || path.startsWith(`${r}/`));
+}
+
+/** Экран ПОД панелью — последний маршрут, который панелью не является. */
+export function basePath(): string | null {
+  return lastBasePath;
+}
 
 /** Есть ли внутриприкладной экран, на который безопасно вернуться. */
 export function canGoBack(): boolean {
@@ -31,10 +50,21 @@ export function markBack(): void {
   expectBack = true;
 }
 
+/**
+ * Помечает следующий переход как replace: адрес меняется, а запись в истории —
+ * нет, значит и глубину двигать нельзя (иначе счётчик уплывает вверх и «назад»
+ * начинает считать, что внутри приложения есть куда возвращаться).
+ */
+export function markReplace(): void {
+  expectReplace = true;
+}
+
 /** Монтируется один раз в корневом layout: считает переходы по смене пути. */
 export function NavHistoryTracker() {
   const pathname = usePathname();
   useEffect(() => {
+    // экран под панелью помним всегда, включая точку входа
+    if (!isPanelRoute(pathname)) lastBasePath = pathname;
     // первая отрисовка (точка входа) и повторные ре-раны с тем же путём
     // (StrictMode/refresh) навигацией не считаются
     if (lastPath === null) {
@@ -46,6 +76,8 @@ export function NavHistoryTracker() {
     if (expectBack) {
       expectBack = false;
       depth = Math.max(0, depth - 1);
+    } else if (expectReplace) {
+      expectReplace = false;
     } else {
       depth += 1;
     }
