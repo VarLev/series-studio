@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import PromptText from "./PromptText";
-import { generateShotPromptsFor, latestPromptVersion, deletePromptVersion } from "@/lib/actions/prompts";
+import {
+  generateShotPromptsFor,
+  latestPromptVersion,
+  deletePromptVersion,
+  listPromptVersions,
+} from "@/lib/actions/prompts";
 import {
   LLM_MODELS,
   PROMPT_FAMILIES,
@@ -42,6 +47,7 @@ export default function PromptBlock({
   shotId,
   episodeId,
   versions,
+  versionCountByFamily,
   tokens,
   tokenImages = {},
   llmModel,
@@ -50,7 +56,10 @@ export default function PromptBlock({
 }: {
   shotId: string;
   episodeId: string;
+  /** последние ~10 версий + текущие каждого трека (остальные — по «показать ещё») */
   versions: PromptVersion[];
+  /** полное число версий каждого трека — для кнопки «показать ещё» */
+  versionCountByFamily: Record<PromptFamily, number>;
   tokens: string[];
   /** токен → url миниатюры (тап по токену в тексте промпта раскрывает её) */
   tokenImages?: Record<string, string | null>;
@@ -115,17 +124,36 @@ export default function PromptBlock({
   const [armDelete, setArmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // полные списки версий трека, подгруженные по «показать ещё»: на клиент по
+  // умолчанию уезжают только последние ~10 (экономия пейлоада через туннель)
+  const [loadedExtra, setLoadedExtra] = useState<Partial<Record<PromptFamily, PromptVersion[]>>>({});
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const trackVersions = versions.filter((v) => promptFamily(v.targetModel) === family);
+  async function loadMoreVersions() {
+    setLoadingMore(true);
+    try {
+      const all = await listPromptVersions(shotId, family);
+      setLoadedExtra((m) => ({ ...m, [family]: all }));
+    } catch {
+      // сеть моргнула — кнопка «показать ещё» останется
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // версии активного трека: полный список, если подгружен, иначе присланные последние
+  const trackVersions = loadedExtra[family] ?? versions.filter((v) => promptFamily(v.targetModel) === family);
   // «открытая» версия трека: выбранная в контексте, иначе последняя. На генерацию
   // уходит именно она (см. ActionBar/GenerateSheet).
   const openId = openByFamily[family];
   const current =
     (openId ? trackVersions.find((v) => v.id === openId) : null) ?? trackVersions[0] ?? null;
   const hasByFamily: Record<PromptFamily, boolean> = {
-    seedance: versions.some((v) => promptFamily(v.targetModel) === "seedance"),
-    kling: versions.some((v) => promptFamily(v.targetModel) === "kling"),
+    seedance: versionCountByFamily.seedance > 0,
+    kling: versionCountByFamily.kling > 0,
   };
+  // сколько версий трека ещё не загружено (кнопка «показать ещё» в истории)
+  const moreToLoad = loadedExtra[family] ? 0 : versionCountByFamily[family] - trackVersions.length;
   const usedTechniques = usedTechniquesByFamily[family] ?? [];
   const createFamilies: PromptFamily[] =
     createChoice === "both" ? ["seedance", "kling"] : [createChoice];
@@ -165,6 +193,10 @@ export default function PromptBlock({
     clearMarker();
     // новая версия трека стала последней — открываем её (сбрасываем ручной выбор)
     setOpen(family, undefined);
+    // подгруженный по «показать ещё» полный список устарел: без сброса он перекрывал
+    // бы свежий проп versions, и новая версия не показалась бы (а на генерацию
+    // ушла бы старая). После сброса список снова строится из versions с сервера.
+    setLoadedExtra({});
     // гасим таймер и поллинг, но НЕ refresh-повторы (их запустим ниже)
     if (timers.current.tick) clearInterval(timers.current.tick);
     if (timers.current.poll) clearInterval(timers.current.poll);
@@ -278,6 +310,7 @@ export default function PromptBlock({
     setDeleting(false);
     setExpanded(false);
     setOpen(family, undefined); // открытой станет последняя из оставшихся версий
+    setLoadedExtra({}); // полный список устарел (см. finishOk) — перечитаем из versions
     router.refresh(); // если версий больше нет — появится форма «Сгенерировать»
   }
 
@@ -590,6 +623,17 @@ export default function PromptBlock({
               </div>
             );
           })}
+          {moreToLoad > 0 && (
+            <button
+              onClick={loadMoreVersions}
+              disabled={loadingMore}
+              className="min-h-9 rounded-lg border border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.08em] text-t300 hover:border-[var(--border-strong)] hover:text-violet-200 disabled:opacity-50"
+            >
+              {loadingMore
+                ? t("Загрузка…", "Loading…")
+                : t(`Показать ещё ${moreToLoad}`, `Show ${moreToLoad} more`)}
+            </button>
+          )}
         </div>
       </Sheet>
     </div>

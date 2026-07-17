@@ -1,15 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   updateEpisode,
   breakdownEpisode,
+  pollBreakdownResult,
   saveBreakdown,
   saveLlmModelChoice,
 } from "@/lib/actions/episodes";
+import { countEpisodeShots } from "@/lib/actions/shots";
+import { useLongAction } from "@/components/useLongAction";
+import { toast } from "@/components/Toaster";
 import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
-import { estTextUsd, estTokens, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
+import { estTextUsd, estTokens, estBreakdownOutTokens, fmtUsd } from "@/lib/pricing";
 import BreakdownPreview from "./BreakdownPreview";
 import DualRange from "@/components/DualRange";
 import { SectionLabel } from "@/components/ui";
@@ -56,6 +61,7 @@ export default function SynopsisEditor({
   initialSynopsis,
   shotsCount,
   shotTitles = [],
+  shotActions = [],
   breakdownModel,
   onBreakdownModelChange,
   useCli = false,
@@ -66,6 +72,8 @@ export default function SynopsisEditor({
   initialSynopsis: string;
   shotsCount: number;
   shotTitles?: string[];
+  /** действия первых шотов существующих групп — признак дубля при повторной разбивке */
+  shotActions?: string[];
   breakdownModel: string;
   onBreakdownModelChange: (m: string) => void;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
@@ -84,19 +92,22 @@ export default function SynopsisEditor({
   const [durMin, setDurMin] = useState(DUR_DEFAULT[0]);
   const [durMax, setDurMax] = useState(DUR_DEFAULT[1]);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [breakingDown, setBreakingDown] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
   const [preview, setPreview] = useState<Breakdown | null>(null);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // счётчик секунд, пока Claude раскадрирует — чтобы ожидание не выглядело зависанием
-  useEffect(() => {
-    if (!breakingDown) return;
-    const t0 = Date.now();
-    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
-    return () => clearInterval(id);
-  }, [breakingDown]);
+  const router = useRouter();
+  // разбивка и подтверждение — долгие вызовы с самовосстановлением через туннель:
+  // ответ экшена может потеряться, результат добирается поллингом (useLongAction)
+  const bd = useLongAction<Breakdown>();
+  const confirmAct = useLongAction<null>();
+  // повторные refresh после подтверждения: одиночный RSC-ответ мог потеряться
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(
+    () => () => {
+      if (refreshTimer.current) clearInterval(refreshTimer.current);
+    },
+    [],
+  );
 
   function pickModel(model: string) {
     onBreakdownModelChange(model);
@@ -187,19 +198,87 @@ export default function SynopsisEditor({
     scheduleSave(next);
   }
 
-  async function onBreakdown() {
-    setElapsed(0);
-    setBreakingDown(true);
+  function onBreakdown() {
     setError("");
-    const res = await breakdownEpisode(episodeId, breakdownModel, { min: durMin, max: durMax });
-    setBreakingDown(false);
-    if (res.ok) stashPreview(res.breakdown);
-    else setError(res.error);
+    // токен запуска: сервер кладёт результат в тайник под ним, и даже если ответ
+    // экшена потеряется в туннеле (llmBreakdown идёт минуты), поллинг его доберёт
+    const token = crypto.randomUUID();
+    bd.start({
+      run: async () => {
+        const res = await breakdownEpisode(
+          episodeId,
+          breakdownModel,
+          { min: durMin, max: durMax },
+          token,
+        );
+        return res.ok ? { ok: true, value: res.breakdown } : res;
+      },
+      poll: async () => {
+        const res = await pollBreakdownResult(episodeId, token);
+        if (!res) return null;
+        return res.ok ? { ok: true, value: res.breakdown } : res;
+      },
+      pollMs: 5000,
+      // потолок ожидания клиента должен быть НЕ меньше серверного (10 мин), иначе
+      // клиент сдаётся раньше, чем приходит настоящий ответ или внятная ошибка
+      ceilingSec: 660,
+      ceilingMsg: t(
+        "Ответа нет дольше 11 минут. Раскадровка могла не создаться — проверьте «Console» или попробуйте ещё раз.",
+        "No response for over 11 minutes. The breakdown may not have been created — check the Console or try again.",
+      ),
+      onOk: stashPreview,
+      onErr: setError,
+    });
   }
 
-  async function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace") {
-    await saveBreakdown(episodeId, confirmed, mode);
-    stashPreview(null);
+  // Промис резолвится по ФИНИШУ (успех/ошибка), а не по возврату экшена:
+  // BreakdownPreview ждёт его для своего saving-состояния (двойной тап по
+  // «Подтвердить» не должен продублировать группы)
+  function onConfirmBreakdown(confirmed: Breakdown, mode: "append" | "replace"): Promise<void> {
+    return new Promise((resolve) => {
+      void (async () => {
+        // свежий ориентир с сервера: пропсовый shotsCount мог устареть
+        const baseline = await countEpisodeShots(episodeId).catch(() => shotsCount);
+        const expected = mode === "append" ? baseline + confirmed.groups.length : null;
+        confirmAct.start({
+          run: async () => {
+            await saveBreakdown(episodeId, confirmed, mode);
+            return { ok: true, value: null };
+          },
+          // replace не поллим: новых групп может оказаться столько же, сколько
+          // старых — по числу не отличить; append детектируем по росту счётчика
+          poll:
+            expected == null
+              ? undefined
+              : async () =>
+                  (await countEpisodeShots(episodeId)) >= expected
+                    ? { ok: true, value: null }
+                    : null,
+          pollMs: 3000,
+          ceilingSec: 60,
+          ceilingMsg: t(
+            "Ответ не пришёл. Группы могли создаться — проверьте вкладку «Группы» и при повторе используйте «заменить».",
+            "No response. The groups may have been created — check the Groups tab; if retrying, use “replace”.",
+          ),
+          onOk: () => {
+            stashPreview(null);
+            // ревалидация из ответа могла потеряться — добираем свежий список
+            // групп повторными refresh (паттерн PromptBlock)
+            router.refresh();
+            let tries = 0;
+            refreshTimer.current = setInterval(() => {
+              router.refresh();
+              if (++tries >= 4 && refreshTimer.current) clearInterval(refreshTimer.current);
+            }, 1000);
+            resolve();
+          },
+          onErr: (msg) => {
+            toast(msg);
+            resolve();
+          },
+        });
+      })();
+    });
   }
 
   const saveLabel =
@@ -216,6 +295,9 @@ export default function SynopsisEditor({
       <BreakdownPreview
         breakdown={preview}
         existingTitles={shotTitles}
+        existingActions={shotActions}
+        synopsis={synopsis}
+        durationRange={[durMin, durMax]}
         onCancel={() => stashPreview(null)}
         onConfirm={onConfirmBreakdown}
         onEdited={(b) => {
@@ -310,18 +392,24 @@ export default function SynopsisEditor({
           </div>
           <button
             onClick={onBreakdown}
-            disabled={breakingDown}
+            disabled={bd.busy}
             className="min-h-[52px] w-full rounded-lg bg-violet-500 px-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
-            {breakingDown
-              ? t(`Claude раскадрирует… ${elapsed}с`, `Claude is storyboarding… ${elapsed}s`)
+            {bd.busy
+              ? t(`Claude раскадрирует… ${bd.elapsed}с`, `Claude is storyboarding… ${bd.elapsed}s`)
               : (() => {
                   // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
                   const cost =
                     useCli && isClaudeModel(breakdownModel)
                       ? "(CLI)"
-                      : `~${fmtUsd(estTextUsd(breakdownModel, estTokens(synopsis) + 1500, OUT_TOKENS.breakdown))}`;
+                      : `~${fmtUsd(
+                          estTextUsd(
+                            breakdownModel,
+                            estTokens(synopsis) + 1500,
+                            estBreakdownOutTokens(synopsis),
+                          ),
+                        )}`;
                   return shotsCount > 0
                     ? t(
                         `Раскадровать (готовые не дублируются) · ${cost}`,
@@ -330,6 +418,25 @@ export default function SynopsisEditor({
                     : t(`Разбить на группы шотов · ${cost}`, `Break into shot groups · ${cost}`);
                 })()}
           </button>
+          {/* Разбивка идёт минутами — сидеть до потолка без выхода нельзя.
+              Отмена только перестаёт ждать: вызов дозреет в тайник, и повтор с тем
+              же токеном подберёт готовый результат, а не оплатит второй прогон. */}
+          {bd.busy && (
+            <button
+              onClick={() => {
+                bd.cancel();
+                setError(
+                  t(
+                    "Ожидание отменено. Разбивка на сервере продолжается — повторный запуск подберёт её результат, если она успеет.",
+                    "Stopped waiting. The breakdown is still running on the server — a retry will pick up its result if it finishes.",
+                  ),
+                );
+              }}
+              className="min-h-11 w-full rounded-lg border border-[var(--border-default)] text-[11px] font-semibold uppercase tracking-[0.1em] text-t300 hover:bg-ink-500"
+            >
+              {t("Отменить ожидание", "Stop waiting")}
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -39,6 +39,9 @@ export default function EpisodeTabs({
   // выбор модели живёт здесь, а не в SynopsisEditor: переключение вкладок
   // размонтирует редактор, и выбор терялся (замечание заказчика)
   const [bdModel, setBdModel] = useState(breakdownModel);
+  // область раскадровки живёт здесь: «▦» на карточке группы открывает вкладку
+  // «Раскадровка» с уже выбранной группой ("" = вся серия)
+  const [sbScopeId, setSbScopeId] = useState("");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -72,6 +75,8 @@ export default function EpisodeTabs({
           initialSynopsis={initialSynopsis}
           shotsCount={shots.length}
           shotTitles={shots.map((s) => s.title)}
+          // действие первого шота группы — второй признак дубля при повторной разбивке
+          shotActions={shots.map((s) => s.beats[0] ?? s.action)}
           breakdownModel={bdModel}
           onBreakdownModelChange={setBdModel}
           useCli={useCli}
@@ -79,12 +84,27 @@ export default function EpisodeTabs({
       )}
 
       {tab === "Раскадровка" && (
-        <StoryboardTab episodeId={episodeId} shots={shots} data={storyboard} />
+        <StoryboardTab
+          episodeId={episodeId}
+          shots={shots}
+          data={storyboard}
+          scopeId={sbScopeId}
+          onScopeChange={setSbScopeId}
+        />
       )}
 
       {/* вставные группы создаются той же моделью, что выбрана для раскадровки */}
       {tab === "Шоты" && (
-        <ShotsList episodeId={episodeId} shots={shots} defaultModel={bdModel} useCli={useCli} />
+        <ShotsList
+          episodeId={episodeId}
+          shots={shots}
+          defaultModel={bdModel}
+          useCli={useCli}
+          onStoryboard={(shotId) => {
+            setSbScopeId(shotId);
+            setTab("Раскадровка");
+          }}
+        />
       )}
     </div>
   );

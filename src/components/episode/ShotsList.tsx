@@ -28,6 +28,10 @@ export interface ShotListItem {
   entityNames: string[];
   /** чистые визуальные описания шотов группы (без «Шот N (время):») — для промпта листа */
   beats: string[];
+  /** эмоциональный тон группы — уходит в биты промпта листа раскадровки */
+  emotionalTone: string;
+  /** у группы есть кадр раскадровки (бейдж покрытия в списке) */
+  hasStoryboard?: boolean;
   /** миниатюра группы: кадр лучшего результата (★ последний, иначе первый готовый) */
   thumbUrl?: string | null;
   thumbIsVideo?: boolean;
@@ -43,6 +47,7 @@ export default function ShotsList({
   shots,
   defaultModel,
   useCli = false,
+  onStoryboard,
 }: {
   episodeId: string;
   shots: ShotListItem[];
@@ -50,6 +55,8 @@ export default function ShotsList({
   defaultModel: string;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
   useCli?: boolean;
+  /** «раскадровать группу»: вкладка «Раскадровка» с этой группой уже в области */
+  onStoryboard?: (shotId: string) => void;
 }) {
   const t = useT();
   const [, startTransition] = useTransition();
@@ -168,6 +175,17 @@ export default function ShotsList({
                     {t("вставка", "insert")}
                   </span>
                 )}
+                {shot.hasStoryboard && (
+                  <span
+                    title={t(
+                      "у группы есть кадр раскадровки",
+                      "this group has a storyboard frame",
+                    )}
+                    className="rounded border border-[rgba(139,95,176,.45)] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200"
+                  >
+                    ▦ {t("раскадровка", "storyboard")}
+                  </span>
+                )}
                 {shot.timecode && (
                   <span
                     className={`font-mono text-[9.5px] ${shot.isInsert ? "text-violet-300" : "text-t400"}`}
@@ -198,6 +216,19 @@ export default function ShotsList({
             >
               ↑
             </button>
+            {onStoryboard && (
+              <button
+                aria-label={t("Раскадровать группу", "Storyboard this group")}
+                title={t(
+                  "Раскадровать эту группу — вкладка «Раскадровка» с ней в области",
+                  "Storyboard this group — opens the Storyboard tab scoped to it",
+                )}
+                onClick={() => onStoryboard(shot.id)}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-[13px] text-t300 hover:bg-ink-500 hover:text-violet-200"
+              >
+                ▦
+              </button>
+            )}
             <button
               aria-label="Ниже"
               disabled={i === shots.length - 1}

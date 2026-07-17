@@ -15,6 +15,7 @@ import {
   refreshCatalog,
   submitJobs,
   submitReferenceJob,
+  type ReferenceJobInput,
   type SubmitInput,
 } from "@/lib/generation";
 import { getProvider } from "@/lib/providers";
@@ -157,6 +158,38 @@ export async function startNanoBanana(input: {
   }
 }
 
+/**
+ * Раскадровочные метки исходника → в задачу правки/апскейла. Без них результат
+ * становился обычным референсом: поправленный ЛИСТ пропадал со вкладки
+ * «Раскадровка» и его нельзя было разрезать, а апскейл КАДРА терял свою группу и
+ * уезжал в общую кучу референсов — цепочка «лист → кадр → шот» рвалась ровно там,
+ * где пользователь пытался улучшить результат.
+ */
+function storyboardMeta(
+  ref: typeof references.$inferSelect,
+  suffix: string,
+): Pick<
+  ReferenceJobInput,
+  "sbGrid" | "sbShotId" | "sbParentId" | "sbPanel" | "sbPanels" | "refSource" | "caption"
+> {
+  const isSheet = ref.grid === 4 || ref.grid === 9;
+  if (!isSheet && ref.source !== "storyboard-frame") return {};
+  let sbPanels: string[] = [];
+  try {
+    const parsed = JSON.parse(ref.sbPanels || "[]");
+    if (Array.isArray(parsed)) sbPanels = parsed as string[];
+  } catch {}
+  return {
+    sbGrid: ref.grid,
+    sbShotId: ref.sbShotId,
+    sbParentId: ref.parentId,
+    sbPanel: ref.sbPanel,
+    sbPanels,
+    refSource: ref.source,
+    caption: `${ref.caption || ref.token || "раскадровка"} · ${suffix}`,
+  };
+}
+
 /** Upscale ×2 (spec §2.6) — Nano Banana, 4 кр; результат — новый референс. */
 export async function upscaleReference(refId: string): Promise<Result> {
   await requireAuth();
@@ -177,6 +210,7 @@ export async function upscaleReference(refId: string): Promise<Result> {
       sourceTag: "upscale",
       credits,
       usd,
+      ...storyboardMeta(ref, "⤢ 2×"),
     });
     revalidatePath(`/episodes/${ref.episodeId}/refs`);
     revalidatePath("/queue");
@@ -210,6 +244,7 @@ export async function editReference(input: {
       sourceTag: "edit",
       credits,
       usd,
+      ...storyboardMeta(ref, "правка"),
     });
     revalidatePath(`/episodes/${ref.episodeId}/refs`);
     revalidatePath("/queue");

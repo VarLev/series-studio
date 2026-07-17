@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
+import { parseBeatMarkers } from "@/lib/beatMarkers";
 import { getDb, episodes, generations, prompts, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
+import { safeParse } from "@/lib/params";
 import ReviewPlayer from "@/components/review/ReviewPlayer";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +29,11 @@ export default async function ReviewPage(ctx: {
     .orderBy(desc(prompts.version));
   const promptVersionById = new Map(versionRows.map((v) => [v.id, v.version]));
   const latest = versionRows[0] ?? null;
-  const latestParams = latest
-    ? (JSON.parse(latest.paramsJson || "{}") as {
-        aspect_ratio?: string;
-        duration?: number;
-        quality?: string;
-      })
-    : {};
+  const latestParams = safeParse<{
+    aspect_ratio?: string;
+    duration?: number;
+    quality?: string;
+  }>(latest?.paramsJson, {});
 
   const genRows = await db
     .select()
@@ -52,6 +52,10 @@ export default async function ReviewPage(ctx: {
         promptVersion: row.promptId ? (promptVersionById.get(row.promptId) ?? null) : null,
         credits: row.creditsSpent,
         source: row.source,
+        // маркеры смены шота — снапшот раскадровки ЭТОГО видео, снятый при
+        // генерации: у кандидатов разных дат они могут отличаться, поэтому
+        // висят на кандидате, а не на группе
+        beatMarkers: parseBeatMarkers(row.beatsJson),
       })),
   );
 

@@ -1,6 +1,6 @@
 import { drizzle as drizzlePglite, type PgliteDatabase } from "drizzle-orm/pglite";
 import { drizzle as drizzlePostgres, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as schema from "./schema";
 
 export type DB = PgliteDatabase<typeof schema> | PostgresJsDatabase<typeof schema>;
@@ -173,9 +173,130 @@ ALTER TABLE shots ADD COLUMN IF NOT EXISTS time_weather text NOT NULL DEFAULT ''
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS is_insert boolean NOT NULL DEFAULT false;
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS emotional_tone text NOT NULL DEFAULT '';
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS analysis text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS anchors (
+  id text PRIMARY KEY,
+  episode_id text NOT NULL,
+  text text NOT NULL,
+  source text NOT NULL DEFAULT 'manual',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS anchors_episode_idx ON anchors (episode_id);
+CREATE TABLE IF NOT EXISTS shot_anchors (
+  shot_id text NOT NULL,
+  anchor_id text NOT NULL,
+  PRIMARY KEY (shot_id, anchor_id)
+);
+CREATE INDEX IF NOT EXISTS shots_episode_idx ON shots (episode_id);
+CREATE INDEX IF NOT EXISTS generations_shot_idx ON generations (shot_id);
+CREATE INDEX IF NOT EXISTS generations_episode_idx ON generations (episode_id);
+CREATE INDEX IF NOT EXISTS generations_status_idx ON generations (status);
+CREATE INDEX IF NOT EXISTS references_shot_idx ON "references" (shot_id);
+CREATE INDEX IF NOT EXISTS references_entity_idx ON "references" (entity_id);
+CREATE INDEX IF NOT EXISTS references_episode_idx ON "references" (episode_id);
+CREATE INDEX IF NOT EXISTS prompts_shot_idx ON prompts (shot_id);
+CREATE INDEX IF NOT EXISTS shot_anchors_anchor_idx ON shot_anchors (anchor_id);
 `;
 
+/**
+ * Версионированные миграции схемы. На холодном старте прогоняются ТОЛЬКО ещё не
+ * применённые версии (текущая хранится в settings.schema_version), а не все ~70
+ * стейтментов каждый раз — включая data-fix UPDATE/DELETE, которые теперь
+ * выполняются ровно один раз. Миграция №0 — исходный SCHEMA_SQL целиком: она
+ * идемпотентна (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS, а её data-fix
+ * идемпотентны по факту предыдущего состояния), поэтому существующие БД переживут
+ * её один раз без вреда. Заморожена: НОВЫЕ изменения схемы добавлять отдельными
+ * элементами массива — списком стейтментов (НЕ режем по ";", поэтому точка с
+ * запятой внутри строкового литерала больше ничего не ломает).
+ */
+const MIGRATIONS: string[][] = [
+  // v0 — заморожена; правки схемы идут новыми версиями ниже
+  SCHEMA_SQL.split(";")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  // v1 — раскадровка знает, какая панель про какую группу: лист хранит карту
+  // «панель → группа» (sb_panels), кадр — свой номер панели (sb_panel). Отсюда
+  // разрезка проставляет кадрам их группы, а кадры становятся стартовыми
+  // кадрами этих групп в один тап.
+  [
+    `ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_panels text`,
+    `ALTER TABLE "references" ADD COLUMN IF NOT EXISTS sb_panel integer`,
+  ],
+  // v2 — персонажи из разбивки, которых нет в библии: раньше они молча терялись,
+  // теперь висят на группе красными чипами-заготовками до решения пользователя
+  [`ALTER TABLE shots ADD COLUMN IF NOT EXISTS unlinked_chars_json text NOT NULL DEFAULT '[]'`],
+  // v3 — вкл/выкл документов базы знаний: выключенный док остаётся в базе,
+  // но не подмешивается в промпт-фабрику (вкладка «База знаний» в настройках)
+  [`ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true`],
+  // v4 — заготовка поштучного вкл/выкл приёмов; отменена в v5 (выключатель нужен
+  // один на всю библиотеку). Версию не удаляем: на БД, где v4 уже применилась,
+  // изменение её текста задним числом не выполнится — чинит только следующая версия
+  [`ALTER TABLE techniques ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true`],
+  // v5 — вкл/выкл библиотеки приёмов целиком живёт в settings.techniques_enabled,
+  // поштучная колонка не нужна
+  [`ALTER TABLE techniques DROP COLUMN IF EXISTS enabled`],
+  // v6 — маркеры смены шота на таймлайне видео: за каждым видео закрепляется
+  // снапшот шотов группы на момент постановки задачи, независимый от дальнейших
+  // правок группы. Бэкфилла нет намеренно — для старых видео состояние группы «на
+  // момент генерации» неизвестно, а подставлять им текущее было бы враньём
+  [`ALTER TABLE generations ADD COLUMN IF NOT EXISTS beats_json text`],
+  // v7 — «База правил» (/rules): пользовательские правила промптинга
+  // (prompt_rules, вклеиваются в system-промпты по scope/family) и read-only
+  // витрина правил, извлечённых LLM-сегментацией из редактируемых шаблонов
+  // (template_rules, source_hash — sha256 шаблона на момент сегментации)
+  [
+    `CREATE TABLE IF NOT EXISTS prompt_rules (
+      id text PRIMARY KEY,
+      title text NOT NULL DEFAULT '',
+      text text NOT NULL,
+      scope text NOT NULL DEFAULT 'all',
+      family text NOT NULL DEFAULT 'all',
+      enabled boolean NOT NULL DEFAULT true,
+      sort_index integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS template_rules (
+      id text PRIMARY KEY,
+      template_key text NOT NULL,
+      order_index integer NOT NULL DEFAULT 0,
+      title text NOT NULL DEFAULT '',
+      text text NOT NULL,
+      source_hash text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  ],
+];
+
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };
+
+async function runMigrations(db: DB): Promise<void> {
+  const latest = MIGRATIONS.length - 1;
+  // текущая версия схемы; если settings ещё нет (совсем новая БД) или ключа нет —
+  // стартуем с нуля (прогоняем всё). Мусор в значении тоже трактуем как «с нуля».
+  let current = -1;
+  try {
+    const [row] = await db
+      .select()
+      .from(schema.settings)
+      .where(eq(schema.settings.key, "schema_version"));
+    if (row?.value != null) {
+      const v = Number(row.value);
+      if (Number.isInteger(v) && v >= 0) current = v;
+    }
+  } catch {
+    current = -1; // таблицы settings ещё не существует — совсем новая БД
+  }
+  for (let v = current + 1; v <= latest; v++) {
+    for (const stmt of MIGRATIONS[v]) {
+      if (stmt) await db.execute(sql.raw(stmt));
+    }
+  }
+  if (current < latest) {
+    await db
+      .insert(schema.settings)
+      .values({ key: "schema_version", value: String(latest) })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value: String(latest) } });
+  }
+}
 
 async function createDb(): Promise<DB> {
   let db: DB;
@@ -193,10 +314,7 @@ async function createDb(): Promise<DB> {
     const client = new PGlite(dataDir);
     db = drizzlePglite(client, { schema });
   }
-  for (const stmt of SCHEMA_SQL.split(";")) {
-    const trimmed = stmt.trim();
-    if (trimmed) await db.execute(sql.raw(trimmed));
-  }
+  await runMigrations(db);
   return db;
 }
 

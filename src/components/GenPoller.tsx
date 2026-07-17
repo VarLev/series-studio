@@ -10,6 +10,9 @@ import { useRouter } from "next/navigation";
 export default function GenPoller({ activeCount }: { activeCount: number }) {
   const router = useRouter();
   const busy = useRef(false);
+  // последний отпечаток состояния задач: рефрешим тяжёлую RSC-страницу (полный
+  // пейлоад через туннель) ТОЛЬКО когда он сменился, а не безусловно каждый тик
+  const lastFp = useRef<string | null>(null);
 
   useEffect(() => {
     if (activeCount <= 0) return;
@@ -18,14 +21,30 @@ export default function GenPoller({ activeCount }: { activeCount: number }) {
       if (busy.current || document.visibilityState === "hidden") return;
       busy.current = true;
       try {
-        // poll двигает статусы у провайдера И запускает фоновую отправку плейсхолдеров;
-        // обновляем экран каждый тик, пока есть активные задачи — часть изменений
-        // (проставленный jobId, провал фоновой отправки) происходит вне ответа poll
-        await fetch("/api/generations/poll", {
+        // poll двигает статусы у провайдера И запускает фоновую отправку плейсхолдеров,
+        // затем возвращает отпечаток состояния (fp), уже учитывающий фоновые изменения
+        const res = await fetch("/api/generations/poll", {
           method: "POST",
           signal: AbortSignal.timeout(20_000),
         });
-        router.refresh();
+        if (!res.ok) return; // 401/500 — не рефрешим, попробуем в следующий тик
+        const data = (await res.json().catch(() => null)) as
+          | { updated?: number; fp?: string }
+          | null;
+        const fp = data?.fp;
+        if (typeof fp === "string") {
+          // Рефреш в двух случаях. (1) poll сам что-то записал (updated > 0) — это
+          // покрывает и первый тик (приземление внутри первого POST иначе пряталось
+          // бы за только что запомненным fp — страница залипала бы на «генерируется»),
+          // и _poll-ошибки связи, которых в отпечатке нет (бейдж «нет связи» должен
+          // появляться). (2) отпечаток сменился — изменения, случившиеся вне poll.
+          const changed =
+            (data?.updated ?? 0) > 0 || (lastFp.current !== null && fp !== lastFp.current);
+          if (changed) router.refresh();
+          lastFp.current = fp;
+        } else {
+          router.refresh(); // ответ без отпечатка (старый роут) — обновим на всякий случай
+        }
       } catch {
         // сеть моргнула — попробуем в следующий тик
       } finally {

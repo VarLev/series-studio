@@ -89,6 +89,24 @@ function openAiCompatClient(provider: Provider): OpenAI {
 /** Жёсткий потолок ожидания ответа модели (мс). Переопределяется LLM_TIMEOUT_MS. */
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 180_000;
 
+/**
+ * Ответ обрезан потолком max_tokens. Отдельный тип, потому что реакция на него
+ * особая: повторять НЕЛЬЗЯ — вторая попытка с тем же потолком обрежется так же,
+ * просто за вторые деньги. Раньше обрезка не детектировалась вовсе: обрубленный
+ * JSON не парсился, runJson делал ретрай, и пользователь получал «Модель вернула
+ * невалидный JSON» после двух полных оплат.
+ */
+export class LlmTruncatedError extends Error {
+  constructor(model: string, maxTokens: number) {
+    super(
+      `Модель «${model}» упёрлась в потолок вывода (${maxTokens} токенов) и ответ обрезан. ` +
+        "Для разбивки это значит, что эпизод слишком велик для одного прохода: " +
+        "сократите сюжет или уменьшите целевой хронометраж.",
+    );
+    this.name = "LlmTruncatedError";
+  }
+}
+
 export interface LlmCall {
   kind: "synopsis" | "breakdown" | "prompt" | "revision" | "analysis";
   model: string;
@@ -116,6 +134,13 @@ export interface LlmCall {
    * (Enhance на Opus). Работает только для Claude-моделей без картинки.
    */
   forceCli?: boolean;
+  /**
+   * Потолок ожидания ответа именно этого вызова (мс). По умолчанию LLM_TIMEOUT_MS
+   * (180 с) — этого хватает шоту и правке, но НЕ разбивке эпизода: она пишет
+   * тысячи токенов и на реальных сериях идёт по 2–3 минуты, упираясь в общий
+   * потолок ровно на самом дорогом вызове.
+   */
+  timeoutMs?: number;
   /**
    * Бюджет «мышления» для CLI-вызова (env MAX_THINKING_TOKENS дочернего процесса).
    * По умолчанию Claude Code думает щедро (~12k токенов → 170–210с и таймауты).
@@ -176,7 +201,9 @@ export async function runText(call: LlmCall): Promise<string> {
         // «мышление» модели не должны съедать бюджет. Основной рычаг скорости —
         // срез thinking (MAX_THINKING_TOKENS в cli.ts); этот запас — страховка на
         // случай всё ещё медленного вызова, чтобы не ловить таймаут на 210с.
-        await runClaudeCliText(call, LLM_TIMEOUT_MS + 120_000)
+        // Обрезку по потолку CLI не сообщает (в его JSON нет stop_reason) —
+        // детект max_tokens работает только на API-пути.
+        await runClaudeCliText(call, (call.timeoutMs ?? LLM_TIMEOUT_MS) + 120_000)
       : provider === "anthropic"
         ? await runAnthropicText(call)
         : await runOpenAiText(call, provider);
@@ -223,6 +250,7 @@ export async function runText(call: LlmCall): Promise<string> {
 
 async function runAnthropicText(call: LlmCall): Promise<TextResult> {
   const anthropic = getClient();
+  const timeoutMs = call.timeoutMs ?? LLM_TIMEOUT_MS;
   try {
     const content: Anthropic.ContentBlockParam[] = call.imageBase64
       ? [
@@ -262,9 +290,14 @@ async function runAnthropicText(call: LlmCall): Promise<TextResult> {
         messages: [{ role: "user", content }],
       },
       // жёсткий потолок: подвисший стрим не держит кнопку «Claude пишет…» бесконечно
-      { signal: AbortSignal.timeout(LLM_TIMEOUT_MS) },
+      { signal: AbortSignal.timeout(timeoutMs) },
     );
     const message = await stream.finalMessage();
+    // обрезка по потолку: дальше по пайплайну она выглядит как «невалидный JSON»
+    // и провоцирует бессмысленный платный ретрай — падаем сразу и по делу
+    if (message.stop_reason === "max_tokens") {
+      throw new LlmTruncatedError(call.model, call.maxTokens ?? 8192);
+    }
     const text = message.content
       .filter((b) => b.type === "text")
       .map((b) => b.text)
@@ -279,7 +312,7 @@ async function runAnthropicText(call: LlmCall): Promise<TextResult> {
   } catch (e) {
     if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
       throw new Error(
-        `Claude не ответил за ${Math.round(LLM_TIMEOUT_MS / 1000)} с — попробуйте ещё раз или выберите модель Haiku (быстрее).`,
+        `Claude не ответил за ${Math.round(timeoutMs / 1000)} с — попробуйте ещё раз или выберите модель Haiku (быстрее).`,
       );
     }
     throw e;
@@ -288,6 +321,7 @@ async function runAnthropicText(call: LlmCall): Promise<TextResult> {
 
 async function runOpenAiText(call: LlmCall, provider: Provider): Promise<TextResult> {
   const openai = openAiCompatClient(provider);
+  const timeoutMs = call.timeoutMs ?? LLM_TIMEOUT_MS;
   try {
     // vision через OpenAI-совместимый формат: картинка как data-URI (Gemini/GPT)
     const userContent: OpenAI.Chat.ChatCompletionUserMessageParam["content"] = call.imageBase64
@@ -321,12 +355,15 @@ async function runOpenAiText(call: LlmCall, provider: Provider): Promise<TextRes
         stream: true,
         stream_options: { include_usage: true },
       },
-      { signal: AbortSignal.timeout(LLM_TIMEOUT_MS) },
+      { signal: AbortSignal.timeout(timeoutMs) },
     );
     let text = "";
     let usage: { input_tokens: number; output_tokens: number } | null = null;
+    let truncated = false;
     for await (const chunk of stream) {
       text += chunk.choices[0]?.delta?.content ?? "";
+      // "length" — тот же смысл, что stop_reason "max_tokens" у Anthropic
+      if (chunk.choices[0]?.finish_reason === "length") truncated = true;
       if (chunk.usage) {
         usage = {
           input_tokens: chunk.usage.prompt_tokens,
@@ -334,13 +371,15 @@ async function runOpenAiText(call: LlmCall, provider: Provider): Promise<TextRes
         };
       }
     }
+    if (truncated) throw new LlmTruncatedError(call.model, call.maxTokens ?? 8192);
     return { text, usage };
   } catch (e) {
     const providerName =
       provider === "deepseek" ? "DeepSeek" : provider === "gemini" ? "Gemini" : "GPT";
+    if (e instanceof LlmTruncatedError) throw e;
     if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
       throw new Error(
-        `${providerName} не ответил за ${Math.round(LLM_TIMEOUT_MS / 1000)} с — попробуйте ещё раз или выберите другую модель.`,
+        `${providerName} не ответил за ${Math.round(timeoutMs / 1000)} с — попробуйте ещё раз или выберите другую модель.`,
       );
     }
     // модель недоступна на аккаунте (напр. новейшая ещё не открыта) — понятная подсказка

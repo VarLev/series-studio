@@ -163,10 +163,18 @@ export default function ConsoleClient({
   items,
   title,
   subtitle,
+  bare = false,
 }: {
   items: LogRowView[];
   title: string;
   subtitle: string;
+  /**
+   * Рендер без экранной обвязки — для правой панели: заголовок и закрытие там
+   * уже даёт слайдер, а вторая шапка с «назад» рядом с ним была бы враньём.
+   * Действия шапки (обновить/очистить) при этом не теряются — уезжают в строку
+   * над списком.
+   */
+  bare?: boolean;
 }) {
   const t = useT();
   const router = useRouter();
@@ -189,36 +197,48 @@ export default function ConsoleClient({
     });
   }, [items, channel, query, errorsOnly]);
 
+  const actions = (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => startTransition(() => router.refresh())}
+        className="flex h-9 w-9 items-center justify-center rounded-md text-t300 hover:bg-ink-500"
+        title={t("Обновить", "Refresh")}
+      >
+        ⟳
+      </button>
+      {items.length > 0 && (
+        <ConfirmButton
+          action={async () => {
+            await clearConsoleLog();
+            toast(t("Журнал очищен", "Log cleared"));
+          }}
+          label="🗑"
+          confirmLabel={t("Очистить журнал?", "Clear the log?")}
+          className="flex h-9 items-center rounded-md px-2 text-[12px] text-t400 hover:text-danger disabled:opacity-50"
+          armedClassName="text-danger"
+        />
+      )}
+    </div>
+  );
+
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
-      <ScreenHeader
-        backHref="/episodes"
-        eyebrow={t("Пульт", "Console")}
-        title={title}
-        right={
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => startTransition(() => router.refresh())}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-t300 hover:bg-ink-500"
-              title={t("Обновить", "Refresh")}
-            >
-              ⟳
-            </button>
-            {items.length > 0 && (
-              <ConfirmButton
-                action={async () => {
-                  await clearConsoleLog();
-                  toast(t("Журнал очищен", "Log cleared"));
-                }}
-                label="🗑"
-                confirmLabel={t("Очистить журнал?", "Clear the log?")}
-                className="flex h-9 items-center rounded-md px-2 text-[12px] text-t400 hover:text-danger disabled:opacity-50"
-                armedClassName="text-danger"
-              />
-            )}
-          </div>
-        }
-      />
+    <main
+      className={
+        bare
+          ? "flex w-full flex-col"
+          : "mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl"
+      }
+    >
+      {bare ? (
+        <div className="flex items-center justify-end px-4 pt-3">{actions}</div>
+      ) : (
+        <ScreenHeader
+          backHref="/episodes"
+          eyebrow={t("Пульт", "Console")}
+          title={title}
+          right={actions}
+        />
+      )}
 
       <div className="flex flex-col gap-2 p-4 pb-10">
         <p className="text-[11px] leading-relaxed text-t400">{subtitle}</p>

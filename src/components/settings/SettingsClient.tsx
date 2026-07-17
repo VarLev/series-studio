@@ -1,20 +1,18 @@
 "use client";
 
 /**
- * Настройки: три шаблона промптов (разбивка сюжета / лист раскадровки / видео)
- * и библиотека режиссёрских приёмов (сид JSFilmz Vault + свои карточки).
+ * Настройки: интерфейс, модели, подключения и шаблоны промптов (разбивка сюжета /
+ * лист раскадровки / видео). Библиотека режиссёрских приёмов переехала на вкладку
+ * «База знаний» — приём это такая же методичка промпт-фабрики, как документ.
  */
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Sheet from "@/components/Sheet";
 import ConfirmButton from "@/components/ConfirmButton";
 import { toast } from "@/components/Toaster";
 import {
   saveTemplate,
   resetTemplate,
-  saveTechnique,
-  deleteTechnique,
-  deleteAllTechniques,
   saveUiPref,
   saveSimpleModel,
   hfMcpDisconnect,
@@ -26,21 +24,6 @@ import { SectionLabel } from "@/components/ui";
 import FullscreenCard from "@/components/settings/FullscreenCard";
 import { SIMPLE_LLM_MODELS } from "@/lib/llm/models";
 import { useT } from "@/components/I18nProvider";
-
-export interface TechniqueCard {
-  id: string;
-  title: string;
-  category: string;
-  camera: string;
-  lens: string;
-  lighting: string;
-  tags: string;
-  prompt: string;
-  negative: string;
-  custom: boolean;
-}
-
-const PAGE = 60;
 
 function TemplateEditor({
   settingKey,
@@ -279,7 +262,6 @@ export default function SettingsClient({
   storyboardTemplate,
   videoTemplate,
   klingVideoTemplate,
-  techniques,
   uiLang,
   uiTheme,
   simpleModel,
@@ -290,7 +272,6 @@ export default function SettingsClient({
   storyboardTemplate: string;
   videoTemplate: string;
   klingVideoTemplate: string;
-  techniques: TechniqueCard[];
   uiLang: string;
   uiTheme: string;
   simpleModel: string;
@@ -299,73 +280,7 @@ export default function SettingsClient({
 }) {
   const router = useRouter();
   const t = useT();
-  const tr = t; // алиас: внутри map((t) => …) имя t занято приёмом
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("");
-  const [limit, setLimit] = useState(PAGE);
-  const [selected, setSelected] = useState<TechniqueCard | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<TechniqueCard | null>(null);
-  const [pending, startTransition] = useTransition();
-  // библиотека приёмов — в спойлере: раскрытое полотно на сотни карточек мешало
-  const [techOpen, setTechOpen] = useState(false);
-
-  const categories = useMemo(
-    () => [...new Set(techniques.map((t) => t.category).filter(Boolean))].sort(),
-    [techniques],
-  );
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return techniques.filter((t) => {
-      if (category && t.category !== category) return false;
-      if (!q) return true;
-      return `${t.title} ${t.tags} ${t.camera} ${t.prompt}`.toLowerCase().includes(q);
-    });
-  }, [techniques, query, category]);
-
-  function openNew() {
-    setDraft({
-      id: "",
-      title: "",
-      category: "Свои приёмы",
-      camera: "",
-      lens: "",
-      lighting: "",
-      tags: "",
-      prompt: "",
-      negative: "",
-      custom: true,
-    });
-    setEditing(true);
-    setSelected(null);
-  }
-
-  function openEdit(t: TechniqueCard) {
-    setDraft({ ...t });
-    setEditing(true);
-    setSelected(null);
-  }
-
-  function submitDraft() {
-    if (!draft) return;
-    startTransition(async () => {
-      const res = await saveTechnique({
-        id: draft.id || undefined,
-        title: draft.title,
-        category: draft.category,
-        prompt: draft.prompt,
-        negative: draft.negative,
-        camera: draft.camera,
-        tags: draft.tags,
-      });
-      if (res.ok) {
-        toast(draft.id ? t("Приём обновлён", "Technique updated") : t("Приём добавлен", "Technique added"));
-        setEditing(false);
-        setDraft(null);
-      } else toast(("error" in res && res.error) || t("Ошибка", "Error"));
-    });
-  }
+  const [, startTransition] = useTransition();
 
   return (
     <div className="flex flex-col gap-3 px-4 pb-10">
@@ -481,224 +396,20 @@ export default function SettingsClient({
         initial={klingVideoTemplate}
       />
 
-      {/* Библиотека приёмов — спойлер: закрытый заголовок с count, открытый — поиск+список */}
-      <button
-        onClick={() => setTechOpen((v) => !v)}
+      {/* Библиотека приёмов переехала в «Базу знаний» — оставляем след, чтобы её не искали здесь */}
+      <Link
+        href="/knowledge"
         className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 text-left"
       >
         <span className="text-[13px] leading-none">🎥</span>
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-t300">
-          {t("Режиссёрские приёмы", "Director techniques")} · {techniques.length}
+        <span className="min-w-0 flex-1 text-[10.5px] leading-relaxed text-t400">
+          {t(
+            "Режиссёрские приёмы переехали на вкладку «База знаний» — вместе с документами промпт-фабрики.",
+            "Director techniques moved to the Knowledge tab — together with the prompt-factory documents.",
+          )}
         </span>
-        <span className="flex-1" />
-        <span className="text-[10px] text-t400">{techOpen ? "▴" : "▾"}</span>
-      </button>
-
-      {techOpen && (
-        <>
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1 text-[10.5px] leading-relaxed text-t400">
-              <span className="text-violet-600">✦</span>&nbsp;{" "}
-              {t(
-                "Приёмы закрепляются за шотами кнопкой Enhance и вплетаются в видео-промпт. Использованные видны бейджами 🎥 под промптом шота.",
-                "Techniques are attached to shots by the Enhance button and woven into the video prompt. Used ones show as 🎥 badges under the shot prompt.",
-              )}
-            </div>
-            <span className="flex shrink-0 items-center gap-3">
-              {techniques.length > 0 && (
-                <ConfirmButton
-                  action={deleteAllTechniques}
-                  label={t("удалить все", "delete all")}
-                  confirmLabel={t(`Удалить все приёмы (${techniques.length})?`, `Delete all techniques (${techniques.length})?`)}
-                  doneToast={t("Приёмы удалены", "Techniques deleted")}
-                  className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-t400 hover:text-danger disabled:opacity-50"
-                  armedClassName="text-danger"
-                />
-              )}
-              <button
-                onClick={openNew}
-                className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:text-violet-100"
-              >
-                {t("+ Добавить приём", "+ Add technique")}
-              </button>
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setLimit(PAGE);
-              }}
-              placeholder={t("Поиск по названию, тегам, тексту…", "Search by title, tags, text…")}
-              className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[12px] text-t200 outline-none focus:border-[var(--border-strong)]"
-            />
-            <select
-              value={category}
-              onChange={(e) => {
-                setCategory(e.target.value);
-                setLimit(PAGE);
-              }}
-              className="min-h-10 rounded-lg border border-[var(--border-default)] bg-ink-600 px-2 text-[11.5px] text-t100 outline-none"
-            >
-              <option value="">{t("Все категории", "All categories")}</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            {filtered.slice(0, limit).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setSelected(t)}
-                className="flex items-center gap-2.5 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5 text-left hover:border-[var(--border-strong)]"
-              >
-                <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-md border border-[var(--border-default)] bg-ink-600 text-[13px]">
-                  🎥
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] font-medium text-t100">{t.title}</span>
-                  <span className="mt-0.5 block truncate font-mono text-[9px] text-t400">
-                    {t.category}
-                    {t.camera ? ` · ${t.camera}` : ""}
-                    {t.custom ? ` · ${tr("свой", "custom")}` : ""}
-                  </span>
-                </span>
-              </button>
-            ))}
-            {filtered.length === 0 && (
-              <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-4 text-center text-[11px] text-t400">
-                {t("Ничего не найдено", "Nothing found")}
-              </div>
-            )}
-            {filtered.length > limit && (
-              <button
-                onClick={() => setLimit((v) => v + PAGE)}
-                className="min-h-10 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t300 hover:bg-ink-600"
-              >
-                {t(`Показать ещё (${filtered.length - limit})`, `Show more (${filtered.length - limit})`)}
-              </button>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Просмотр приёма */}
-      <Sheet open={Boolean(selected) && !editing} onClose={() => setSelected(null)} title={selected?.title ?? ""}>
-        {selected && (
-          <div className="flex flex-col gap-3 pb-2">
-            <div className="flex flex-wrap gap-1.5">
-              {[selected.category, selected.camera, selected.lens, selected.lighting]
-                .filter(Boolean)
-                .map((m) => (
-                  <span
-                    key={m}
-                    className="rounded border border-[var(--border-subtle)] bg-ink-600 px-2 py-1 font-mono text-[9.5px] text-t300"
-                  >
-                    {m}
-                  </span>
-                ))}
-            </div>
-            {selected.tags && (
-              <div className="font-mono text-[10px] text-t400">#{selected.tags.split(",").map((t) => t.trim()).join(" #")}</div>
-            )}
-            <div className="whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3 font-mono text-[11px] leading-relaxed text-t200">
-              {selected.prompt}
-            </div>
-            {selected.negative && (
-              <div className="whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3 font-mono text-[10px] leading-relaxed text-t400">
-                negative: {selected.negative}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <button
-                onClick={() => openEdit(selected)}
-                className="min-h-10 flex-1 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t200 hover:bg-ink-500"
-              >
-                {t("✎ Править", "✎ Edit")}
-              </button>
-              <ConfirmButton
-                action={async () => {
-                  await deleteTechnique(selected.id);
-                  setSelected(null);
-                }}
-                label={t("Удалить", "Delete")}
-                confirmLabel={t("Точно удалить приём?", "Really delete this technique?")}
-                doneToast={t("Приём удалён", "Technique deleted")}
-                className="min-h-10 rounded-lg border border-[rgba(194,71,106,.4)] px-3 text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)] disabled:opacity-50"
-              />
-            </div>
-          </div>
-        )}
-      </Sheet>
-
-      {/* Редактирование / создание приёма */}
-      <Sheet
-        open={editing}
-        onClose={() => {
-          setEditing(false);
-          setDraft(null);
-        }}
-        title={draft?.id ? t("Правка приёма", "Edit technique") : t("Новый приём", "New technique")}
-      >
-        {draft && (
-          <div className="flex flex-col gap-2 pb-2">
-            <input
-              value={draft.title}
-              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-              placeholder={t("Название приёма", "Technique title")}
-              className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[13px] font-semibold text-t100 outline-none focus:border-[var(--border-strong)]"
-            />
-            <div className="flex gap-2">
-              <input
-                value={draft.category}
-                onChange={(e) => setDraft({ ...draft, category: e.target.value })}
-                placeholder={t("Категория", "Category")}
-                className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
-              />
-              <input
-                value={draft.camera}
-                onChange={(e) => setDraft({ ...draft, camera: e.target.value })}
-                placeholder={t("Камера (напр. Steadicam)", "Camera (e.g. Steadicam)")}
-                className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
-              />
-            </div>
-            <input
-              value={draft.tags}
-              onChange={(e) => setDraft({ ...draft, tags: e.target.value })}
-              placeholder={t("Теги через запятую (one-take, chase…)", "Comma-separated tags (one-take, chase…)")}
-              className="min-h-10 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 font-mono text-[11px] text-t200 outline-none focus:border-[var(--border-strong)]"
-            />
-            <textarea
-              value={draft.prompt}
-              onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
-              rows={7}
-              placeholder={t("Текст приёма (английский промпт)…", "Technique text (English prompt)…")}
-              className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-t200 outline-none focus:border-[var(--border-strong)]"
-            />
-            <textarea
-              value={draft.negative}
-              onChange={(e) => setDraft({ ...draft, negative: e.target.value })}
-              rows={3}
-              placeholder={t("Negative prompt (по желанию)…", "Negative prompt (optional)…")}
-              className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 font-mono text-[10.5px] leading-relaxed text-t400 outline-none focus:border-[var(--border-strong)]"
-            />
-            <button
-              onClick={submitDraft}
-              disabled={pending || !draft.title.trim() || !draft.prompt.trim()}
-              className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
-              style={{ boxShadow: "var(--glow-violet-sm)" }}
-            >
-              {pending ? t("Сохранение…", "Saving…") : t("Сохранить приём", "Save technique")}
-            </button>
-          </div>
-        )}
-      </Sheet>
+        <span className="shrink-0 text-[10px] text-t400">→</span>
+      </Link>
     </div>
   );
 }

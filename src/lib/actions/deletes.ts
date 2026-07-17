@@ -156,7 +156,7 @@ export async function deleteKnowledgeDoc(id: string): Promise<void> {
   await requireAuth();
   const db = await getDb();
   await db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, id));
-  revalidatePath("/costs");
+  revalidatePath("/knowledge");
 }
 
 export async function clearKnowledge(): Promise<void> {
@@ -164,5 +164,5 @@ export async function clearKnowledge(): Promise<void> {
   const db = await getDb();
   const rows = await db.select().from(knowledgeDocs);
   for (const d of rows) await db.delete(knowledgeDocs).where(eq(knowledgeDocs.id, d.id));
-  revalidatePath("/costs");
+  revalidatePath("/knowledge");
 }

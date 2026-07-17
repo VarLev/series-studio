@@ -13,10 +13,11 @@ import {
   sceneChainOf,
 } from "@/lib/beats";
 import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
+import { createEpisodeAnchor, getShotAnchorTexts } from "@/lib/anchors";
 import { ensureShotRefsAnalyzed } from "@/lib/refs";
 import { reconcileShotPromptRefs } from "@/lib/refDirectives";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
-import { listTechniques } from "@/lib/director";
+import { listEnabledTechniques } from "@/lib/director";
 import { stripAt } from "@/lib/entityName";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
@@ -188,6 +189,8 @@ async function doReviseGroup(
       beats: mainCurrent,
       feedback,
       targetOrders: scoped,
+      // прикреплённые якоря — обязательные детали, которые правка не должна терять
+      anchors: await getShotAnchorTexts(shotId),
     });
 
     // точечная правка: детерминированно берём из ответа модели ТОЛЬКО целевые шоты,
@@ -284,6 +287,9 @@ export async function enhanceGroup(
 
     // догоняем анализ референсов группы, чтобы Enhance учитывал их контекст
     await ensureShotRefsAnalyzed(shotId);
+    // якоря группы: если их НЕТ — Enhance может предложить новые; если ЕСТЬ — только
+    // учитывает существующие и новых не выдумывает (решает по наличию, не пользователь)
+    const existingAnchors = await getShotAnchorTexts(shotId);
     const res = await llmEnhanceGroup({
       episodeId: shot.episodeId,
       shotId,
@@ -294,6 +300,7 @@ export async function enhanceGroup(
       timeWeather: chainTimeWeather(allRows, shotId),
       emotionalTone: shot.emotionalTone,
       sceneContext,
+      anchors: existingAnchors,
     });
     // Enhance только улучшает Main: все возвращённые шоты — основные (draft:false),
     // shots_draft игнорируем полностью (черновиков Enhance не создаёт)
@@ -302,8 +309,8 @@ export async function enhanceGroup(
       return { ok: false, error: "Модель не вернула ни одного основного шота" };
     }
 
-    // приёмы: оставляем только реально существующие в библиотеке id, максимум 1 на шот
-    const knownTech = new Set((await listTechniques()).map((t) => t.id));
+    // приёмы: оставляем только существующие и ВКЛЮЧЁННЫЕ id, максимум 1 на шот
+    const knownTech = new Set((await listEnabledTechniques()).map((t) => t.id));
     const cleanMain = improvedMain.map((s) => ({
       ...s,
       technique_id: s.technique_id && knownTech.has(s.technique_id) ? s.technique_id : "",
@@ -347,6 +354,15 @@ export async function enhanceGroup(
       res.location.trim() || shot.location,
       cleanMain.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
     );
+
+    // якоря: Enhance предлагает новые ТОЛЬКО когда своих ещё не было — создаём их в
+    // пуле эпизода и цепляем к группе (source=enhance). Если якоря уже были, res.anchors
+    // приходит пустым (так велит промпт) и мы ничего не трогаем.
+    if (!existingAnchors.length && res.anchors.length) {
+      for (const text of res.anchors) {
+        await createEpisodeAnchor(shot.episodeId, shotId, text, "enhance");
+      }
+    }
 
     await recomputeEpisodeTimecodes(shot.episodeId);
     revalidatePath(shotPath(shot.episodeId, shotId));
@@ -642,6 +658,94 @@ export async function countEpisodeShots(episodeId: string): Promise<number> {
     .from(shots)
     .where(eq(shots.episodeId, episodeId));
   return rows.length;
+}
+
+/** Имена-заготовки группы: персонажи из разбивки, которых нет в библии. */
+function parseUnlinked(json: string): string[] {
+  try {
+    const raw = JSON.parse(json || "[]");
+    return Array.isArray(raw) ? (raw as string[]).filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function setUnlinked(shotId: string, names: string[]): Promise<void> {
+  const db = await getDb();
+  await db.update(shots).set({ unlinkedCharsJson: JSON.stringify(names) }).where(eq(shots.id, shotId));
+}
+
+/**
+ * Снять чип-заготовку: персонаж остаётся в тексте шотов, но в библию не идёт —
+ * видеомодель нарисует его без референса (осознанный выбор для эпизодников
+ * вроде медсестры). Обратимо только повторной разбивкой.
+ */
+export async function dismissUnlinkedChar(shotId: string, name: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  const key = stripAt(name);
+  await setUnlinked(
+    shotId,
+    parseUnlinked(shot.unlinkedCharsJson).filter((n) => stripAt(n) !== key),
+  );
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Завести персонажа-заготовку в библию и привязать к группе. Чип перестаёт быть
+ * красным во ВСЕХ группах эпизода, где встречалось это имя: заготовка — маркер
+ * «в библии нет», и как только персонаж там появился, маркер снимается везде,
+ * а группы получают настоящую привязку (иначе пришлось бы обходить их руками).
+ */
+export async function createEntityFromUnlinked(input: {
+  shotId: string;
+  name: string;
+  elementName?: string;
+  description?: string;
+  wardrobe?: string;
+}): Promise<{ ok: true; entityId: string } | { ok: false; error: string }> {
+  await requireAuth();
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "Имя пустое" };
+  try {
+    const db = await getDb();
+    const [shot] = await db.select().from(shots).where(eq(shots.id, input.shotId));
+    if (!shot) return { ok: false, error: "Группа не найдена" };
+
+    const { createEntity } = await import("@/lib/actions/entities");
+    const entityId = await createEntity({
+      type: "character",
+      name,
+      elementName: input.elementName?.trim() || undefined,
+      description: input.description?.trim() || "",
+    });
+    if (input.wardrobe?.trim()) {
+      await db
+        .update(entities)
+        .set({ wardrobe: input.wardrobe.trim() })
+        .where(eq(entities.id, entityId));
+    }
+
+    // все группы эпизода, где это имя висело заготовкой: снимаем маркер и
+    // привязываем свежую сущность
+    const key = stripAt(name);
+    const episodeShots = await db.select().from(shots).where(eq(shots.episodeId, shot.episodeId));
+    for (const s of episodeShots) {
+      const names = parseUnlinked(s.unlinkedCharsJson);
+      if (!names.some((n) => stripAt(n) === key)) continue;
+      await setUnlinked(s.id, names.filter((n) => stripAt(n) !== key));
+      await db.insert(shotEntities).values({ shotId: s.id, entityId, auto: true }).onConflictDoNothing();
+    }
+    revalidatePath(shotPath(shot.episodeId, input.shotId));
+    revalidatePath(`/episodes/${shot.episodeId}`);
+    revalidatePath("/bible");
+    return { ok: true, entityId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Не удалось создать персонажа" };
+  }
 }
 
 /** Начало новой сюжетной сцены: связности с предыдущей группой нет (кроме библии). */

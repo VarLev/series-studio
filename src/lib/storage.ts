@@ -52,6 +52,46 @@ export async function getFileUrl(storagePath: string): Promise<string> {
   return `/api/files/${safeKey}`;
 }
 
+/** Есть ли файл в хранилище (для постеров видео — проверка по конвенции имени). */
+export async function fileExists(storagePath: string): Promise<boolean> {
+  const safeKey = sanitizeKey(storagePath);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    const slash = safeKey.lastIndexOf("/");
+    const dir = slash === -1 ? "" : safeKey.slice(0, slash);
+    const name = slash === -1 ? safeKey : safeKey.slice(slash + 1);
+    const { data, error } = await supabase.storage.from(BUCKET).list(dir, { search: name, limit: 1 });
+    return !error && Boolean(data?.some((f) => f.name === name));
+  }
+  try {
+    await fs.stat(resolveLocalPath(storagePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Пакетный вариант getFileUrl: один round-trip на много путей. В Supabase-режиме
+ * это createSignedUrls (вместо N последовательных createSignedUrl в циклах на
+ * страницах эпизода/шота); локально — просто map на /api/files. Порядок URL
+ * совпадает с порядком путей на входе.
+ */
+export async function getFileUrls(storagePaths: string[]): Promise<string[]> {
+  if (!storagePaths.length) return [];
+  const safeKeys = storagePaths.map(sanitizeKey);
+  if (supabaseConfigured()) {
+    const supabase = await supabaseClient();
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(safeKeys, 60 * 60);
+    if (error || !data) throw new Error(`Signed URLs failed: ${error?.message}`);
+    return data.map((d, i) => {
+      if (d.error || !d.signedUrl) throw new Error(`Signed URL failed for ${safeKeys[i]}: ${d.error ?? "no url"}`);
+      return d.signedUrl;
+    });
+  }
+  return safeKeys.map((k) => `/api/files/${k}`);
+}
+
 /** Абсолютный путь файла в локальном хранилище (с защитой от выхода за корень). */
 export function resolveLocalPath(storagePath: string): string {
   const filePath = path.join(LOCAL_ROOT(), sanitizeKey(storagePath));

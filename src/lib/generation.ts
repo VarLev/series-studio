@@ -3,7 +3,8 @@
  * поллинг статусов, приземление результатов (M5). Используется server actions,
  * cron-роутом и вебхуком.
  */
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import {
   getDb,
   entities,
@@ -15,6 +16,7 @@ import {
   shots,
   videoModels,
 } from "@/lib/db";
+import { buildBeatMarkers } from "@/lib/beatMarkers";
 import { stripAt } from "@/lib/entityName";
 import {
   availableVideoProviders,
@@ -28,6 +30,7 @@ import {
 import { CATALOG_SEED } from "@/lib/providers/higgsfield";
 import { readMockImage, readMockSample } from "@/lib/providers/mock";
 import { getFileUrl, putFile, readFile, saveFromUrl } from "@/lib/storage";
+import { generateVideoPoster } from "@/lib/poster";
 import { toProviderJpeg } from "@/lib/image";
 import { imageModelMeta, type ImageModelMeta } from "@/lib/imageModels";
 import { promptFamily } from "@/lib/llm/models";
@@ -639,6 +642,10 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
   // токенов Higgsfield/Kling по сети и задерживает появление карточки).
   // Сперва резолвим промпты всех моделей: нет промпта → ошибка ДО любых вставок.
   const plan = input.modelIds.map((modelId) => ({ modelId, promptRow: promptRowFor(modelId) }));
+  // Раскадровка группы, снятая один раз на всю постановку: все модели этого
+  // запуска снимают одно и то же, а маркеры смены шота в плеере остаются при
+  // видео навсегда — правка группы задним числом их уже не сдвинет
+  const beatsSnapshot = JSON.stringify(buildBeatMarkers(shot.beatsJson));
   const pending: Pending[] = [];
   for (const { modelId, promptRow } of plan) {
     const model = catalog.find((m) => m.id === modelId);
@@ -663,6 +670,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       }),
       status: "queued",
       source: "api",
+      beatsJson: beatsSnapshot,
     });
     pending.push({ genId, modelId, promptRow, quality, model });
   }
@@ -801,8 +809,20 @@ export interface ReferenceJobInput {
   /** цена в $ для Google-провайдера (Higgsfield считает в кредитах). */
   usd?: number | null;
   /** Лист раскадровки: сколько кадров в сетке (4 | 9) и к какому шоту относится. */
-  sbGrid?: number;
+  sbGrid?: number | null;
   sbShotId?: string | null;
+  /** Кадр листа: id листа-родителя и номер панели (правка/апскейл их наследуют). */
+  sbParentId?: string | null;
+  sbPanel?: number | null;
+  /** Лист «вся серия»: карта «панель → группа» (id групп по номерам панелей). */
+  sbPanels?: string[] | null;
+  /**
+   * Чем пометить готовый референс (references.source). По умолчанию — sourceTag,
+   * но правка/апскейл ЛИСТА обязаны оставить его листом, а КАДРА — кадром: иначе
+   * результат выпадает со вкладки «Раскадровка» и его нельзя ни разрезать, ни
+   * подставить стартовым кадром группы.
+   */
+  refSource?: string | null;
   caption?: string;
 }
 
@@ -878,6 +898,10 @@ export async function submitReferenceJob(input: ReferenceJobInput): Promise<void
     usd: google ? input.usd ?? null : null,
     sb_grid: input.sbGrid ?? null,
     sb_shot_id: input.sbShotId ?? null,
+    sb_parent_id: input.sbParentId ?? null,
+    sb_panel: input.sbPanel ?? null,
+    sb_panels: input.sbPanels?.length ? JSON.stringify(input.sbPanels) : null,
+    ref_source: input.refSource ?? null,
     caption: input.caption ?? null,
     _urls: { statusUrl: sub.statusUrl, cancelUrl: sub.cancelUrl },
   };
@@ -964,6 +988,10 @@ async function landReferenceResult(
     aspect_ratio?: string;
     sb_grid?: number | null;
     sb_shot_id?: string | null;
+    sb_parent_id?: string | null;
+    sb_panel?: number | null;
+    sb_panels?: string | null;
+    ref_source?: string | null;
     caption?: string | null;
   };
   let data: Buffer;
@@ -990,25 +1018,57 @@ async function landReferenceResult(
     ext === ".png" ? "image/png" : "image/jpeg",
   );
   const { width, height } = await probeImageSize(data);
+  // Захват задачи: помечаем done ТОЛЬКО пока она ещё активна. Параллельный поллер
+  // (вебхук / синхронный проход), уже приземливший её, оставит нам 0 строк — тогда
+  // выходим, НЕ вставляя второй референс (иначе одна картинка задваивалась бы в
+  // библиотеке — landReferenceResult генерит новый id на каждый заход). Скачивание
+  // выше делаем ДО захвата, чтобы его сбой оставлял задачу активной для ретрая.
+  const claimed = await db
+    .update(generations)
+    .set({ status: "done", resultStoragePath: storagePath })
+    .where(and(eq(generations.id, gen.id), inArray(generations.status, [...ACTIVE])))
+    .returning();
+  if (!claimed.length) return;
   await db.insert(references).values({
     id: refId,
     episodeId: gen.episodeId,
     storagePath,
     caption: params.caption ?? "",
-    source: params.source_tag ?? "nano-banana",
+    // ref_source задают правка/апскейл раскадровки: результат остаётся тем же,
+    // чем был исходник (лист — листом, кадр — кадром), а не становится "edit"
+    source: params.ref_source ?? params.source_tag ?? "nano-banana",
     token: await nextRefToken(gen.episodeId!),
     width,
     height,
     grid: params.sb_grid ?? null,
     sbShotId: params.sb_shot_id ?? null,
+    parentId: params.sb_parent_id ?? null,
+    sbPanel: params.sb_panel ?? null,
+    sbPanels: params.sb_panels ?? null,
   });
-  await db
-    .update(generations)
-    .set({ status: "done", resultStoragePath: storagePath })
-    .where(eq(generations.id, gen.id));
 }
 
-export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
+// Полный проход поллинга — один на процесс. Телефон + десктоп + cron + вебхук,
+// дёргающие poll одновременно, переиспользуют этот запуск: PGlite — один WASM-поток,
+// два параллельных прохода только толкались бы за него и задваивали приземление
+// (в т.ч. вставку референсов). Точечный проход (onlyIds, синхронный Google) не
+// коалесцируем — он обязан приземлить свою свежесозданную задачу; от гонки его
+// защищает условный claim в landReferenceResult.
+let pollInFlight: Promise<{ active: number; updated: number }> | null = null;
+
+export function pollActiveGenerations(onlyIds?: string[]): Promise<{
+  active: number;
+  updated: number;
+}> {
+  if (onlyIds?.length) return pollActiveGenerationsInner(onlyIds);
+  if (pollInFlight) return pollInFlight;
+  pollInFlight = pollActiveGenerationsInner().finally(() => {
+    pollInFlight = null;
+  });
+  return pollInFlight;
+}
+
+async function pollActiveGenerationsInner(onlyIds?: string[]): Promise<{
   active: number;
   updated: number;
 }> {
@@ -1021,15 +1081,85 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
     .where(inArray(generations.status, [...ACTIVE]));
   if (onlyIds?.length) rows = rows.filter((r) => onlyIds.includes(r.id));
 
-  let updated = 0;
-  for (const gen of rows) {
+  // Фаза 1: опрос статуса у провайдера ПАРАЛЛЕЛЬНО, чанками по 4. getStatus — самый
+  // медленный шаг (MCP-вызов); последовательно 5 задач × медленный провайдер = тик
+  // дольше интервала поллинга. Приземление/записи (фаза 2) оставляем
+  // ПОСЛЕДОВАТЕЛЬНЫМИ по исходному порядку: так не возникает гонок, которые внёс бы
+  // параллельный landing — выдача одинакового REF-токена двум референсам одного
+  // эпизода и застревание статуса шота при пересчёте, когда две его модели
+  // (Seedance+Kling) завершаются одновременно.
+  type StatusResult = Awaited<ReturnType<GenerationProvider["getStatus"]>>;
+  type Fetched =
+    | { tag: "placeholder" }
+    | { tag: "skip" }
+    | { tag: "ok"; status: StatusResult; bundle: UrlBundle }
+    | { tag: "err"; error: unknown; bundle: UrlBundle };
+
+  async function fetchFor(gen: (typeof rows)[number]): Promise<Fetched> {
+    if (!gen.providerJobId) return { tag: "placeholder" };
     // image-задачи опрашивает image-провайдер; видео — провайдер задачи
     // (маршрутизация по generations.provider: higgsfield-mcp / kling-mcp / …)
     const provider =
       gen.kind === "reference"
         ? imageProvider
         : ((await videoProviderByName(gen.provider)) ?? videoProvider);
-    if (!gen.providerJobId) {
+    if (gen.provider !== provider.name) return { tag: "skip" };
+    const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
+    try {
+      const status = await provider.getStatus({
+        jobId: gen.providerJobId,
+        statusUrl: bundle._urls?.statusUrl,
+        cancelUrl: bundle._urls?.cancelUrl,
+      });
+      return { tag: "ok", status, bundle };
+    } catch (error) {
+      return { tag: "err", error, bundle };
+    }
+  }
+
+  // сетевые сбои поллинга не роняют цикл; протухшие мок-задачи закрываем
+  async function handlePollError(
+    gen: (typeof rows)[number],
+    bundle: UrlBundle,
+    e: unknown,
+  ): Promise<number> {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("Мок-задача не найдена")) {
+      await db
+        .update(generations)
+        .set({ status: "failed", error: message })
+        .where(eq(generations.id, gen.id));
+      if (gen.shotId) await recalcShotStatus(gen.shotId);
+      return 1;
+    }
+    // ошибка связи НЕ глотается молча: пишем в _poll — карточка покажет
+    // «нет связи с Higgsfield» вместо вечной «очереди» (инцидент 2026-07-11)
+    bundle._poll = {
+      at: Date.now(),
+      error: message.slice(0, 200),
+      fails: (bundle._poll?.fails ?? 0) + 1,
+    };
+    await db
+      .update(generations)
+      .set({ paramsJson: JSON.stringify(bundle) })
+      .where(eq(generations.id, gen.id));
+    return 1;
+  }
+
+  const fetched: Fetched[] = [];
+  const POLL_CONCURRENCY = 4;
+  for (let i = 0; i < rows.length; i += POLL_CONCURRENCY) {
+    // fetchFor не бросает (ошибки заворачиваются в tag:"err") — Promise.all безопасен
+    fetched.push(...(await Promise.all(rows.slice(i, i + POLL_CONCURRENCY).map(fetchFor))));
+  }
+
+  // Фаза 2: последовательная обработка результатов в исходном порядке
+  let updated = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const gen = rows[i];
+    const f = fetched[i];
+    if (f.tag === "skip") continue;
+    if (f.tag === "placeholder") {
       // плейсхолдер видео-задачи ещё отправляется в фоне (submitJobs). Если завис
       // дольше 3 минут (например, сервер перезапускался в момент отправки) —
       // помечаем ошибкой, чтобы не крутился вечный «в очереди».
@@ -1046,14 +1176,13 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
       }
       continue;
     }
-    if (gen.provider !== provider.name) continue;
-    const bundle = JSON.parse(gen.paramsJson || "{}") as UrlBundle;
+    const bundle = f.bundle;
+    if (f.tag === "err") {
+      updated += await handlePollError(gen, bundle, f.error);
+      continue;
+    }
     try {
-      const status = await provider.getStatus({
-        jobId: gen.providerJobId,
-        statusUrl: bundle._urls?.statusUrl,
-        cancelUrl: bundle._urls?.cancelUrl,
-      });
+      const status = f.status;
       // связь с провайдером ок — снимаем предупреждение, если оно было
       if (bundle._poll?.error) {
         bundle._poll = { at: Date.now() };
@@ -1098,6 +1227,10 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
         } else {
           throw new Error("Провайдер завершил задачу без URL результата");
         }
+        // постер первого кадра (best-effort): миниатюры страниц отдаются лёгким
+        // jpg, а не range-запросами mp4 через туннель. Сбой извлечения не роняет
+        // приземление — миниатюра просто фолбэкнется на само видео.
+        await generateVideoPoster(storagePath).catch(() => null);
         await db
           .update(generations)
           .set({
@@ -1121,44 +1254,51 @@ export async function pollActiveGenerations(onlyIds?: string[]): Promise<{
       }
       updated++;
     } catch (e) {
-      // сетевые сбои поллинга не роняют цикл; протухшие мок-задачи закрываем
-      const message = e instanceof Error ? e.message : String(e);
-      if (message.includes("Мок-задача не найдена")) {
-        await db
-          .update(generations)
-          .set({ status: "failed", error: message })
-          .where(eq(generations.id, gen.id));
-        if (gen.shotId) await recalcShotStatus(gen.shotId);
-        updated++;
-      } else {
-        // ошибка связи НЕ глотается молча: пишем в _poll — карточка покажет
-        // «нет связи с Higgsfield» вместо вечной «очереди» (инцидент 2026-07-11)
-        bundle._poll = {
-          at: Date.now(),
-          error: message.slice(0, 200),
-          fails: (bundle._poll?.fails ?? 0) + 1,
-        };
-        await db
-          .update(generations)
-          .set({ paramsJson: JSON.stringify(bundle) })
-          .where(eq(generations.id, gen.id));
-        updated++;
-      }
+      updated += await handlePollError(gen, bundle, e);
     }
   }
 
-  const stillActive = await db
-    .select()
+  // счётчик оставшихся активных — узкий count(*), а не выборка килобайтных строк
+  const [{ n: active }] = await db
+    .select({ n: sql<number>`count(*)` })
     .from(generations)
     .where(inArray(generations.status, [...ACTIVE]));
-  return { active: stillActive.length, updated };
+  return { active: Number(active), updated };
+}
+
+/**
+ * Отпечаток «живого» состояния задач — для GenPoller: клиент рефрешит тяжёлую
+ * страницу ТОЛЬКО когда отпечаток сменился (а не безусловно каждые 6 с). Берём
+ * активные + завершённые за последние 2 минуты задачи узкими колонками. Считается
+ * ПОСЛЕ pollActiveGenerations, поэтому ловит и изменения вне ответа poll: фоново
+ * проставленный jobId, провал отправки, и быстрые (синхронные) задачи, успевшие
+ * создаться и завершиться между тиками клиента.
+ */
+export async function activityFingerprint(): Promise<string> {
+  const db = await getDb();
+  const since = new Date(Date.now() - 120_000);
+  const rows = await db
+    .select({
+      id: generations.id,
+      status: generations.status,
+      providerJobId: generations.providerJobId,
+      error: generations.error,
+      resultStoragePath: generations.resultStoragePath,
+    })
+    .from(generations)
+    .where(or(inArray(generations.status, [...ACTIVE]), gte(generations.createdAt, since)))
+    .orderBy(asc(generations.id));
+  const serialized = rows
+    .map((r) => `${r.id}:${r.status}:${r.providerJobId ?? ""}:${r.error ?? ""}:${r.resultStoragePath ?? ""}`)
+    .join("|");
+  return createHash("sha1").update(serialized).digest("hex");
 }
 
 export async function countActiveGenerations(): Promise<number> {
   const db = await getDb();
-  const rows = await db
-    .select()
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)` })
     .from(generations)
     .where(inArray(generations.status, [...ACTIVE]));
-  return rows.length;
+  return Number(n);
 }

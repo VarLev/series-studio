@@ -11,9 +11,17 @@ import { useRouter } from "next/navigation";
 
 export default function SideDrawer({
   title,
+  nested = false,
   children,
 }: {
   title: string;
+  /**
+   * Панель открыта поверх другой панели (напр. сущность поверх списка библии).
+   * Меняет только ИКОНКУ на честную: действие одно и то же — router.back(), но
+   * на вложенном уровне он возвращает к предыдущей панели, а не закрывает всё,
+   * и «×» там врал бы.
+   */
+  nested?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -42,14 +50,25 @@ export default function SideDrawer({
         className="drawer-slide-in absolute inset-y-0 right-0 flex w-[90%] max-w-xl flex-col border-l border-[var(--border-default)] bg-ink-800 shadow-2xl"
       >
         <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-3">
+          {nested && (
+            <button
+              onClick={() => router.back()}
+              aria-label="Back"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-[16px] text-t400 hover:bg-ink-600 hover:text-t100"
+            >
+              ←
+            </button>
+          )}
           <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-t100">{title}</span>
-          <button
-            onClick={() => router.back()}
-            aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-[16px] text-t400 hover:bg-ink-600 hover:text-t100"
-          >
-            ×
-          </button>
+          {!nested && (
+            <button
+              onClick={() => router.back()}
+              aria-label="Close"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-[16px] text-t400 hover:bg-ink-600 hover:text-t100"
+            >
+              ×
+            </button>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </aside>

@@ -11,6 +11,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
+import { fmtTime } from "@/lib/beatsPure";
+import type { BeatMarker } from "@/lib/beatMarkers";
 import { toast } from "@/components/Toaster";
 import { toggleWinner } from "@/lib/actions/generations";
 import { revisePrompt } from "@/lib/actions/prompts";
@@ -19,6 +21,13 @@ import { useT } from "@/components/I18nProvider";
 
 const FPS = 24;
 const FRAME = 1 / FPS;
+
+/**
+ * Ширина ползунка <input type=range>: его центр ходит не от края до края, а от
+ * THUMB/2 до W−THUMB/2. Маркеры выравниваем по той же геометрии — иначе первый
+ * (всегда 00:00) заметно расходился бы с бегунком на старте.
+ */
+const THUMB_PX = 16;
 
 export interface Candidate {
   id: string;
@@ -29,6 +38,8 @@ export interface Candidate {
   promptVersion: number | null;
   credits: number | null;
   source: string;
+  /** снапшот раскадровки, снятый при генерации ЭТОГО видео (см. lib/beatMarkers) */
+  beatMarkers: BeatMarker[];
 }
 
 function timecode(t: number): string {
@@ -87,6 +98,7 @@ export default function ReviewPlayer({
   const [grabTarget, setGrabTarget] = useState<string>(""); // "series" | "next-shot" | entityId
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [beat, setBeat] = useState<BeatMarker | null>(null); // маркер, чья инфа открыта
   const [pending, startTransition] = useTransition();
   const dragging = useRef(false);
 
@@ -147,6 +159,16 @@ export default function ReviewPlayer({
     [eachVideo],
   );
 
+  // тап по маркеру: перемотка на начало шота + его инфа
+  const openBeat = useCallback(
+    (m: BeatMarker) => {
+      eachVideo((x) => (x.currentTime = m.startSec));
+      setTime(m.startSec);
+      setBeat(m);
+    },
+    [eachVideo],
+  );
+
   const switchCandidate = useCallback(
     (dir: 1 | -1) => {
       if (candidates.length < 2) return;
@@ -172,10 +194,11 @@ export default function ReviewPlayer({
   // hotkeys (spec §5, e.code — независимо от раскладки)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (grabOpen || noteOpen) {
+      if (grabOpen || noteOpen || beat) {
         if (e.code === "Escape") {
           setGrabOpen(false);
           setNoteOpen(false);
+          setBeat(null);
         }
         return;
       }
@@ -201,7 +224,7 @@ export default function ReviewPlayer({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [grabOpen, noteOpen, togglePlay, step, pickWinner, router, shotHref]);
+  }, [grabOpen, noteOpen, beat, togglePlay, step, pickWinner, router, shotHref]);
 
   function grabFrame() {
     const v = videoRef.current;
@@ -300,6 +323,20 @@ export default function ReviewPlayer({
       </main>
     );
   }
+
+  // шкала транспорта: реальная длина файла, если известна; иначе длительность
+  // группы (некоторые MP4 не сообщают duration — см. handleDuration)
+  const scale = (duration > 0 ? duration : shotDurationSec) || 0;
+  // Маркеры ставим по АБСОЛЮТНЫМ секундам — той же шкале, что бегунок и таймкод:
+  // если модель отдала файл короче плана, хвост маркеров просто не показываем, а
+  // не растягиваем раскадровку под факт (растяжка врала бы о времени шота).
+  // В режиме «Сравнить» транспорт общий и ведёт кандидат A — маркеры тоже его.
+  const markers = scale > 0 ? current.beatMarkers.filter((m) => m.startSec < scale) : [];
+  // идущий сейчас шот: последний, чьё начало уже позади (маркеры идут по порядку)
+  const activeOrder = markers.reduce<number | null>(
+    (acc, m) => (time >= m.startSec ? m.order : acc),
+    null,
+  );
 
   return (
     <main className="mx-auto flex h-dvh w-full max-w-lg flex-col bg-[#050505] lg:max-w-none">
@@ -505,10 +542,42 @@ export default function ReviewPlayer({
               группы — некоторые MP4 (Kling/Higgsfield) не сообщают duration, и без
               запасной шкалы max=0 «замораживает» ползунок */}
           <div className="px-4 pt-1.5">
+            {/* Маркеры смены шота — ОТДЕЛЬНОЙ полосой над бегунком, а не поверх
+                него: тап-зоны маркеров перехватывали бы перетаскивание ползунка
+                ровно в тех точках, где они стоят. Риска — вид, тап-зона — 24px */}
+            {markers.length > 0 && (
+              <div className="relative h-5">
+                {markers.map((m) => {
+                  const f = Math.min(1, Math.max(0, m.startSec / scale));
+                  const label = t(
+                    `Шот ${m.order} · ${fmtTime(m.startSec)}`,
+                    `Shot ${m.order} · ${fmtTime(m.startSec)}`,
+                  );
+                  return (
+                    <button
+                      key={m.order}
+                      onClick={() => openBeat(m)}
+                      aria-label={label}
+                      title={label}
+                      className="absolute bottom-0 flex h-5 w-6 -translate-x-1/2 items-end justify-center"
+                      style={{ left: `calc(${THUMB_PX / 2}px + ${f} * (100% - ${THUMB_PX}px))` }}
+                    >
+                      <span
+                        className="block w-0.5 rounded-full transition-[height,background]"
+                        style={{
+                          height: m.order === activeOrder ? "12px" : "9px",
+                          background: m.order === activeOrder ? "var(--violet-300)" : "#6a6a6a",
+                        }}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <input
               type="range"
               min={0}
-              max={(duration > 0 ? duration : shotDurationSec) || 0}
+              max={scale}
               step={FRAME}
               value={time}
               onChange={(e) => {
@@ -542,7 +611,7 @@ export default function ReviewPlayer({
               ›
             </button>
             <span className="ml-auto font-mono text-[10px] text-[#8a8a8a]">
-              {timecode(time)} · {(duration > 0 ? duration : shotDurationSec).toFixed(0)}
+              {timecode(time)} · {scale.toFixed(0)}
               {t("с", "s")}
             </span>
           </div>
@@ -589,6 +658,55 @@ export default function ReviewPlayer({
           {current.isWinner ? t("Победитель ✓", "Winner ✓") : t("Победитель", "Winner")}
         </button>
       </div>
+
+      {/* Инфа шота по маркеру: снимок раскадровки на момент генерации ЭТОГО
+          видео — с текущим содержимым группы не связан и за ним не меняется */}
+      <Sheet
+        open={Boolean(beat)}
+        onClose={() => setBeat(null)}
+        title={
+          beat
+            ? t(
+                `Шот ${beat.order} · ${fmtTime(beat.startSec)}–${fmtTime(beat.endSec)}`,
+                `Shot ${beat.order} · ${fmtTime(beat.startSec)}–${fmtTime(beat.endSec)}`,
+              )
+            : ""
+        }
+      >
+        {beat && (
+          <div className="flex flex-col gap-3">
+            {(
+              [
+                [t("План и ракурс", "Framing"), beat.framing],
+                [t("Камера", "Camera"), beat.camera],
+                [t("Действие", "Action"), beat.action],
+              ] as const
+            ).map(([label, value]) =>
+              value ? (
+                <div key={label}>
+                  <div className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-t400">
+                    {label}
+                  </div>
+                  <div className="mt-1 text-[13px] leading-snug text-t200">{value}</div>
+                </div>
+              ) : null,
+            )}
+            {beat.dialogue && (
+              <div>
+                <div className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-t400">
+                  {t("Реплика", "Dialogue")}
+                </div>
+                <div className="mt-1 text-[13px] italic leading-snug text-t100">«{beat.dialogue}»</div>
+              </div>
+            )}
+            {!beat.framing && !beat.camera && !beat.action && !beat.dialogue && (
+              <div className="text-[12.5px] text-t400">
+                {t("У шота не было описания", "This shot had no description")}
+              </div>
+            )}
+          </div>
+        )}
+      </Sheet>
 
       {/* Шторка «Взять кадр» (spec §2.5/§3.5) */}
       <Sheet

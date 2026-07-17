@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { getDb, knowledgeDocs } from "@/lib/db";
 import { requireAuth, login, logout } from "@/lib/auth";
 import { setSetting, DEFAULT_SETTINGS, type SettingKey } from "@/lib/settings";
+import { guessKnowledgeTags } from "@/lib/knowledgeTags";
 
 export async function saveSettings(formData: FormData): Promise<void> {
   await requireAuth();
@@ -31,22 +32,11 @@ export async function logoutAction(): Promise<void> {
   redirect("/login");
 }
 
-function guessTags(fileName: string, content: string): string {
-  const tags: string[] = [];
-  const haystack = (fileName + " " + content.slice(0, 2000)).toLowerCase();
-  for (const key of ["kling", "seedance", "grok", "nano banana", "soul", "camera", "realism", "avatar"]) {
-    if (haystack.includes(key)) tags.push(key.replace(" ", "-"));
-  }
-  if (haystack.includes("камер") || haystack.includes("dolly") || haystack.includes("crane")) {
-    if (!tags.includes("camera")) tags.push("camera");
-  }
-  return tags.length ? tags.join(",") : "general";
-}
-
 /**
  * M3 — база знаний: читает файлы из папки /knowledge репозитория (.md, .txt)
  * и складывает их в knowledge_docs. PDF заказчик конвертирует в markdown
  * (или кладёт .md рядом) — честная конвертация PDF будет добавлена этапом 2.
+ * Правки/вкл-выкл документов — на вкладке «База знаний» (actions/knowledge.ts).
  */
 export async function ingestKnowledge(): Promise<{ ok: boolean; message: string }> {
   await requireAuth();
@@ -71,15 +61,15 @@ export async function ingestKnowledge(): Promise<{ ok: boolean; message: string 
         title,
         sourceFile: file,
         contentMd: content,
-        tags: guessTags(file, content),
+        tags: guessKnowledgeTags(file, content),
       })
       .onConflictDoUpdate({
         target: knowledgeDocs.id,
-        set: { contentMd: content, tags: guessTags(file, content) },
+        set: { contentMd: content, tags: guessKnowledgeTags(file, content) },
       });
     count++;
   }
-  revalidatePath("/costs");
+  revalidatePath("/knowledge");
   return {
     ok: true,
     message: count

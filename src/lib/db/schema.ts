@@ -42,6 +42,12 @@ export const references = pgTable("references", {
   grid: integer("grid"), // лист: сколько кадров в сетке (4 = 2×2, 9 = 3×3)
   sbShotId: text("sb_shot_id"), // раскадровка конкретного шота (null = вся серия)
   parentId: text("parent_id"), // кадр: id листа, из которого вырезан
+  // лист «вся серия»: карта «панель → группа» (JSON-массив shot_id по номерам
+  // панелей). Промпт листа обещает «panel N depicts beat N», а бит N взят из
+  // конкретной группы — карта позволяет разрезке проставить кадрам их группы,
+  // а тем — стать стартовыми кадрами этих групп в один тап
+  sbPanels: text("sb_panels"),
+  sbPanel: integer("sb_panel"), // кадр: номер его панели на листе (1..grid)
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -86,6 +92,11 @@ export const shots = pgTable("shots", {
   // сцены, но живёт отдельно — свои локация/погода/референсы, своя шкала времени
   // от 00:00; в сквозной таймкод эпизода и сюжетную связку сцены НЕ входит
   isInsert: boolean("is_insert").notNull().default(false),
+  // персонажи, которых разбивка назвала в этой группе, но в библии их не нашлось
+  // (JSON-массив имён). Живут как красные чипы-заготовки: их можно завести в
+  // библию одним тапом или снять — тогда видеомодель просто нарисует «какую-то
+  // медсестру» без референса. Без этого списка такие персонажи молча пропадали.
+  unlinkedCharsJson: text("unlinked_chars_json").notNull().default("[]"),
   winnerGenerationId: text("winner_generation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -133,6 +144,11 @@ export const generations = pgTable("generations", {
   winner: boolean("winner").notNull().default(false),
   providerJobId: text("provider_job_id"),
   resultStoragePath: text("result_storage_path"),
+  // снапшот шотов группы (BeatMarker[]) на момент постановки задачи — маркеры
+  // смены шота на таймлайне плеера. Принадлежит ЭТОМУ видео: правка группы после
+  // генерации маркеры готового видео не меняет. null — видео до появления фичи
+  // (их раскадровка «на момент генерации» неизвестна, маркеров нет)
+  beatsJson: text("beats_json"),
   // кредиты бывают дробными (Seedance 22.5) — real, не integer
   creditsSpent: real("credits_spent"),
   error: text("error"),
@@ -140,12 +156,40 @@ export const generations = pgTable("generations", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Якоря — короткие текстовые инъекции-детали, которых не хватает референсам/энтити/
+ * тону: «синяк на лице», «красная куртка», «на столе разбитая чашка». Живут за
+ * ЭПИЗОДОМ (создаются в группе, но сохраняются в пул эпизода) и переиспользуются:
+ * один якорь цепляется к нескольким группам через shot_anchors. При генерации
+ * видео-промпта, Enhance и Rework прикреплённые якоря — ОБЯЗАТЕЛЬНЫЕ пометки.
+ */
+export const anchors = pgTable("anchors", {
+  id: text("id").primaryKey(),
+  episodeId: text("episode_id").notNull(),
+  text: text("text").notNull(),
+  source: text("source").notNull().default("manual"), // manual | enhance
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Привязка якоря к группе шотов (many-to-many): один якорь — на N групп. */
+export const shotAnchors = pgTable(
+  "shot_anchors",
+  {
+    shotId: text("shot_id").notNull(),
+    anchorId: text("anchor_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.shotId, t.anchorId] })],
+);
+
 export const knowledgeDocs = pgTable("knowledge_docs", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   sourceFile: text("source_file").notNull(),
   contentMd: text("content_md").notNull(),
   tags: text("tags").notNull().default(""), // comma-separated: kling,seedance,camera,realism...
+  // выключенный документ остаётся в базе, но НЕ подмешивается в промпт-фабрику
+  // (вкладка «База знаний» в настройках, переключатель у каждого документа)
+  enabled: boolean("enabled").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -186,6 +230,45 @@ export const techniques = pgTable("techniques", {
   prompt: text("prompt").notNull(),
   negative: text("negative").notNull().default(""),
   custom: boolean("custom").notNull().default(false), // добавлен пользователем
+  // вкл/выкл — не у карточки, а у всей библиотеки разом: settings.techniques_enabled
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * База пользовательских правил промптинга («База правил», /rules): короткие
+ * директивы, которые владелец сериала добавляет сам. Активные правила
+ * вклеиваются высокоприоритетным блоком в системные промпты LLM-вызовов
+ * (customRulesContext в rules.ts).
+ * scope: all | breakdown (разбивка + Rework/Вставка/Enhance групп) |
+ *        video_prompt (промпт шота + его ревизия).
+ * family: all | seedance | kling — учитывается ТОЛЬКО для video_prompt-вызовов;
+ *         в breakdown-вызовы попадают лишь правила family=all.
+ */
+export const promptRules = pgTable("prompt_rules", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull().default(""),
+  text: text("text").notNull(),
+  scope: text("scope").notNull().default("all"),
+  family: text("family").notNull().default("all"),
+  enabled: boolean("enabled").notNull().default(true),
+  sortIndex: integer("sort_index").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Правила, извлечённые из редактируемых шаблонов (tpl_breakdown / tpl_video /
+ * tpl_video_kling) LLM-сегментацией — read-only витрина «что за правила внутри
+ * шаблона» на странице /rules. source_hash — sha256 текста шаблона на момент
+ * сегментации: не совпал с текущим → бейдж «устарело», кнопка «Обновить»
+ * пересегментирует только изменившиеся шаблоны.
+ */
+export const templateRules = pgTable("template_rules", {
+  id: text("id").primaryKey(),
+  templateKey: text("template_key").notNull(), // tpl_breakdown | tpl_video | tpl_video_kling
+  orderIndex: integer("order_index").notNull().default(0),
+  title: text("title").notNull().default(""),
+  text: text("text").notNull(),
+  sourceHash: text("source_hash").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
