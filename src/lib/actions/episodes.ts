@@ -106,7 +106,13 @@ async function runBreakdown(
   const stash = async (payload: BdResult) => {
     if (!token) return;
     try {
-      await setSetting(bdStashKey(episodeId), JSON.stringify({ token, ...payload }));
+      // finishedAt метит тайник «новым»: по нему claimBreakdownResult отличает
+      // результат, который РЕАЛЬНО никто не забирал, от тайников старых версий,
+      // где чистки не было и лежал результат давно утверждённой разбивки
+      await setSetting(
+        bdStashKey(episodeId),
+        JSON.stringify({ token, finishedAt: Date.now(), ...payload }),
+      );
     } catch {}
   };
   try {
@@ -177,6 +183,49 @@ export async function pollBreakdownResult(
     if (parsed.ok === false) return { ok: false, error: parsed.error ?? "Неизвестная ошибка" };
   } catch {}
   return null;
+}
+
+/**
+ * Забрать НЕВОСТРЕБОВАННУЮ разбивку — ту, что дозрела, пока клиента не было:
+ * закрыл вкладку, перезагрузил браузер, открыл эпизод с другого устройства.
+ * Токен здесь не спрашиваем: его знал только тот браузер, который запускал, а
+ * результат уже оплачен и пропадать не должен.
+ *
+ * Признак «никто не забрал» — САМО наличие тайника: он живёт ровно до того, как
+ * пользователь разберётся с предпросмотром (dropBreakdownStash на «Создать» и на
+ * «Отмена»). Тайники старых версий (без finishedAt) не отдаём: там чистки не было,
+ * и лежать может результат давно утверждённой разбивки — воскрешать его нельзя.
+ * Ошибку тоже не отдаём: показывать «ваша разбивка упала» тому, кто пришёл на
+ * экран через час с другого устройства, — только пугать; ошибка доедет поллингом
+ * тому, кто запускал.
+ */
+export async function claimBreakdownResult(
+  episodeId: string,
+): Promise<{ breakdown: Breakdown } | null> {
+  await requireAuth();
+  const db = await getDb();
+  const [row] = await db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, bdStashKey(episodeId)));
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.value) as {
+      finishedAt?: number;
+      ok?: boolean;
+      breakdown?: Breakdown;
+    };
+    if (!parsed.finishedAt) return null;
+    if (parsed.ok && parsed.breakdown) return { breakdown: parsed.breakdown };
+  } catch {}
+  return null;
+}
+
+/** Пользователь разобрался с предпросмотром (создал группы или отменил) — тайник больше не нужен. */
+export async function dropBreakdownStash(episodeId: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  await db.delete(settings).where(eq(settings.key, bdStashKey(episodeId)));
 }
 
 /**

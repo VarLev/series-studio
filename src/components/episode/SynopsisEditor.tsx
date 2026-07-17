@@ -6,6 +6,8 @@ import {
   updateEpisode,
   breakdownEpisode,
   pollBreakdownResult,
+  claimBreakdownResult,
+  dropBreakdownStash,
   saveBreakdown,
   saveLlmModelChoice,
 } from "@/lib/actions/episodes";
@@ -143,6 +145,11 @@ export default function SynopsisEditor({
       if (b) localStorage.setItem(bdKey, JSON.stringify(b));
       else localStorage.removeItem(bdKey);
     } catch {}
+    // Предпросмотр закрыли (создали группы или отменили) — снимаем и серверный
+    // тайник: пока он есть, результат считается невостребованным и его подхватит
+    // claimBreakdownResult при следующем заходе. Иначе на экран возвращался бы
+    // предпросмотр разбивки, с которой уже разобрались.
+    if (!b) void dropBreakdownStash(episodeId);
   }
 
   // restore local draft if it is newer than what the server rendered;
@@ -161,10 +168,14 @@ export default function SynopsisEditor({
         if (draft.logline && draft.logline !== initialLogline) setLogline(draft.logline);
       }
       const rawBd = localStorage.getItem(bdKey);
+      let hasPreview = false;
       if (rawBd) {
         const bd = JSON.parse(rawBd) as Breakdown;
         // предпросмотры старого формата ({shots:[…]}) молча пропускаем
-        if (Array.isArray(bd?.groups) && bd.groups.length) setPreview(bd);
+        if (Array.isArray(bd?.groups) && bd.groups.length) {
+          setPreview(bd);
+          hasPreview = true;
+        }
       }
       const rawDur = localStorage.getItem(durKey);
       if (rawDur) {
@@ -187,6 +198,11 @@ export default function SynopsisEditor({
         // нечего, тайник за это время либо забрали, либо вызов давно умер
         if (fresh) watchBreakdown({ token: run.token!, startedAt: run.startedAt! }, true);
         else localStorage.removeItem(bdRunKey);
+      } else if (!hasPreview) {
+        // Ни маркера, ни предпросмотра — но разбивка могла дозреть, пока этого
+        // браузера не было вовсе: вкладку закрыли, localStorage почистили, эпизод
+        // открыли с телефона. Результат оплачен и лежит в тайнике — забираем.
+        void claimBreakdownResult(episodeId).then((r) => r && stashPreview(r.breakdown));
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
