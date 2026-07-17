@@ -36,6 +36,9 @@ export const DEFAULT_SETTINGS = {
   tpl_storyboard: DEFAULT_STORYBOARD_TEMPLATE,
   tpl_video: DEFAULT_VIDEO_TEMPLATE, // трек Seedance
   tpl_video_kling: DEFAULT_KLING_VIDEO_TEMPLATE, // трек Kling (<<<image_N>>>, нативный звук)
+  // «База правил» (/rules): JSON-массив id выключенных системных правил и
+  // динамических блоков реестра (rulesRegistry). Нет id в массиве = включено.
+  rules_disabled: "[]",
   // интерфейс
   ui_lang: "ru", // ru | en
   ui_theme: "stigma", // stigma (фиолетовый) | vault (графит + янтарь)

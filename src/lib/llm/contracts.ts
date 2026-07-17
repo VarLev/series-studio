@@ -157,6 +157,17 @@ export const referenceAnalysisSchema = z.object({
 });
 export type ReferenceAnalysis = z.infer<typeof referenceAnalysisSchema>;
 
+/**
+ * Сегментация редактируемого шаблона (tpl_breakdown / tpl_video / tpl_video_kling)
+ * на отдельные правила для витрины «База правил» (/rules) — llmSegmentTemplate.
+ */
+export const templateSegmentationSchema = z.object({
+  rules: z
+    .array(z.object({ title: z.string().default(""), text: z.string() }))
+    .min(1),
+});
+export type TemplateSegmentation = z.infer<typeof templateSegmentationSchema>;
+
 /** Анализ референса персонажа (кнопка «Анализ» в библии, vision-модель). */
 export const imageAnalysisSchema = z.object({
   name: z.string().default(""), // имя сущности на английском (транслит собственных имён)

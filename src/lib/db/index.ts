@@ -173,6 +173,25 @@ ALTER TABLE shots ADD COLUMN IF NOT EXISTS time_weather text NOT NULL DEFAULT ''
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS is_insert boolean NOT NULL DEFAULT false;
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS emotional_tone text NOT NULL DEFAULT '';
 ALTER TABLE "references" ADD COLUMN IF NOT EXISTS analysis text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS prompt_rules (
+  id text PRIMARY KEY,
+  title text NOT NULL DEFAULT '',
+  text text NOT NULL,
+  scope text NOT NULL DEFAULT 'all',
+  family text NOT NULL DEFAULT 'all',
+  enabled boolean NOT NULL DEFAULT true,
+  sort_index integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS template_rules (
+  id text PRIMARY KEY,
+  template_key text NOT NULL,
+  order_index integer NOT NULL DEFAULT 0,
+  title text NOT NULL DEFAULT '',
+  text text NOT NULL,
+  source_hash text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

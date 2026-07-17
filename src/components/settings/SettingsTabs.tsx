@@ -11,6 +11,7 @@ import { useT } from "@/components/I18nProvider";
 const TABS = [
   { href: "/settings", ru: "Настройки", en: "Settings" },
   { href: "/costs", ru: "Затраты", en: "Costs" },
+  { href: "/rules", ru: "База правил", en: "Rules" },
 ];
 
 export default function SettingsTabs() {

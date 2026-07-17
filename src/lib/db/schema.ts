@@ -189,6 +189,44 @@ export const techniques = pgTable("techniques", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * База пользовательских правил промптинга («База правил», /rules): короткие
+ * директивы, которые владелец сериала добавляет сам. Активные правила
+ * вклеиваются высокоприоритетным блоком в системные промпты LLM-вызовов
+ * (customRulesContext в rules.ts).
+ * scope: all | breakdown (разбивка + Rework/Вставка/Enhance групп) |
+ *        video_prompt (промпт шота + его ревизия).
+ * family: all | seedance | kling — учитывается ТОЛЬКО для video_prompt-вызовов;
+ *         в breakdown-вызовы попадают лишь правила family=all.
+ */
+export const promptRules = pgTable("prompt_rules", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull().default(""),
+  text: text("text").notNull(),
+  scope: text("scope").notNull().default("all"),
+  family: text("family").notNull().default("all"),
+  enabled: boolean("enabled").notNull().default(true),
+  sortIndex: integer("sort_index").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Правила, извлечённые из редактируемых шаблонов (tpl_breakdown / tpl_video /
+ * tpl_video_kling) LLM-сегментацией — read-only витрина «что за правила внутри
+ * шаблона» на странице /rules. source_hash — sha256 текста шаблона на момент
+ * сегментации: не совпал с текущим → бейдж «устарело», кнопка «Обновить»
+ * пересегментирует только изменившиеся шаблоны.
+ */
+export const templateRules = pgTable("template_rules", {
+  id: text("id").primaryKey(),
+  templateKey: text("template_key").notNull(), // tpl_breakdown | tpl_video | tpl_video_kling
+  orderIndex: integer("order_index").notNull().default(0),
+  title: text("title").notNull().default(""),
+  text: text("text").notNull(),
+  sourceHash: text("source_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const llmUsage = pgTable("llm_usage", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(), // synopsis | breakdown | prompt | revision
