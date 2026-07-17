@@ -436,8 +436,13 @@ export default function BreakdownPreview({
       </div>
 
       <div
-        // мобайл: над общим таб-баром (58px + safe-area); десктоп: у низа окна
-        className="fixed inset-x-0 bottom-[calc(58px+env(safe-area-inset-bottom))] z-30 mx-auto flex w-full max-w-lg gap-2 border-t border-[var(--border-default)] px-3 py-3 md:max-w-3xl lg:bottom-0 lg:left-56 lg:mx-0 lg:max-w-none"
+        // Мобайл: над общим таб-баром (58px + safe-area), по ширине колонки контента.
+        // Десктоп: у низа окна, от края сайдбара до правого края ЭКРАНА.
+        // lg:w-auto обязателен: с w-full ширина считается от всего окна (100vw), и
+        // вместе с lg:left-56 панель уезжала за правый край ровно на ширину
+        // сайдбара — кнопку «Создать группы» обрезало. Ширина побеждает right:0,
+        // поэтому её и нужно отпустить, чтобы коробку растянули left и right.
+        className="fixed inset-x-0 bottom-[calc(58px+env(safe-area-inset-bottom))] z-30 mx-auto flex w-full max-w-lg gap-2 border-t border-[var(--border-default)] px-3 py-3 md:max-w-3xl lg:bottom-0 lg:left-56 lg:mx-0 lg:w-auto lg:max-w-none"
         style={{
           background: "linear-gradient(180deg, rgba(15,12,22,.94), rgba(6,5,9,.98))",
           backdropFilter: "blur(14px)",
