@@ -18,9 +18,10 @@ import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
 import { getShotAnchorTexts } from "@/lib/anchors";
 import { refAnalysisText } from "@/lib/refAnalysis";
 import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives";
-import { TIMING_RULES, LANGUAGE_RULES, DIALOGUE_RULES } from "@/lib/templates";
 import { KNOWLEDGE_EXCERPT_CHARS } from "@/lib/knowledgeTags";
 import { listEnabledTechniques, techniqueIndex, getEnabledTechniquesByIds } from "@/lib/director";
+import { systemRuleText, gateBlock, type RuleSite } from "./rulesRegistry";
+import { getDisabledRuleIds, customRulesContext } from "@/lib/rules";
 import { effectiveOutfit } from "@/lib/wardrobe";
 import { promptFamily, visionModelFrom, maxOutputTokens, CHEAPEST_LLM, isClaudeModel } from "./models";
 import { runJson, type LlmCall } from "./client";
@@ -33,6 +34,8 @@ import {
   insertGroupsSchema,
   referenceAnalysisSchema,
   shotPromptSchema,
+  templateSegmentationSchema,
+  type TemplateSegmentation,
   type Breakdown,
   type EnhanceGroup,
   type GroupPatch,
@@ -147,6 +150,10 @@ export async function llmBreakdown(
   const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const settings = await getAllSettings();
+  // «База правил»: выключенные записи реестра + пользовательские правила разбивки
+  const off = await getDisabledRuleIds();
+  const R = (id: string) => systemRuleText(id, off);
+  const customRules = await customRulesContext("breakdown");
   // диапазон хронометража эпизода задаётся бегунком на вкладке «Сюжет» (дефолт 3–5 мин)
   const durMin = duration?.min ?? 3;
   const durMax = duration?.max ?? 5;
@@ -180,29 +187,10 @@ export async function llmBreakdown(
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если сюжет его описал для этой сцены, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
-        "СЦЕНЫ (границы сюжетных сцен): scene_start: true — если группа начинает НОВУЮ сюжетную " +
-        "сцену: смена локации, скачок во времени или разрыв непрерывности действия. Если группа — " +
-        "прямое продолжение предыдущей (та же обстановка, действие течёт без разрыва) — scene_start: false. " +
-        "Первая группа эпизода — всегда scene_start: true.\n" +
-        "ВРЕМЯ СУТОК И ПОГОДА: для каждой группы заполни time_weather по сюжету — время суток и " +
-        "погода (напр. «evening, overcast», «night, rain», «bright sunny day»). Внутри одной сцены " +
-        "(scene_start: false) — ОДИНАКОВО во всех группах; менять можно только на границе сцены " +
-        "(scene_start: true). Если сюжет не уточняет — выбери правдоподобное и держи единым по сцене.\n" +
-        "ЭМОЦИОНАЛЬНЫЙ ТОН: для КАЖДОЙ группы заполни emotional_tone (на английском, 1–3 слова) — " +
-        "настроение и атмосфера ИМЕННО этого фрагмента по тому, что в нём реально происходит: " +
-        "напр. «calm», «tender», «tense», «anxious, ominous», «warm», «melancholic», «angry». " +
-        "Определяй его по СОДЕРЖАНИЮ группы, а не по общему тону сериала: если в группе ничего " +
-        "напряжённого не происходит — ставь спокойный/нейтральный тон (calm), НЕ нагнетай тревогу. " +
-        "Тон может свободно меняться от группы к группе даже внутри одной сцены.\n" +
-        "ГАРДЕРОБ (якорь одежды): НЕ придумывай одежду. По умолчанию у каждого персонажа " +
-        "есть базовый гардероб в библии — приложение подставит его само, поэтому в обычном " +
-        "случае outfit оставляй ПУСТОЙ СТРОКОЙ. Заполняй outfit (на английском, годный для " +
-        'видеопромпта, например "charcoal wool coat over white shirt, black jeans") ТОЛЬКО ' +
-        "если сам сюжет явно описывает, во что персонаж одет в этой сцене или что он " +
-        "переоделся (например «надела красное платье», «теперь в строгом костюме»). Если " +
-        "сюжет одежду не упоминает — outfit пустой. Когда сцена (scene_start: false) " +
-        "продолжается, а сюжет ранее задал наряд — повтори тот же наряд ДОСЛОВНО во всех " +
-        "группах этой сцены; на границе сцены обновляй, только если сюжет описал переодевание.\n" +
+        `${R("breakdown_scenes")}\n` +
+        `${R("breakdown_time_weather")}\n` +
+        `${R("breakdown_emotional_tone")}\n` +
+        `${R("breakdown_wardrobe")}\n` +
         "Соответствие формату задания: группа (не длиннее 15 секунд, пригодна для отдельной " +
         "AI-видеогенерации) — элемент groups[], её шоты — элементы shots[] внутри неё, " +
         "duration_sec — длительность группы в секундах. Время шотов (shots[].time) отсчитывается " +
@@ -213,7 +201,10 @@ export async function llmBreakdown(
         "чтобы суммарный хронометраж уложился в этот диапазон.\n" +
         // программно, поверх редактируемого шаблона задания (tpl_breakdown) — так
         // точная формула тайминга не зависит от того, что пользователь оставил в шаблоне
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}`,
+        [R("timing_rules"), R("language_rules"), R("dialogue_rules"), R("shot_view_rules")]
+          .filter(Boolean)
+          .join("\n") +
+        (customRules ? `\n${customRules}` : ""),
       user,
     },
     breakdownSchema,
@@ -274,7 +265,10 @@ export async function llmReviseGroup(input: {
 }): Promise<GroupPatch> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
-  const refCtx = await shotRefsContext(input.shotId);
+  const off = await getDisabledRuleIds();
+  const R = (id: string) => systemRuleText(id, off);
+  const customRules = await customRulesContext("revise_group");
+  const refCtx = off.has("dyn_refs_context") ? "" : await shotRefsContext(input.shotId);
   const anchorsBlock = input.anchors?.length
     ? "ОБЯЗАТЕЛЬНЫЕ ДЕТАЛИ (ЯКОРЯ) этой группы — точечные пометки пользователя, которые ДОЛЖНЫ " +
       "сохраняться при правке. Не выбрасывай и не затирай их: если деталь относится к действию/облику " +
@@ -319,21 +313,17 @@ export async function llmReviseGroup(input: {
         "Ты правишь ОДНУ группу шотов раскадровки вертикального сериала (группа = отдельное " +
         "AI-видео не длиннее 15 секунд). Перепиши её шоты по запросу пользователя, сохранив " +
         "сюжет группы и рабочие части.\n" +
-        "ТЕКУЩЕЕ содержимое шотов (реплики, действие, планы) — ИСТОЧНИК ИСТИНЫ и приоритет. Работай " +
-        "именно с ним: существующие реплики и действие сохраняй ДОСЛОВНО, лишь распределяя, " +
-        "перегруппировывая или деля их по запросу. НЕ заменяй текущий текст «изначальным» или " +
-        "сюжетным вариантом и НЕ переписывай реплики, если запрос явно этого не требует. При разбиении " +
-        "шота его текущие реплики и действие раздели между новыми шотами, ничего не выдумывая заново.\n" +
+        `${R("revise_source_of_truth")}\n` +
         scope +
-        "РАБОТАЙ ТОЛЬКО С ШОТАМИ. НЕ заполняй и НЕ меняй локацию, время суток, погоду, " +
-        "эмоциональный тон, референсы и привязки сущностей — их нет в твоём ответе, и не вписывай " +
-        "их описания в текст шотов без необходимости. Мизансцена: собеседников в очной сцене держи " +
-        "в связке (не уводи одного в дальний расфокусированный фон, пока другой к нему обращается).\n" +
-        "ПЕРЕСЧИТАЙ ТАЙМИНГ: у каждого шота честное время по правилам хронометража ниже; шоты идут " +
-        "встык от 00:00; duration_sec группы = сумма шотов, НЕ БОЛЬШЕ 15 секунд.\n" +
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
+        `${R("revise_shots_only")}\n` +
+        `${R("revise_recalc_timing")}\n` +
+        [R("timing_rules"), R("language_rules"), R("dialogue_rules"), R("shot_view_rules")]
+          .filter(Boolean)
+          .join("\n") +
+        "\n" +
         (refCtx ? refCtx + "\n" : "") +
         anchorsBlock +
+        (customRules ? customRules + "\n" : "") +
         "Верни ТОЛЬКО JSON без пояснений " +
         (input.targetOrders?.length
           ? `(в массиве shots — ТОЛЬКО изменённые шоты [${input.targetOrders.join(", ")}], без остальных):\n`
@@ -374,6 +364,9 @@ export async function llmInsertGroups(input: {
 }): Promise<InsertGroups> {
   const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
+  const off = await getDisabledRuleIds();
+  const R = (id: string) => systemRuleText(id, off);
+  const customRules = await customRulesContext("insert_groups");
   return runJson(
     {
       kind: "breakdown",
@@ -386,15 +379,12 @@ export async function llmInsertGroups(input: {
         "(группа = отдельное AI-видео не длиннее 15 секунд). Пользователь описал, что должно " +
         "происходить в новых шотах; контекст сцены дан ТОЛЬКО для связности (персонажи, тон, " +
         "обстановка) — существующие группы НЕ переписывай и НЕ пересказывай.\n" +
-        "Сам реши, сколько групп создать — одну или несколько: считай по правилам хронометража " +
-        "ниже (реплики и действия по формуле не помещаются в 15 секунд одной группы — значит нужна " +
-        "ещё одна группа), а не по интуиции. У вставки могут быть СВОИ локация и время/погода: если " +
-        "запрос переносит действие в другое место или время — задай новые значения; если нет — " +
-        "повтори значения сцены.\n" +
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
-        "У каждой группы заполни emotional_tone (на английском, 1–3 слова) по тому, что в ней " +
-        "происходит по запросу: calm / tense / tender / anxious, ominous / warm — не нагнетай " +
-        "тревогу, если фрагмент спокойный.\n" +
+        `${R("insert_groups_guidance")}\n` +
+        [R("timing_rules"), R("language_rules"), R("dialogue_rules"), R("shot_view_rules")]
+          .filter(Boolean)
+          .join("\n") +
+        "\n" +
+        (customRules ? customRules + "\n" : "") +
         "Верни ТОЛЬКО JSON без пояснений:\n" +
         '{"groups":[{"order":1,"title":"название группы","duration_sec":14,' +
         '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain",' +
@@ -439,7 +429,10 @@ export async function llmEnhanceGroup(input: {
 }): Promise<EnhanceGroup> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
-  const refCtx = await shotRefsContext(input.shotId);
+  const off = await getDisabledRuleIds();
+  const R = (id: string) => systemRuleText(id, off);
+  const customRules = await customRulesContext("enhance_group");
+  const refCtx = off.has("dyn_refs_context") ? "" : await shotRefsContext(input.shotId);
   const anchorsBlock = input.anchors.length
     ? "ЯКОРЯ ГРУППЫ (обязательные точечные детали пользователя) — учитывай их как данность при " +
       "шлифовке шотов (если деталь относится к облику/действию — она должна оставаться отражённой в " +
@@ -452,7 +445,7 @@ export async function llmEnhanceGroup(input: {
       "\"anchors\" (по одной детали на строку массива, 2–6 слов). Если добавлять нечего — \"anchors\": []. " +
       "НЕ дублируй то, что уже описано в шотах, референсах или гардеробе; не выдумывай сюжетных событий.\n";
   // выключенные приёмы модель не видит вовсе — их нет в индексе
-  const all = await listEnabledTechniques();
+  const all = off.has("dyn_techniques") ? [] : await listEnabledTechniques();
   const techIndexBlock = all.length
     ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (id | название | камера | теги | категория) — " +
       "для каждого шота выбери НЕ БОЛЕЕ ОДНОГО приёма (technique_id), только если он ПОДХОДИТ к сути " +
@@ -483,37 +476,15 @@ export async function llmEnhanceGroup(input: {
         `${rules}\n\n${bible}\n\n` +
         "Ты — старший режиссёр вертикального сериала. Тебе дают ТЕКУЩИЕ основные шоты одной группы. " +
         "Твоя задача — УЛУЧШИТЬ их, а НЕ пересобрать заново.\n" +
-        "ГЛАВНОЕ ПРАВИЛО: сюжет, действие и реплики, которые УЖЕ есть в шотах — ИСТОЧНИК ИСТИНЫ. НЕ " +
-        "придумывай новый сюжет и НЕ пересобирай сцену «с нуля» по исходной истории. Работай ровно с тем, " +
-        "что уже есть: сохраняй смысл, ход действия и реплики каждого шота, лишь шлифуя формулировки, " +
-        "ракурс, камеру и дозаполняя пустые поля. Существующие реплики сохраняй ДОСЛОВНО (допустимо " +
-        "поправить оформление/пунктуацию и формат «[Имя]: -фраза»); действие оставляй тем же по сути, " +
-        "делая его точнее и кинематографичнее.\n" +
-        "Что МОЖНО делать:\n" +
-        "- дозаполнять и уточнять поля framing (план/ракурс), camera (что видит камера), а также " +
-        "location, time_weather, emotional_tone по содержанию группы;\n" +
-        "- РАЗБИТЬ шот на два, если его действие/реплики не помещаются в отведённое время — распредели " +
-        "СУЩЕСТВУЮЩЕЕ содержимое между двумя шотами, ничего не выдумывая; можно объединить два соседних " +
-        "шота, если это не теряет содержания;\n" +
-        "- уточнить тайминг каждого шота по формуле хронометража ниже;\n" +
-        "- закрепить за шотом не более ОДНОГО подходящего режиссёрского приёма;\n" +
-        "- в characters_in_frame перечислить element_name ТОЛЬКО тех персонажей библии, кто РЕАЛЬНО в " +
-        "кадре (по действию и репликам) — не всех упомянутых.\n" +
-        "Чего делать НЕЛЬЗЯ:\n" +
-        "- выбрасывать, подменять или переписывать существующее действие/реплики; менять ход сюжета " +
-        "группы; добавлять новые сюжетные события, которых в шотах не было;\n" +
-        "- НИЧЕГО не уноси в черновики: черновиков в этой задаче НЕТ, все шоты остаются основными " +
-        "(draft: false). Если материал не влезает в 15 секунд — не сжимай его в кашу и не выкидывай, а " +
-        "раздели на большее число ОСНОВНЫХ шотов (тайминг посчитай честно). Лимит 15 сек здесь — " +
-        "ориентир; приоритет — сохранить существующее содержание.\n" +
-        "МИЗАНСЦЕНА каждого шота (поля framing и camera): если в шоте двое в прямом разговоре или очной " +
-        "сцене — держи их В СВЯЗКЕ (плотный two-shot, over-the-shoulder или чередование крупных планов " +
-        "лицом к лицу). НЕ ставь одного собеседника в дальний/расфокусированный фон, пока другой к нему " +
-        "обращается. Дальний план оправдан ТОЛЬКО если по действию они реально разошлись. По умолчанию " +
-        "собеседник — близко и в фокусе. Прежнюю неудачную расстановку не тяни по инерции — переоцени по " +
-        "сути сцены, но саму сцену (сюжет, действие, реплики) не меняй.\n" +
-        `${TIMING_RULES}\n${LANGUAGE_RULES}\n${DIALOGUE_RULES}\n` +
+        `${R("enhance_source_of_truth")}\n` +
+        `${R("enhance_scope")}\n` +
+        `${R("enhance_blocking")}\n` +
+        [R("timing_rules"), R("language_rules"), R("dialogue_rules"), R("shot_view_rules")]
+          .filter(Boolean)
+          .join("\n") +
+        "\n" +
         (refCtx ? refCtx + "\n" : "") +
+        (customRules ? customRules + "\n" : "") +
         "\n" +
         anchorsBlock +
         techIndexBlock +
@@ -572,8 +543,13 @@ export async function llmShotPrompt(
   const { rules, model: defaultModel } = await seriesSystemBase();
   const model = modelOverride || defaultModel;
   const bible = await bibleContext(links.map((l) => l.entityId));
-  const knowledge = await knowledgeContext(targetModel);
   const isKling = promptFamily(targetModel) === "kling";
+  // «База правил»: выключенные записи реестра + пользовательские правила видео-промптов
+  const off = await getDisabledRuleIds();
+  const R = (id: string) => systemRuleText(id, off);
+  const site: RuleSite = isKling ? "shot_prompt_kling" : "shot_prompt_seedance";
+  const customRules = await customRulesContext(site);
+  const knowledge = off.has("dyn_knowledge") ? "" : await knowledgeContext(targetModel);
   // у каждого семейства свой шаблон: Seedance (tpl_video) и Kling (tpl_video_kling —
   // референсы <<<image_N>>>, нативный звук, своя структура шотов)
   const videoTemplate = isKling ? settings.tpl_video_kling : settings.tpl_video;
@@ -616,7 +592,10 @@ export async function llmShotPrompt(
   const refLocations = locationRows.filter((l) =>
     locEntityRefs.some((r) => r.entityId === l.id),
   );
-  const locationRefBlock = refLocations.length
+  const locationRefBlock = gateBlock(
+    "dyn_location_ref",
+    off,
+    refLocations.length
     ? "ЛОКАЦИЯ-РЕФЕРЕНС ИЗ БИБЛИИ: к группе привязана локация с приложенным фото-референсом — " +
       refLocations.map((l) => `${l.name} (element_name: "${l.elementName}")`).join(", ") +
       ". Её облик (архитектура, планировка, мебель, материалы) несёт референс, НЕ выдумывай другой " +
@@ -630,7 +609,8 @@ export async function llmShotPrompt(
       ") — как с персонажами. ОБЯЗАТЕЛЬНО включи " +
       refLocations.map((l) => l.elementName).join(", ") +
       " в reference_element_names — иначе референс не прикрепится к задаче."
-    : "";
+    : "",
+  );
 
   // ---------- стартовый кадр: упоминается в промпте ТОЛЬКО если реально прикреплён ----------
   // (инцидент: шаблон показывает строку "Use @Image1 …" в примере структуры, и модель
@@ -641,16 +621,20 @@ export async function llmShotPrompt(
   const startAnalysis = refAnalysisText(startRef?.analysis);
   const startAnchor = isKling ? "@Start" : "@Image1";
   const refFamily = isKling ? "kling" : "seedance";
-  const startFrameBlock = hasStartFrame
-    ? `СТАРТОВЫЙ КАДР: к группе прикреплён стартовый кадр — сошлись на него ровно одной строкой ` +
-      `"${startFrameLine(refFamily)}" в начале промпта и больше его не упоминай.` +
-      (startAnalysis
-        ? ` На стартовом кадре: ${startAnalysis}. ПЕРВЫЙ шот группы обязан ему строго соответствовать — ` +
-          `та же композиция, ракурс, расстановка и свет; действие продолжается ИЗ этого кадра, не ` +
-          `переигрывай его заново. Отрази это в позиции камеры и в том, что видит камера первого шота.`
-        : "")
-    : `СТАРТОВЫЙ КАДР: к этой группе стартовый кадр НЕ прикреплён — НЕ упоминай ${startAnchor}, ` +
-      `@Start, @Image1 или "starting frame" вообще, даже если шаблон выше показывает такую строку в примере.`;
+  const startFrameBlock = gateBlock(
+    "dyn_start_frame",
+    off,
+    hasStartFrame
+      ? `СТАРТОВЫЙ КАДР: к группе прикреплён стартовый кадр — сошлись на него ровно одной строкой ` +
+        `"${startFrameLine(refFamily)}" в начале промпта и больше его не упоминай.` +
+        (startAnalysis
+          ? ` На стартовом кадре: ${startAnalysis}. ПЕРВЫЙ шот группы обязан ему строго соответствовать — ` +
+            `та же композиция, ракурс, расстановка и свет; действие продолжается ИЗ этого кадра, не ` +
+            `переигрывай его заново. Отрази это в позиции камеры и в том, что видит камера первого шота.`
+          : "")
+      : `СТАРТОВЫЙ КАДР: к этой группе стартовый кадр НЕ прикреплён — НЕ упоминай ${startAnchor}, ` +
+        `@Start, @Image1 или "starting frame" вообще, даже если шаблон выше показывает такую строку в примере.`,
+  );
 
   // ---------- референсы шота: роль определяет строку-инструкцию ----------
   // приложение прикрепляет их к задаче и заменяет якоря @CompN на слоты картинок.
@@ -667,16 +651,20 @@ export async function llmShotPrompt(
     const anchor = `@Comp${i + 1}`;
     return `"${r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor)}"`;
   });
-  const compositionBlock = attachedRefs.length
-    ? "РЕФЕРЕНСЫ ШОТА (приложение заменит якоря @CompN на реальные слоты картинок при отправке): " +
-      "для КАЖДОГО добавь в начале промпта РОВНО ОДНУ строку ниже — дословно — и больше нигде его не упоминай:\n" +
-      compLines.join("\n") +
-      (hasLayoutRef
-        ? "\nLayout-референс задаёт ТОЛЬКО геометрию помещения и взаимное положение персонажей/объектов: " +
-          "зафиксируй их расстановку в GLOBAL CONTINUITY по сцене, но НЕ повторяй его ракурс и кадрирование — " +
-          "камеру каждого шота выбирай заново."
-        : "")
-    : "РЕФЕРЕНСЫ ШОТА: не приложены — НЕ упоминай @Comp, \"composition reference\" или лишние @ImageN.";
+  const compositionBlock = gateBlock(
+    "dyn_shot_refs",
+    off,
+    attachedRefs.length
+      ? "РЕФЕРЕНСЫ ШОТА (приложение заменит якоря @CompN на реальные слоты картинок при отправке): " +
+        "для КАЖДОГО добавь в начале промпта РОВНО ОДНУ строку ниже — дословно — и больше нигде его не упоминай:\n" +
+        compLines.join("\n") +
+        (hasLayoutRef
+          ? "\nLayout-референс задаёт ТОЛЬКО геометрию помещения и взаимное положение персонажей/объектов: " +
+            "зафиксируй их расстановку в GLOBAL CONTINUITY по сцене, но НЕ повторяй его ракурс и кадрирование — " +
+            "камеру каждого шота выбирай заново."
+          : "")
+      : "РЕФЕРЕНСЫ ШОТА: не приложены — НЕ упоминай @Comp, \"composition reference\" или лишние @ImageN.",
+  );
 
   // содержимое референсов (анализ vision-модели) — что реально на каждой картинке;
   // помогает точнее описать кадр, позицию камеры и «что видит камера». В сам текст
@@ -687,11 +675,15 @@ export async function llmShotPrompt(
       return a ? `@Comp${i + 1} (${r.role === "layout" ? "layout" : "composition"}) — ${a}` : "";
     })
     .filter(Boolean);
-  const refContentBlock = refContentLines.length
-    ? "СОДЕРЖИМОЕ РЕФЕРЕНСОВ ШОТА (что на каждой картинке — используй, чтобы точнее задать позицию " +
-      "камеры и что видит камера; НЕ копируй эти описания в текст промпта дословно):\n" +
-      refContentLines.join("\n")
-    : "";
+  const refContentBlock = gateBlock(
+    "dyn_shot_refs",
+    off,
+    refContentLines.length
+      ? "СОДЕРЖИМОЕ РЕФЕРЕНСОВ ШОТА (что на каждой картинке — используй, чтобы точнее задать позицию " +
+        "камеры и что видит камера; НЕ копируй эти описания в текст промпта дословно):\n" +
+        refContentLines.join("\n")
+      : "",
+  );
 
   // ---------- сюжетная сцена: непрерывность или чистый лист ----------
   // первая группа эпизода — всегда начало сцены; иначе смотрим флаг scene_start.
@@ -717,22 +709,33 @@ export async function llmShotPrompt(
     .where(eq(shots.episodeId, shot.episodeId))
     .orderBy(asc(shots.orderIndex));
   const sceneLocation = chainLocation(episodeShots, shotId);
-  const locationBlock = sceneLocation
-    ? `ЛОКАЦИЯ СЦЕНЫ (единая для всех групп этой сюжетной связки): "${sceneLocation}". ` +
-      "Используй именно её как локацию в Scene/GLOBAL CONTINUITY (переведи на английский при " +
-      "необходимости) — НЕ выдумывай другую обстановку и не меняй место действия между группами связки."
-    : "";
+  const locationBlock = gateBlock(
+    "dyn_location",
+    off,
+    sceneLocation
+      ? `ЛОКАЦИЯ СЦЕНЫ (единая для всех групп этой сюжетной связки): "${sceneLocation}". ` +
+        "Используй именно её как локацию в Scene/GLOBAL CONTINUITY (переведи на английский при " +
+        "необходимости) — НЕ выдумывай другую обстановку и не меняй место действия между группами связки."
+      : "",
+  );
   const sceneTimeWeather = chainTimeWeather(episodeShots, shotId);
-  const timeWeatherBlock = sceneTimeWeather
-    ? `ВРЕМЯ СУТОК И ПОГОДА (единые для всех групп этой сюжетной связки): "${sceneTimeWeather}". ` +
-      "Отрази их в Scene/GLOBAL CONTINUITY и в описании света/неба (переведи на английский при " +
-      "необходимости) — держи одинаковыми во всех группах связки, НЕ меняй время суток и погоду между группами."
-    : "";
+  const timeWeatherBlock = gateBlock(
+    "dyn_time_weather",
+    off,
+    sceneTimeWeather
+      ? `ВРЕМЯ СУТОК И ПОГОДА (единые для всех групп этой сюжетной связки): "${sceneTimeWeather}". ` +
+        "Отрази их в Scene/GLOBAL CONTINUITY и в описании света/неба (переведи на английский при " +
+        "необходимости) — держи одинаковыми во всех группах связки, НЕ меняй время суток и погоду между группами."
+      : "",
+  );
   // эмоциональный тон — СВОЙ у этой группы; задаёт эмоциональную окраску сцены и
   // ПЕРЕКРЫВАЕТ общий тон сериала (series_rules/series_style) для настроения этой
   // группы. Без него спокойная сцена наследовала «психологическое напряжение» серии.
   const emotionalTone = shot.emotionalTone.trim();
-  const emotionalToneBlock = emotionalTone
+  const emotionalToneBlock = gateBlock(
+    "dyn_emotional_tone",
+    off,
+    emotionalTone
     ? `ЭМОЦИОНАЛЬНЫЙ ТОН ЭТОЙ ГРУППЫ: "${emotionalTone}". Он задаёт ТОЛЬКО атмосферу и уровень ` +
       "напряжения сцены, и ТОЛЬКО в одном месте: в GLOBAL CONTINUITY зафиксируй настроение этим тоном " +
       'ОДНОЙ короткой формулировкой (напр. "calm, warm atmosphere"). НЕ создавай отдельную строку или ' +
@@ -741,7 +744,8 @@ export async function llmShotPrompt(
       "(локация, время, свет, позиции, одежда) не меняй. Если тон спокойный/тёплый/нейтральный — " +
       'атмосфера спокойная: не добавляй тревогу, саспенс, "dark / psychological thriller / tense" ' +
       "мотивы, даже если они звучат в общих правилах или визуальном стиле сериала."
-    : "";
+    : "",
+  );
 
   // ЯКОРЯ — точечные детали пользователя (синяк, цвет одежды, предмет в кадре),
   // которых нет в референсах/энтити. Это ОБЯЗАТЕЛЬНЫЕ пометки: должны появиться в
@@ -784,34 +788,17 @@ export async function llmShotPrompt(
       "погоду и одежду персонажей; действие продолжается без разрыва — состояние машины/объектов " +
       "и положение персонажей вытекает из конца предыдущей группы, без резких скачков.";
   }
+  sceneBlock = gateBlock("dyn_scene", off, sceneBlock);
 
-  // GLOBAL CONTINUITY = только инвариант сцены (одинаков у всех связанных групп);
-  // моментальное действие/движение туда НЕ пишем — оно идёт в Action шотов.
-  // Мизансцена (крупность, передний/дальний план, кто в кадре) — ПО ШОТАМ, а не
-  // глобальная константа: глобализация по-шотной позиции загоняла персонажа с
-  // крупного плана на дальний план в другом шоте (инцидент «Craig на фоне» 2026-07-13).
-  const continuityBlock =
-    "GLOBAL CONTINUITY — пиши ТОЛЬКО инварианты сцены, которые ОДИНАКОВЫ во всех связанных группах " +
-    "этой сюжетной связки и НЕ зависят от кадра: локация, время суток, погода/свет, одежда, что " +
-    "НЕЛЬЗЯ менять (атмосферу/настроение сюда НЕ вписывай из общего тона сериала — её задаёт " +
-    "эмоциональный тон группы отдельно). КАТЕГОРИЧЕСКИ НЕ пиши в GLOBAL CONTINUITY моментальное " +
-    "состояние или движение — едет / тормозит / останавливается / припаркована / куда направляется / " +
-    "что делает прямо сейчас: это Action конкретного шота.\n" +
-    "МИЗАНСЦЕНА — ПО ШОТАМ, НЕ В GLOBAL CONTINUITY. Кто именно в кадре, крупность, кто на переднем и " +
-    "кто на дальнем плане, куда смотрит — МЕНЯЕТСЯ от шота к шоту (в одном шоте крупный план одного " +
-    "персонажа, в другом — средний план другого) и пишется в СВОЙ SHOT-блок. НЕ фиксируй позицию " +
-    "персонажа в кадре как общую константу и НЕ пиши \"positions do not change between shots\" — иначе " +
-    "персонаж, снятый крупным планом в одном шоте, ошибочно оказывается на дальнем плане в другом, а " +
-    "его собеседник обращается в пустоту.\n" +
-    "Позицию в GLOBAL CONTINUITY допустимо зафиксировать ТОЛЬКО если она физически неизменна во всех " +
-    "кадрах — например жёсткая посадка в машине: ВЕРНО — \"interior of @Jacob's car, @Jacob at the " +
-    "wheel (left), @Simon in the passenger seat (right), morning, overcast\". Если же персонажи стоят/" +
-    "двигаются и каждый шот перекадрирует — единой позиции НЕТ, не выдумывай её. НЕВЕРНО (в GLOBAL " +
-    "CONTINUITY): \"the car drives away\", \"@Craig stays at the trunk in the background, positions do " +
-    "not change\". Поэтому у связанных групп GLOBAL CONTINUITY по смыслу СОВПАДАЕТ, различаются Action " +
-    "и мизансцена шотов.";
+  // GLOBAL CONTINUITY (правило prompt_continuity, инцидент «Craig на фоне» 2026-07-13)
+  // и «один SHOT = одна точка съёмки» (prompt_view_lock, инцидент эп.24) — тексты
+  // в реестре правил (rulesRegistry.ts), здесь только подстановка с учётом вкл/выкл.
+  const continuityBlock = R("prompt_continuity");
+  const viewLockBlock = R("prompt_view_lock");
 
-  const wardrobeBlock =
+  const wardrobeBlock = gateBlock(
+    "dyn_wardrobe",
+    off,
     outfits.length || faceOnly.length
       ? "ГАРДЕРОБ ГРУППЫ (жёсткий якорь одежды):\n" +
         [
@@ -825,7 +812,8 @@ export async function llmShotPrompt(
         "\nПравила гардероба: включи в промпт блок WARDROBE LOCK с этой одеждой " +
         "(дословно, на английском) и правилом «clothing must remain identical in every shot»; " +
         "не выдумывай и не меняй предметы одежды; в SHOT-блоках одежду не пересказывай."
-      : "";
+      : "",
+  );
 
   // структура шотов группы из раскадровки v2: тайминг/план/камера/действие/реплика
   let allBeats: GroupShot[] = [];
@@ -876,7 +864,7 @@ export async function llmShotPrompt(
   // приём, выключенный в библиотеке, в промпт не вплетается: закреплённый за шотом
   // id остаётся в раскадровке (включат обратно — снова заработает), но в модель
   // не уходит и в бейджах 🎥 использованных не показывается
-  const candidates = await getEnabledTechniquesByIds(attachedTechIds);
+  const candidates = off.has("dyn_techniques") ? [] : await getEnabledTechniquesByIds(attachedTechIds);
   const techLabel = new Map(candidates.map((t) => [t.id, t.title]));
   // Приём даёт ТОЛЬКО грамматику камеры (движение + оптика). Свободный текст приёма
   // НЕ вливаем: его проза (жесты/реквизит/второй человек/локация — «the hands betray
@@ -900,34 +888,24 @@ export async function llmShotPrompt(
         .join("\n")
     : "";
 
-  // Компактность: рекомендация Seedance — до 3500 символов; лишние повторы и
-  // «декоративные» запреты только съедают внимание модели. Программный блок —
-  // не зависит от правок шаблона пользователем.
-  const compactBlock =
-    "КОМПАКТНОСТЬ ПРОМПТА (обязательно):\n" +
-    "- Весь промпт — не длиннее 3500 символов. Плотно, без воды.\n" +
-    '- На персонажа ровно ОДНА identity-строка: "Use @Name as the locked identity reference." ' +
-    "(или face-only вариант из блока гардероба). Никаких тавтологий вида " +
-    '"Use @X as the locked identity for @X" и никаких повторных строк про тот же референс.\n' +
-    "- Локация, время суток, свет, атмосфера и одежда фиксируются ОДИН раз в GLOBAL CONTINUITY — " +
-    "в SHOT-блоках пиши только то, что меняется (ракурс, действие, реплика); поля Location/Lighting " +
-    "в шоте опускай, если они не изменились.\n" +
-    "- Каждый запрет — один раз. Strict rules: не более 5 строк, только специфичное для этой сцены; " +
-    "не повторяй то, что уже зафиксировано в GLOBAL CONTINUITY, WARDROBE LOCK, DIALOGUE LOCK или Framing.\n" +
-    "- Не добавляй декларации без визуального смысла и дублирующиеся эпитеты атмосферы в каждом блоке.\n" +
-    '- НЕ начинай промпт с заголовка-метки вроде "SEEDANCE 2.0 PROMPT" или "KLING 3.0 OMNI PROMPT" — ' +
-    "это название секции шаблона, а не часть промпта. Первая строка — сразу по делу.";
+  // Компактность: рекомендация Seedance — до 3500 символов (текст правила —
+  // prompt_compact в реестре, не зависит от правок шаблона пользователем).
+  const compactBlock = R("prompt_compact");
 
   // единый визуальный стиль сериала — это про КАРТИНКУ (свет/грейдинг/look), НЕ про
   // эмоцию. Вставляем ТОЛЬКО в VISUAL STYLE, ОДИН раз — не дублируем в GLOBAL
   // CONTINUITY (иначе общий «dark thriller» конфликтует со спокойным тоном группы)
-  const styleBlock = settings.series_style?.trim()
-    ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА — это про КАРТИНКУ (свет, грейдинг, реализм, цвет), НЕ про " +
-      "эмоциональное настроение. Вставь его ДОСЛОВНО, СЛОВО В СЛОВО ТОЛЬКО в блок VISUAL STYLE — " +
-      "РОВНО ОДИН раз; НЕ дублируй его в GLOBAL CONTINUITY, Performance или SHOT-блоки. Не " +
-      "перефразируй и не меняй эпитеты от версии к версии. Эмоцию и атмосферу сцены он НЕ задаёт — " +
-      `их задаёт эмоциональный тон группы (см. ниже): "${settings.series_style.trim()}".`
-    : "";
+  const styleBlock = gateBlock(
+    "dyn_style",
+    off,
+    settings.series_style?.trim()
+      ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА — это про КАРТИНКУ (свет, грейдинг, реализм, цвет), НЕ про " +
+        "эмоциональное настроение. Вставь его ДОСЛОВНО, СЛОВО В СЛОВО ТОЛЬКО в блок VISUAL STYLE — " +
+        "РОВНО ОДИН раз; НЕ дублируй его в GLOBAL CONTINUITY, Performance или SHOT-блоки. Не " +
+        "перефразируй и не меняй эпитеты от версии к версии. Эмоцию и атмосферу сцены он НЕ задаёт — " +
+        `их задаёт эмоциональный тон группы (см. ниже): "${settings.series_style.trim()}".`
+      : "",
+  );
 
   return runJson(
     {
@@ -941,7 +919,7 @@ export async function llmShotPrompt(
       // полной оплаты (база знаний может весить 10–18К символов)
       cacheableSystemPrefix: `${videoTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${viewLockBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +
@@ -955,16 +933,11 @@ export async function llmShotPrompt(
         "собственные (персонажи, локации, бренды) — латиницей по-английски; для сущностей библии " +
         "используй их element_name. Реплики в DIALOGUE LOCK — на английском (переведи, если в " +
         "исходнике они на другом языке).\n" +
-        "ИМЕНА ПЕРСОНАЖЕЙ: в тексте промпта КАЖДОЕ упоминание персонажа пиши ТОЛЬКО как его " +
-        "element_name (@Simon, @Jacob) — НИКОГДА не пиши имя персонажа обычным словом (Simon, Jacob) " +
-        "вне кавычек. Обычные имена собственные допустимы ИСКЛЮЧИТЕЛЬНО внутри реплик (в кавычках " +
-        "DIALOGUE LOCK). В reference_element_names перечисли element_name сущностей, чьи референсы " +
-        "нужно прикрепить к задаче.\n" +
-        "Идентичность персонажей несут их референсы (element/image) — в тексте промпта ссылайся на " +
-        "element_name и НЕ переписывай их внешность подробно. Описывай действие, эмоцию, свет и камеру; " +
-        "внешность из библии — только чтобы не спутать персонажей, а не для копирования в промпт.\n" +
+        [R("prompt_character_names"), R("prompt_identity_refs")].filter(Boolean).join("\n") +
+        "\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
-        '"used_technique_ids":["..."],"params":{"aspect_ratio":"9:16","duration":15}}',
+        '"used_technique_ids":["..."],"params":{"aspect_ratio":"9:16","duration":15}}' +
+        (customRules ? `\n${customRules}` : ""),
       // actionMd собирается из шотов группы — при наличии beats не дублируем его
       user:
         (singleBeat
@@ -998,22 +971,34 @@ export async function llmRevisePrompt(
   const [shot] = await db.select().from(shots).where(eq(shots.id, prev.shotId));
   const settings = await getAllSettings();
   const { rules, model } = await seriesSystemBase();
-  const knowledge = await knowledgeContext(prev.targetModel);
   // ревизия наследует шаблон семейства исходной версии (Seedance или Kling)
   const isKlingRev = promptFamily(prev.targetModel) === "kling";
+  // «База правил»: выключенные записи реестра + пользовательские правила видео-промптов
+  const off = await getDisabledRuleIds();
+  const R = (id: string) => systemRuleText(id, off);
+  const customRules = await customRulesContext("revise_prompt", isKlingRev ? "kling" : "seedance");
+  const knowledge = off.has("dyn_knowledge") ? "" : await knowledgeContext(prev.targetModel);
   const reviseTemplate = isKlingRev ? settings.tpl_video_kling : settings.tpl_video;
   // стартовый кадр: как и в llmShotPrompt — упоминать только если реально прикреплён
   const reviseShotRefs = shot
     ? await db.select().from(references).where(eq(references.shotId, shot.id))
     : [];
   const reviseAnchor = isKlingRev ? "@Start" : "@Image1";
-  const reviseStartBlock = reviseShotRefs.some((r) => r.role === "start_frame")
-    ? `СТАРТОВЫЙ КАДР: прикреплён — ссылка на него ровно одной строкой "Use ${reviseAnchor} as the locked starting frame.".`
-    : `СТАРТОВЫЙ КАДР: НЕ прикреплён — убери/не добавляй упоминания ${reviseAnchor}, @Start, @Image1 и "starting frame".`;
-  const reviseStyleBlock = settings.series_style?.trim()
-    ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА (единый, ДОСЛОВНО, не перефразируй и не меняй эпитеты между версиями): " +
-      `"${settings.series_style.trim()}". Он должен остаться в VISUAL STYLE и атмосфере GLOBAL CONTINUITY без изменений.`
-    : "";
+  const reviseStartBlock = gateBlock(
+    "dyn_start_frame",
+    off,
+    reviseShotRefs.some((r) => r.role === "start_frame")
+      ? `СТАРТОВЫЙ КАДР: прикреплён — ссылка на него ровно одной строкой "Use ${reviseAnchor} as the locked starting frame.".`
+      : `СТАРТОВЫЙ КАДР: НЕ прикреплён — убери/не добавляй упоминания ${reviseAnchor}, @Start, @Image1 и "starting frame".`,
+  );
+  const reviseStyleBlock = gateBlock(
+    "dyn_style",
+    off,
+    settings.series_style?.trim()
+      ? "ВИЗУАЛЬНЫЙ СТИЛЬ СЕРИАЛА (единый, ДОСЛОВНО, не перефразируй и не меняй эпитеты между версиями): " +
+        `"${settings.series_style.trim()}". Он должен остаться в VISUAL STYLE и атмосфере GLOBAL CONTINUITY без изменений.`
+      : "",
+  );
   return runJson(
     {
       kind: "revision",
@@ -1023,14 +1008,13 @@ export async function llmRevisePrompt(
       // база знаний в кэшируемом префиксе — как в llmShotPrompt
       cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${reviseStartBlock}\n\n${reviseStyleBlock}\n\n` +
+        `${reviseStartBlock}\n\n${R("prompt_view_lock")}\n\n${reviseStyleBlock}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
-        "сохранив работающие части. Промпт на английском, не длиннее 3500 символов, без " +
-        "дублирующихся правил и тавтологичных identity-строк (одна на персонажа). Имена персонажей " +
-        "в тексте — ТОЛЬКО как @element_name (@Simon); обычные имена собственные допустимы лишь " +
-        "внутри реплик (в кавычках).\n" +
+        "сохранив работающие части. " +
+        (R("revise_prompt_hygiene") ? `${R("revise_prompt_hygiene")}\n` : "") +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
-        '"used_technique_ids":[],"params":{"aspect_ratio":"9:16","duration":15}}',
+        '"used_technique_ids":[],"params":{"aspect_ratio":"9:16","duration":15}}' +
+        (customRules ? `\n${customRules}` : ""),
       user:
         `Текущий промпт (v${prev.version}):\n${prev.text}\n\n` +
         (prev.negativePrompt ? `Negative: ${prev.negativePrompt}\n\n` : "") +
@@ -1081,6 +1065,33 @@ async function runVisionJson<T>(call: LlmCall, schema: z.ZodType<T>): Promise<T>
     );
     return await runJson({ ...call, model: CHEAPEST_LLM }, schema);
   }
+}
+
+/**
+ * Сегментация редактируемого шаблона на отдельные правила для витрины
+ * «База правил» (/rules): дешёвая модель делит свободный текст шаблона на
+ * атомарные правила (title + text ДОСЛОВНО). Вызывается кнопкой «Обновить из
+ * шаблонов» и только для шаблонов с изменившимся хэшем (см. lib/rules.ts).
+ */
+export async function llmSegmentTemplate(templateText: string): Promise<TemplateSegmentation> {
+  const settings = await getAllSettings();
+  return runJson(
+    {
+      kind: "analysis",
+      model: settings.llm_simple_model,
+      maxTokens: 8000,
+      system:
+        "Ты разбираешь шаблон промпта на отдельные правила для каталога «База правил». " +
+        "Раздели текст на атомарные правила/инструкции: у каждого короткий заголовок (title, " +
+        "по-русски, 2–6 слов) и точный текст (text) — ДОСЛОВНО из шаблона, ничего не " +
+        "перефразируй и не сокращай. Пропускай: плейсхолдеры ({{STORY}}, {{DURATION}}, " +
+        "<<<image_N>>> и подобные), примеры структуры/формата вывода, каркасную markdown-разметку. " +
+        "Каждое содержательное требование — отдельное правило; связанные пункты одного списка " +
+        'держи вместе. Верни ТОЛЬКО JSON: {"rules":[{"title":"...","text":"..."}]}',
+      user: templateText,
+    },
+    templateSegmentationSchema,
+  );
 }
 
 /**

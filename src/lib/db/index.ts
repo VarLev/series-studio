@@ -239,6 +239,31 @@ const MIGRATIONS: string[][] = [
   // правок группы. Бэкфилла нет намеренно — для старых видео состояние группы «на
   // момент генерации» неизвестно, а подставлять им текущее было бы враньём
   [`ALTER TABLE generations ADD COLUMN IF NOT EXISTS beats_json text`],
+  // v7 — «База правил» (/rules): пользовательские правила промптинга
+  // (prompt_rules, вклеиваются в system-промпты по scope/family) и read-only
+  // витрина правил, извлечённых LLM-сегментацией из редактируемых шаблонов
+  // (template_rules, source_hash — sha256 шаблона на момент сегментации)
+  [
+    `CREATE TABLE IF NOT EXISTS prompt_rules (
+      id text PRIMARY KEY,
+      title text NOT NULL DEFAULT '',
+      text text NOT NULL,
+      scope text NOT NULL DEFAULT 'all',
+      family text NOT NULL DEFAULT 'all',
+      enabled boolean NOT NULL DEFAULT true,
+      sort_index integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS template_rules (
+      id text PRIMARY KEY,
+      template_key text NOT NULL,
+      order_index integer NOT NULL DEFAULT 0,
+      title text NOT NULL DEFAULT '',
+      text text NOT NULL,
+      source_hash text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  ],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

@@ -12,6 +12,7 @@ const TABS = [
   { href: "/settings", ru: "Настройки", en: "Settings" },
   { href: "/knowledge", ru: "База знаний", en: "Knowledge" },
   { href: "/costs", ru: "Затраты", en: "Costs" },
+  { href: "/rules", ru: "База правил", en: "Rules" },
 ];
 
 export default function SettingsTabs() {
