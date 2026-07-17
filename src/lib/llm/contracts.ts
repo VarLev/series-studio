@@ -80,8 +80,8 @@ export type InsertGroups = z.infer<typeof insertGroupsSchema>;
  * НЕ пересобирая сюжет — шлифует их, дозаполняет поля, при нехватке времени разбивает
  * шот, закрепляет приём (technique_id), уточняет локацию/погоду/тон и возвращает
  * список персонажей, кто РЕАЛЬНО в кадре. Все возвращённые шоты — основные
- * (draft:false); shots_draft оставлен для обратной совместимости, но Enhance его
- * НЕ использует (черновики берутся нетронутыми из текущей группы).
+ * (draft:false); черновики пользователя Enhance не трогает — они берутся
+ * нетронутыми из текущей группы.
  */
 export const enhanceGroupSchema = z.object({
   title: z.string().default(""),
@@ -96,9 +96,10 @@ export const enhanceGroupSchema = z.object({
   // игнорируется). enhanceGroup создаёт их в пуле эпизода и цепляет к группе.
   anchors: z.array(z.string()).default([]),
   shots: z.array(groupShotSchema).default([]),
-  // страховка: Opus иногда кладёт черновики отдельным массивом вместо
-  // draft:true внутри shots (реальный инцидент) — принимаем и такой формат,
-  // enhanceGroup сольёт их в общий список с draft:true
+  // страховка: Opus иногда кладёт часть шотов отдельным массивом вместо одного
+  // shots (реальный инцидент) — принимаем и такой формат. Промпт запрещает
+  // создавать shots_draft, поэтому всё сюда попавшее — это ОСНОВНЫЕ шоты,
+  // которые модель разложила не в тот массив: enhanceGroup дольёт их в shots.
   shots_draft: z.array(groupShotSchema).default([]),
 });
 export type EnhanceGroup = z.infer<typeof enhanceGroupSchema>;
@@ -141,11 +142,6 @@ export const shotPromptSchema = z.object({
     .default({ aspect_ratio: "9:16", duration: 15 }),
 });
 export type ShotPrompt = z.infer<typeof shotPromptSchema>;
-
-/** Этап подбора приёмов: дешёвая модель выбирает кандидатов из индекса библиотеки. */
-export const techniquePickSchema = z.object({
-  ids: z.array(z.string()).default([]),
-});
 
 /**
  * Анализ референса шота (стартовый кадр / композиция / layout) vision-моделью.

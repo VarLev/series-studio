@@ -13,6 +13,7 @@ import {
   shotEntities,
 } from "@/lib/db";
 import { getAllSettings } from "@/lib/settings";
+import { stripTimingRules } from "@/lib/templates";
 import { readFile } from "@/lib/storage";
 import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
 import { getShotAnchorTexts } from "@/lib/anchors";
@@ -158,7 +159,12 @@ export async function llmBreakdown(
   const durMin = duration?.min ?? 3;
   const durMax = duration?.max ?? 5;
   const durPhrase = durMin === durMax ? `${durMin} минут` : `${durMin}–${durMax} минут`;
-  const user = settings.tpl_breakdown
+  // выключенный «Хронометраж (формула)» снимаем и с сохранённого шаблона: там
+  // лежит вторая копия того же текста, и без этого тумблер работал вполсилы
+  const tpl = off.has("timing_rules")
+    ? stripTimingRules(settings.tpl_breakdown)
+    : settings.tpl_breakdown;
+  const user = tpl
     .replaceAll("{{STORY}}", synopsis)
     .replaceAll("[ВСТАВИТЬ ТЕКСТ]", synopsis)
     .replaceAll("{{DURATION}}", durPhrase)
@@ -444,8 +450,11 @@ export async function llmEnhanceGroup(input: {
       "в референсах, ни в описаниях энтити/гардеробе. Если да — предложи их КОРОТКО по-русски в поле " +
       "\"anchors\" (по одной детали на строку массива, 2–6 слов). Если добавлять нечего — \"anchors\": []. " +
       "НЕ дублируй то, что уже описано в шотах, референсах или гардеробе; не выдумывай сюжетных событий.\n";
-  // выключенные приёмы модель не видит вовсе — их нет в индексе
-  const all = off.has("dyn_techniques") ? [] : await listEnabledTechniques();
+  // выключенные приёмы модель не видит вовсе — ни индекса, ни уже закреплённых
+  // id в тексте шотов, ни technique_id в контракте ответа (реестр обещает
+  // «Enhance перестанет закреплять приёмы» — обещание должно быть полным)
+  const techOff = off.has("dyn_techniques");
+  const all = techOff ? [] : await listEnabledTechniques();
   const techIndexBlock = all.length
     ? "БИБЛИОТЕКА РЕЖИССЁРСКИХ ПРИЁМОВ (id | название | камера | теги | категория) — " +
       "для каждого шота выбери НЕ БОЛЕЕ ОДНОГО приёма (technique_id), только если он ПОДХОДИТ к сути " +
@@ -460,7 +469,7 @@ export async function llmEnhanceGroup(input: {
   const fmtBeat = (b: GroupShot): string =>
     `Шот ${b.order} (${b.time}): План/ракурс: ${b.framing}. Камера: ${b.camera}. ` +
     `Действие: ${b.action}.${b.dialogue ? ` Реплика: «${b.dialogue}»` : ""}` +
-    `${b.technique_id ? ` [закреплён приём: ${b.technique_id}]` : ""}`;
+    `${b.technique_id && !techOff ? ` [закреплён приём: ${b.technique_id}]` : ""}`;
   // Enhance работает ТОЛЬКО с основными шотами (Main); черновики (Draft) сюда не
   // приходят и не трогаются вовсе (замечание заказчика)
   const mainNow = input.beats.filter((b) => !b.draft);
@@ -493,7 +502,8 @@ export async function llmEnhanceGroup(input: {
         '"emotional_tone":"эмоциональный тон, напр. calm / tense","characters_in_frame":["@Simon"],' +
         '"anchors":["синяк на левой скуле","красный шарф"],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка","technique_id":"b19 или пусто",' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка",' +
+        (techOff ? "" : '"technique_id":"b19 или пусто",') +
         '"draft":false}]}\n' +
         "Все шоты в массиве shots — основные (draft:false). НЕ создавай ключей shots_draft/draft_shots/drafts " +
         "и НЕ помечай шоты draft:true.\n" +
@@ -1079,7 +1089,12 @@ export async function llmSegmentTemplate(templateText: string): Promise<Template
     {
       kind: "analysis",
       model: settings.llm_simple_model,
-      maxTokens: 8000,
+      // вывод ограничен размером шаблона (сегментация ДОСЛОВНАЯ, не пересказ), но
+      // потолок берём модельный: у Gemini в max_tokens входит и thinking, и с
+      // тесным бюджетом ответ обрывался посреди строки (Unterminated string —
+      // тот же инцидент, что у llmAnalyzeShotReference ниже). Большой шаблон
+      // пользователя иначе не пролезал вовсе
+      maxTokens: maxOutputTokens(settings.llm_simple_model),
       system:
         "Ты разбираешь шаблон промпта на отдельные правила для каталога «База правил». " +
         "Раздели текст на атомарные правила/инструкции: у каждого короткий заголовок (title, " +

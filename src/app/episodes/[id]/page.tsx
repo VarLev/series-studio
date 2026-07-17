@@ -5,7 +5,7 @@ import { getDb, episodes, generations, references, shots, shotEntities, entities
 import { getAllSettings } from "@/lib/settings";
 import { displayGroupNumbers } from "@/lib/beats";
 import { getT } from "@/lib/i18n-server";
-import { availableImageModels } from "@/lib/generation";
+import { activityFingerprint, availableImageModels } from "@/lib/generation";
 import { getFileUrls } from "@/lib/storage";
 import { thumbForResult } from "@/lib/poster";
 import Link from "next/link";
@@ -279,7 +279,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
           </div>
         }
       />
-      <GenPoller activeCount={activeGenRows.length} />
+      <GenPoller activeCount={activeGenRows.length} initialFp={await activityFingerprint()} />
       <EpisodeTabs
         episodeId={episode.id}
         initialTitle={episode.title}

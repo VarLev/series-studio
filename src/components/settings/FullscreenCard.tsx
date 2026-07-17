@@ -8,32 +8,48 @@
  * 2) Fullscreen API — работает в Android Chrome прямо из вкладки (до закрытия).
  *    iOS Safari для страниц его не поддерживает — там только путь №1.
  */
-import { useEffect, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useT } from "@/components/I18nProvider";
+
+/**
+ * Режим показа — состояние ВНЕШНЕЕ по отношению к React (matchMedia, Fullscreen
+ * API), поэтому читаем его через useSyncExternalStore, а не setState в эффекте:
+ * серверный снапшот пустой, значит SSR-разметка и первый клиентский рендер
+ * совпадают, а реальные значения приезжают сразу после гидратации.
+ * Снапшот — СТРОКА: useSyncExternalStore сравнивает по ссылке, и новый объект на
+ * каждый вызов уводил бы рендер в бесконечный цикл.
+ */
+function subscribe(onChange: () => void): () => void {
+  document.addEventListener("fullscreenchange", onChange);
+  return () => document.removeEventListener("fullscreenchange", onChange);
+}
+
+function getSnapshot(): string {
+  const standalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.matchMedia("(display-mode: fullscreen)").matches ||
+    (navigator as { standalone?: boolean }).standalone === true;
+  return [
+    standalone,
+    Boolean(document.documentElement.requestFullscreen),
+    Boolean(document.fullscreenElement),
+  ].join("|");
+}
+
+const SERVER_SNAPSHOT = "";
 
 export default function FullscreenCard() {
   const t = useT();
-  // всё определяем после маунта, чтобы SSR-разметка совпала с клиентской
-  const [state, setState] = useState<{
-    standalone: boolean;
-    canFullscreen: boolean;
-    isFullscreen: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    const compute = () => ({
-      standalone:
-        window.matchMedia("(display-mode: standalone)").matches ||
-        window.matchMedia("(display-mode: fullscreen)").matches ||
-        (navigator as { standalone?: boolean }).standalone === true,
-      canFullscreen: Boolean(document.documentElement.requestFullscreen),
-      isFullscreen: Boolean(document.fullscreenElement),
-    });
-    setState(compute());
-    const onChange = () => setState(compute());
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => SERVER_SNAPSHOT);
+  const state = useMemo(() => {
+    if (!snapshot) return null; // ещё не гидратировались
+    const [standalone, canFullscreen, isFullscreen] = snapshot.split("|");
+    return {
+      standalone: standalone === "true",
+      canFullscreen: canFullscreen === "true",
+      isFullscreen: isFullscreen === "true",
+    };
+  }, [snapshot]);
 
   // уже без браузерной полосы (PWA/fullscreen) — карточка не нужна
   if (!state || state.standalone) return null;

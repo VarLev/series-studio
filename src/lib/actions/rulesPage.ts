@@ -46,25 +46,39 @@ export async function saveUserRule(input: {
   if (!SCOPES.includes(input.scope) || !FAMILIES.includes(input.family)) {
     return { ok: false, error: "Недопустимая область действия" };
   }
-  await upsertUserRuleRow({
-    ...input,
-    // family имеет смысл только для видео-промптов
-    family: input.scope === "breakdown" ? "all" : input.family,
-  });
+  try {
+    await upsertUserRuleRow({
+      ...input,
+      // family имеет смысл только для видео-промптов
+      family: input.scope === "breakdown" ? "all" : input.family,
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
   revalidatePath("/rules");
   return { ok: true };
 }
 
-export async function toggleUserRule(id: string, enabled: boolean): Promise<void> {
+export async function toggleUserRule(id: string, enabled: boolean): Promise<Result> {
   await requireAuth();
-  await setUserRuleEnabled(id, enabled);
+  try {
+    await setUserRuleEnabled(id, enabled);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
   revalidatePath("/rules");
+  return { ok: true };
 }
 
-export async function deleteUserRule(id: string): Promise<void> {
+export async function deleteUserRule(id: string): Promise<Result> {
   await requireAuth();
-  await deleteUserRuleRow(id);
+  try {
+    await deleteUserRuleRow(id);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
   revalidatePath("/rules");
+  return { ok: true };
 }
 
 /**

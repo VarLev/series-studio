@@ -43,6 +43,28 @@ export interface UsedTechnique {
   negative: string;
 }
 
+type ResumeMarker = { families: PromptFamily[]; baseline: number; startedAt: number };
+
+/**
+ * Маркер незавершённой генерации промпта из localStorage; протухший (старше 4 мин,
+ * как таймаут фабрики) удаляем. Только для клиента — зовётся из эффекта.
+ */
+function readResumeMarker(key: string): ResumeMarker | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const m = JSON.parse(raw) as { families?: PromptFamily[]; baseline?: number; startedAt?: number };
+    if (!m?.startedAt || !m.families?.length) return null;
+    if (Date.now() - m.startedAt > 240_000) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return { families: m.families, baseline: m.baseline ?? 0, startedAt: m.startedAt };
+  } catch {
+    return null;
+  }
+}
+
 export default function PromptBlock({
   shotId,
   episodeId,
@@ -73,24 +95,8 @@ export default function PromptBlock({
   const t = useT();
   const en = t("ru", "en") === "en";
   // маркер незавершённой генерации в localStorage: переживает уход со страницы и
-  // возврат/ремаунт. Читаем ОДИН раз при монтировании (ленивый инициализатор).
+  // возврат/ремаунт. Читается ПОСЛЕ маунта (эффект возобновления ниже) — см. там
   const genKey = `pgen:${shotId}`;
-  const [resumeMarker] = useState<{ families: PromptFamily[]; baseline: number; startedAt: number } | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem(genKey);
-      if (!raw) return null;
-      const m = JSON.parse(raw) as { families?: PromptFamily[]; baseline?: number; startedAt?: number };
-      if (!m?.startedAt || !m.families?.length) return null;
-      if (Date.now() - m.startedAt > 240_000) {
-        localStorage.removeItem(genKey);
-        return null;
-      }
-      return { families: m.families, baseline: m.baseline ?? 0, startedAt: m.startedAt };
-    } catch {
-      return null;
-    }
-  });
   const [expanded, setExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   // активный трек и «открытая» версия — из общего контекста (его же читают
@@ -106,12 +112,10 @@ export default function PromptBlock({
   );
   const [error, setError] = useState("");
   // своя машина состояний вместо useTransition: нужен таймер и поллинг-подхват
-  // результата, если ответ долгого запроса потеряется в туннеле. При возобновлении
-  // сразу показываем «идёт генерация».
-  const [generating, setGenerating] = useState(Boolean(resumeMarker));
-  const [elapsed, setElapsed] = useState(() =>
-    resumeMarker ? Math.floor((Date.now() - resumeMarker.startedAt) / 1000) : 0,
-  );
+  // результата, если ответ долгого запроса потеряется в туннеле. Стартуем всегда с
+  // «не генерируется» — как в SSR-разметке; возобновление поднимет флаг после маунта.
+  const [generating, setGenerating] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const timers = useRef<{
     tick?: ReturnType<typeof setInterval>;
     poll?: ReturnType<typeof setInterval>;
@@ -276,15 +280,26 @@ export default function PromptBlock({
       });
   }
 
-  // Возврат на страницу во время генерации: маркер уже прочитан в resumeMarker
-  // (ленивый инициализатор), здесь только запускаем слежение — без прямых setState
-  // в теле эффекта (generating/elapsed/family уже проставлены из маркера).
+  // Возврат на страницу во время генерации: подхватываем маркер и возобновляем
+  // слежение. localStorage читаем ЗДЕСЬ, после гидратации, а не ленивым
+  // инициализатором useState: на сервере его нет, поэтому маркер правил первым
+  // клиентским рендером (generating, elapsed) и расходился с SSR-разметкой —
+  // перезагрузка во время генерации ломала гидратацию.
+  //
+  /* eslint-disable react-hooks/set-state-in-effect -- разовая синхронизация с
+     ВНЕШНИМ хранилищем (localStorage) после маунта: каскада нет (deps пустые,
+     эффект отрабатывает один раз), а альтернатива — читать маркер в инициализаторе
+     useState — и есть тот самый баг гидратации, который мы здесь чиним. */
   useEffect(() => {
-    if (!resumeMarker) return;
-    startWatch(resumeMarker.families.length, resumeMarker.baseline, resumeMarker.startedAt);
+    const m = readResumeMarker(genKey);
+    if (!m) return cleanupTimers;
+    setGenerating(true);
+    setElapsed(Math.floor((Date.now() - m.startedAt) / 1000));
+    startWatch(m.families.length, m.baseline, m.startedAt);
     return cleanupTimers;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function copy() {
     if (!current) return;

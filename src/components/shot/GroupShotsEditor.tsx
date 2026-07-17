@@ -200,6 +200,8 @@ export default function GroupShotsEditor({
   const [beats, setBeats] = useState<GroupShot[]>(initialBeats);
   const [editing, setEditing] = useState<Set<number>>(new Set());
   const [dirty, setDirty] = useState(false);
+  // счётчик неудачных авто-повторов сохранения — двигает deps эффекта-ретрая
+  const [retry, setRetry] = useState(0);
   const [feedback, setFeedback] = useState("");
   // маркер идущего реворка — переживает уход со страницы и ремаунт (как pgen в
   // PromptBlock): на возврате поллинг возобновляется и результат долетает
@@ -458,6 +460,7 @@ export default function GroupShotsEditor({
     try {
       await updateGroupBeats(shotId, next);
       setDirty(false);
+      setRetry(0); // связь вернулась — следующий сбой снова начинает с короткой паузы
       if (!silent) toast(t("Шоты сохранены", "Shots saved"));
       return true;
     } catch (err) {
@@ -479,15 +482,23 @@ export default function GroupShotsEditor({
     });
   }
 
-  // самовосстановление автосейва вместо кнопки «Сохранить шоты»: если правки
+  // Самовосстановление автосейва вместо кнопки «Сохранить шоты»: если правки
   // остались несохранёнными (обрыв туннеля) и ни одна карточка не открыта на
   // редактирование — тихо повторяем сохранение, пока не пройдёт.
+  //
+  // retry в deps обязателен: провал зовёт setDirty(true), но dirty уже true —
+  // состояние не меняется, deps те же, эффект не перезапускается. Без счётчика
+  // «повторяем, пока не пройдёт» повторяло ровно ОДИН раз. Пауза растёт до 40 с,
+  // чтобы наглухо отвергнутое сохранение не долбило сервер каждые 2.5 с.
   useEffect(() => {
     if (!dirty || editing.size > 0 || saving) return;
-    const id = setTimeout(() => void persistNow(beats, true), 2500);
+    const delay = Math.min(2500 * 2 ** Math.min(retry, 4), 40_000);
+    const id = setTimeout(async () => {
+      if (!(await persistNow(beats, true))) setRetry((n) => n + 1);
+    }, delay);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, editing, saving, beats]);
+  }, [dirty, editing, saving, beats, retry]);
 
   function toggleEdit(i: number) {
     const closing = editing.has(i); // ✓ на открытой карточке = «готово»

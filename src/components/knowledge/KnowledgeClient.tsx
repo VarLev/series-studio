@@ -251,6 +251,9 @@ export default function KnowledgeClient({ docs }: { docs: KnowledgeDocItem[] }) 
                     tags: selected.tags,
                     contentMd: selected.contentMd,
                   });
+                  // как в TechniquesLibrary: снимок под view-шитом устарел в момент
+                  // сохранения, и без сброса шит переоткрывался со СТАРЫМ текстом
+                  setSelected(null);
                 }}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-default)] text-[11px] font-semibold text-t200 hover:bg-ink-500"
               >

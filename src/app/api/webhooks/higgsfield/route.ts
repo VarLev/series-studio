@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { secretEquals } from "@/lib/auth";
 import { pollActiveGenerations } from "@/lib/generation";
 
 export const maxDuration = 60;
@@ -10,7 +11,9 @@ export const maxDuration = 60;
  */
 export async function POST(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.nextUrl.searchParams.get("secret") !== secret) {
+  // сравнение постоянного времени: обычный !== отвечает тем быстрее, чем раньше
+  // разошлись строки, и по времени ответа секрет добирается посимвольно
+  if (!secret || !secretEquals(req.nextUrl.searchParams.get("secret") ?? "", secret)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const result = await pollActiveGenerations();

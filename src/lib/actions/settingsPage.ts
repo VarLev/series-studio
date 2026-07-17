@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb, settings } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
-import { setSetting } from "@/lib/settings";
+import { DEFAULT_SETTINGS, setSetting } from "@/lib/settings";
 import { upsertTechniqueRow, deleteTechniqueRow, deleteAllTechniqueRows } from "@/lib/director";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -21,14 +21,20 @@ export async function saveTemplate(
   return { ok: true };
 }
 
-/** Сбросить шаблон к стандартному (удалить переопределение). */
+/**
+ * Сбросить шаблон к стандартному (удалить переопределение). Возвращает сам
+ * стандартный текст: редактор — контролируемый инпут со своим состоянием, и без
+ * этого ему было нечем заменить содержимое (подставлял старый кастомный текст из
+ * замыкания, а стандартный появлялся только после ремаунта страницы).
+ */
 export async function resetTemplate(
   key: "tpl_breakdown" | "tpl_storyboard" | "tpl_video" | "tpl_video_kling",
-): Promise<void> {
+): Promise<string> {
   await requireAuth();
   const db = await getDb();
   await db.delete(settings).where(eq(settings.key, key));
   revalidatePath("/settings");
+  return DEFAULT_SETTINGS[key];
 }
 
 export async function saveTechnique(input: {
@@ -38,6 +44,10 @@ export async function saveTechnique(input: {
   prompt: string;
   negative: string;
   camera?: string;
+  // lens/lighting редактор обязан присылать вместе с остальным: без них правка
+  // карточки затирала оптику и свет в пустую строку (lens уходит в промпт шота)
+  lens?: string;
+  lighting?: string;
   tags?: string;
 }): Promise<Result> {
   await requireAuth();

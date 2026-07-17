@@ -51,13 +51,15 @@ function channelLabel(channel: LogRowView["channel"]): string {
   return "LLM";
 }
 
-function fmtTime(iso: string): string {
+// Локаль ПИНИМ языком интерфейса (как QueueList): с локалью рантайма по умолчанию
+// сервер и браузер форматировали список по-разному — гидратация расходилась.
+function fmtTime(iso: string, locale: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+function fmtDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, { day: "2-digit", month: "2-digit" });
 }
 
 function fmtDuration(ms: number): string {
@@ -320,7 +322,9 @@ export default function ConsoleClient({
                   </span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-1">
-                  <span className="font-mono text-[9px] text-t400">{fmtTime(r.createdAt)}</span>
+                  <span className="font-mono text-[9px] text-t400">
+                    {fmtTime(r.createdAt, t("ru", "en"))}
+                  </span>
                   <span
                     className="h-2 w-2 rounded-full"
                     style={{ background: r.status === "error" ? "var(--danger)" : "var(--success)" }}
@@ -345,7 +349,7 @@ export default function ConsoleClient({
               {[
                 selected.provider,
                 selected.kind,
-                `${fmtDate(selected.createdAt)} ${fmtTime(selected.createdAt)}`,
+                `${fmtDate(selected.createdAt, t("ru", "en"))} ${fmtTime(selected.createdAt, t("ru", "en"))}`,
                 fmtDuration(selected.durationMs),
                 selected.inputTokens || selected.outputTokens
                   ? `${selected.inputTokens}→${selected.outputTokens} tok`

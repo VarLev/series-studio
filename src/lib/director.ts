@@ -149,15 +149,18 @@ export async function upsertTechniqueRow(input: {
     })
     .onConflictDoUpdate({
       target: techniques.id,
+      // при ПРАВКЕ не пришедшее поле сохраняем, а не гасим в "": редактор, не
+      // знающий про поле, иначе стирал бы его на каждом сохранении (так пропадали
+      // lens/lighting). Пустая строка от редактора — по-прежнему очистка.
       set: {
         title: input.title,
         category: input.category,
-        camera: input.camera ?? "",
-        lens: input.lens ?? "",
-        lighting: input.lighting ?? "",
-        tags: input.tags ?? "",
         prompt: input.prompt,
         negative: input.negative,
+        ...(input.camera !== undefined ? { camera: input.camera } : {}),
+        ...(input.lens !== undefined ? { lens: input.lens } : {}),
+        ...(input.lighting !== undefined ? { lighting: input.lighting } : {}),
+        ...(input.tags !== undefined ? { tags: input.tags } : {}),
       },
     });
   return id;

@@ -86,8 +86,10 @@ function TemplateEditor({
             </button>
             <ConfirmButton
               action={async () => {
-                await resetTemplate(settingKey);
-                setValue(initial); // сервер отдаст стандартный после refresh
+                // стандартный текст берём из ответа экшена: initial — это старый
+                // кастомный шаблон из замыкания, и подстановка его же выглядела
+                // как «сброс ничего не сделал» до перезагрузки страницы
+                setValue(await resetTemplate(settingKey));
               }}
               label={t("Сбросить", "Reset")}
               confirmLabel={t("Вернуть стандартный?", "Restore the default?")}
@@ -156,6 +158,10 @@ function HiggsfieldConnect({ connected }: { connected: boolean }) {
             />
           </>
         ) : (
+          // не <Link>: это не страница, а route handler, который отдаёт 302 на
+          // домен провайдера — нужен полный переход, клиентская навигация Next
+          // такой редирект не выполнит
+          // eslint-disable-next-line @next/next/no-html-link-for-pages
           <a
             href="/api/higgsfield/oauth/start"
             className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400"
@@ -238,6 +244,8 @@ function KlingConnect({ connected }: { connected: boolean }) {
             />
           </>
         ) : (
+          // не <Link>: route handler с 302 на домен провайдера (см. Higgsfield выше)
+          // eslint-disable-next-line @next/next/no-html-link-for-pages
           <a
             href="/api/kling/oauth/start"
             className="flex min-h-11 flex-1 items-center justify-center rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400"

@@ -18,6 +18,7 @@ import { ensureShotRefsAnalyzed } from "@/lib/refs";
 import { reconcileShotPromptRefs } from "@/lib/refDirectives";
 import { buildEntityLinkIndex, linkGroupEntities } from "@/lib/entityLink";
 import { listEnabledTechniques } from "@/lib/director";
+import { getDisabledRuleIds } from "@/lib/rules";
 import { stripAt } from "@/lib/entityName";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
 import { z } from "zod";
@@ -302,18 +303,32 @@ export async function enhanceGroup(
       sceneContext,
       anchors: existingAnchors,
     });
-    // Enhance только улучшает Main: все возвращённые шоты — основные (draft:false),
-    // shots_draft игнорируем полностью (черновиков Enhance не создаёт)
-    const improvedMain: GroupShot[] = res.shots.map((s) => ({ ...s, draft: false }));
+    // Enhance только улучшает Main: все возвращённые шоты — основные (draft:false).
+    // shots_draft — не черновики (создавать их промпт запрещает), а те же основные
+    // шоты, разложенные моделью не в тот массив: доливаем, иначе теряются молча
+    const improvedMain: GroupShot[] = [...res.shots, ...res.shots_draft].map((s) => ({
+      ...s,
+      draft: false,
+    }));
     if (!improvedMain.length) {
       return { ok: false, error: "Модель не вернула ни одного основного шота" };
     }
 
-    // приёмы: оставляем только существующие и ВКЛЮЧЁННЫЕ id, максимум 1 на шот
-    const knownTech = new Set((await listEnabledTechniques()).map((t) => t.id));
+    // Приёмы: оставляем только существующие и ВКЛЮЧЁННЫЕ id, максимум 1 на шот.
+    // При выключенном блоке «Режиссёрские приёмы» (/rules) модель приёмов не видит и
+    // technique_id не возвращает — но реестр обещает лишь «не попадут в промпт», а не
+    // «сотрутся»: уже закреплённое переносим с текущего шота того же порядка, иначе
+    // выключение блока молча вычищало бы закрепления пользователя при первом Enhance.
+    const techOff = (await getDisabledRuleIds()).has("dyn_techniques");
+    const keptTech = new Map(mainCurrent.map((b) => [b.order, b.technique_id || ""]));
+    const knownTech = new Set(techOff ? [] : (await listEnabledTechniques()).map((t) => t.id));
     const cleanMain = improvedMain.map((s) => ({
       ...s,
-      technique_id: s.technique_id && knownTech.has(s.technique_id) ? s.technique_id : "",
+      technique_id: techOff
+        ? keptTech.get(s.order) ?? ""
+        : s.technique_id && knownTech.has(s.technique_id)
+          ? s.technique_id
+          : "",
     }));
     // объединяем улучшенные основные с НЕТРОНУТЫМИ черновиками пользователя
     const cleanShots = [...cleanMain, ...draftCurrent];

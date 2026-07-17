@@ -73,16 +73,23 @@ function UsageBadges({ usedIn }: { usedIn: RuleSite[] }) {
   );
 }
 
-/** Тумблер вкл/выкл: оптимистичный, с server action. */
+type ActionResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Тумблер вкл/выкл: оптимистичный, с server action. Провал ОБЯЗАН вернуться
+ * тостом и откатом: молча отброшенный {ok:false} выглядел как успех, а
+ * незанулённое оптимистичное значение залипало в непрожатом состоянии.
+ */
 function Toggle({
   enabled,
   onChange,
   disabled,
 }: {
   enabled: boolean;
-  onChange: (v: boolean) => Promise<void>;
+  onChange: (v: boolean) => Promise<ActionResult>;
   disabled?: boolean;
 }) {
+  const t = useT();
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
   const [pending, startTransition] = useTransition();
   const value = optimistic ?? enabled;
@@ -96,8 +103,14 @@ function Toggle({
         const next = !value;
         setOptimistic(next);
         startTransition(async () => {
-          await onChange(next);
-          setOptimistic(null);
+          try {
+            const res = await onChange(next);
+            if (!res.ok) toast(res.error || t("Ошибка", "Error"));
+          } catch (err) {
+            toast(err instanceof Error ? err.message : t("Ошибка", "Error"));
+          } finally {
+            setOptimistic(null);
+          }
         });
       }}
       className="relative h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-50"
@@ -130,6 +143,8 @@ export default function RulesClient({
   const disabled = new Set(disabledIds);
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<UserRuleCard | null>(null);
+  // enabled на момент открытия шита: по нему видно, трогал ли пользователь чекбокс
+  const [openedEnabled, setOpenedEnabled] = useState<boolean | null>(null);
   const [pending, startTransition] = useTransition();
   const [refreshing, startRefresh] = useTransition();
 
@@ -144,18 +159,30 @@ export default function RulesClient({
 
   function openNew() {
     setDraft({ id: "", title: "", text: "", scope: "all", family: "all", enabled: true });
+    setOpenedEnabled(true);
+  }
+
+  function openEdit(r: UserRuleCard) {
+    setDraft({ ...r });
+    setOpenedEnabled(r.enabled);
   }
 
   function submitDraft() {
     if (!draft) return;
     startTransition(async () => {
+      const current = draft.id ? userRules.find((x) => x.id === draft.id) : undefined;
+      // чекбокс в шите не трогали → пишем АКТУАЛЬНОЕ значение из пропа, а не своё:
+      // draft — снимок на момент открытия, и тумблер в списке мог переключить
+      // правило уже после него (иначе сохранение молча воскрешало выключенное)
+      const enabled =
+        current && draft.enabled === openedEnabled ? current.enabled : draft.enabled;
       const res = await saveUserRule({
         id: draft.id || undefined,
         title: draft.title,
         text: draft.text,
         scope: draft.scope as "all" | "breakdown" | "video_prompt",
         family: draft.family as "all" | "seedance" | "kling",
-        enabled: draft.enabled,
+        enabled,
       });
       if (res.ok) {
         toast(draft.id ? t("Правило обновлено", "Rule updated") : t("Правило добавлено", "Rule added"));
@@ -210,7 +237,7 @@ export default function RulesClient({
             key={r.id}
             className="flex items-center gap-2.5 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5"
           >
-            <button onClick={() => setDraft({ ...r })} className="min-w-0 flex-1 text-left">
+            <button onClick={() => openEdit(r)} className="min-w-0 flex-1 text-left">
               <span className={`block truncate text-[12.5px] font-medium ${r.enabled ? "text-t100" : "text-t400 line-through"}`}>
                 {r.title || r.text.slice(0, 60)}
               </span>
@@ -253,7 +280,7 @@ export default function RulesClient({
                     <UsageBadges usedIn={r.usedIn} />
                   </span>
                 </button>
-                <Toggle enabled={on} onChange={(v) => toggleRuleState(r.id, v).then(() => undefined)} />
+                <Toggle enabled={on} onChange={(v) => toggleRuleState(r.id, v)} />
               </div>
               {open && (
                 <pre className="max-h-80 overflow-auto whitespace-pre-wrap border-t border-[var(--border-subtle)] bg-ink-800 p-3 font-mono text-[10px] leading-relaxed text-t200">
@@ -294,7 +321,7 @@ export default function RulesClient({
                   <UsageBadges usedIn={b.usedIn} />
                 </span>
               </div>
-              <Toggle enabled={on} onChange={(v) => toggleRuleState(b.id, v).then(() => undefined)} />
+              <Toggle enabled={on} onChange={(v) => toggleRuleState(b.id, v)} />
             </div>
           );
         })}
@@ -446,9 +473,12 @@ export default function RulesClient({
             {draft.id && (
               <ConfirmButton
                 action={async () => {
-                  await deleteUserRule(draft.id);
-                  setDraft(null);
-                  router.refresh();
+                  const res = await deleteUserRule(draft.id);
+                  if (res.ok) {
+                    setDraft(null);
+                    router.refresh();
+                  } else toast(res.error || t("Ошибка", "Error"));
+                  return res; // ConfirmButton не должен рапортовать об успехе на провале
                 }}
                 label={t("Удалить правило", "Delete rule")}
                 confirmLabel={t("Точно удалить правило?", "Really delete this rule?")}

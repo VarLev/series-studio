@@ -264,6 +264,31 @@ const MIGRATIONS: string[][] = [
       created_at timestamptz NOT NULL DEFAULT now()
     )`,
   ],
+  // v8 — версия промпта шота уникальна в пределах шота. Раньше её чеканили двумя
+  // запросами (SELECT max + INSERT): параллельные генерации на одном шоте (30–200 с,
+  // несколько триггеров) читали одинаковый max и создавали дубли версий, ломая
+  // version-based поллеры. Перед индексом расшиваем уже накопленные дубли: самый
+  // ранний по времени остаётся на своей версии, остальные уезжают в хвост нумерации
+  // СВОЕГО шота (номера версий — порядок, ссылок по ним нет: parent_id смотрит на id)
+  [
+    `WITH d AS (
+       SELECT id, shot_id, version,
+              row_number() OVER (PARTITION BY shot_id, version ORDER BY created_at, id) AS rn
+       FROM prompts
+     ),
+     extra AS (
+       SELECT id, shot_id, row_number() OVER (PARTITION BY shot_id ORDER BY version, id) AS seq
+       FROM d WHERE rn > 1
+     ),
+     mx AS (
+       SELECT shot_id, max(version) AS mv FROM prompts GROUP BY shot_id
+     )
+     UPDATE prompts p
+     SET version = mx.mv + extra.seq
+     FROM extra JOIN mx ON mx.shot_id = extra.shot_id
+     WHERE p.id = extra.id`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS prompts_shot_version_idx ON prompts (shot_id, version)`,
+  ],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

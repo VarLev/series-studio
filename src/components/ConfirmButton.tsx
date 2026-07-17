@@ -48,7 +48,10 @@ export default function ConfirmButton({
     // action обязан сам ревалидировать текущую страницу (revalidatePath) —
     // обновлённый экран приезжает в том же ответе, без второго круга по сети
     startTransition(async () => {
-      await action();
+      const res = await action();
+      // action вправе вернуть Result: на {ok:false} он уже показал свой тост —
+      // рапортовать поверх него об успехе нельзя
+      if (res && typeof res === "object" && "ok" in res && res.ok === false) return;
       if (doneToast) toast(doneToast);
     });
   }

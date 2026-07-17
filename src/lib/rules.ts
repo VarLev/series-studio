@@ -8,8 +8,8 @@
  */
 import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
-import { getDb, promptRules, templateRules } from "@/lib/db";
-import { getAllSettings, getSetting, setSetting } from "@/lib/settings";
+import { getDb, promptRules, settings, templateRules } from "@/lib/db";
+import { getAllSettings } from "@/lib/settings";
 import { ALL_TOGGLEABLE_IDS, type RuleSite } from "@/lib/llm/rulesRegistry";
 
 // ---------- вкл/выкл записей реестра (системные правила + динамические блоки) ----------
@@ -26,21 +26,40 @@ export async function getDisabledRuleIds(): Promise<Set<string>> {
   return new Set();
 }
 
-/** Включить/выключить запись реестра. Неизвестные id отвергаются. */
+/**
+ * Включить/выключить запись реестра. Неизвестные id отвергаются.
+ *
+ * Весь цикл «прочитал список → поправил → записал» идёт ОДНОЙ транзакцией с
+ * блокировкой строки: без неё два таба, гасящие РАЗНЫЕ правила, читали один и тот
+ * же массив и последний писал поверх — чужой тумблер молча воскресал.
+ */
 export async function setRuleEnabled(id: string, enabled: boolean): Promise<void> {
   if (!ALL_TOGGLEABLE_IDS.has(id)) throw new Error(`Неизвестное правило: ${id}`);
-  // читаем напрямую (getSetting), а не через кэш getAllSettings — внутри одного
-  // запроса могло быть уже изменённое значение
-  const raw = await getSetting("rules_disabled");
-  let list: string[] = [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) list = parsed.filter((v): v is string => typeof v === "string");
-  } catch {}
-  const set = new Set(list);
-  if (enabled) set.delete(id);
-  else set.add(id);
-  await setSetting("rules_disabled", JSON.stringify([...set]));
+  const db = await getDb();
+  await db.transaction(async (tx) => {
+    // строку сначала гарантируем: на чистой БД ключа нет и блокировать нечего
+    await tx
+      .insert(settings)
+      .values({ key: "rules_disabled", value: "[]" })
+      .onConflictDoNothing();
+    const [row] = await tx
+      .select()
+      .from(settings)
+      .where(eq(settings.key, "rules_disabled"))
+      .for("update");
+    let list: string[] = [];
+    try {
+      const parsed = JSON.parse(row?.value ?? "[]");
+      if (Array.isArray(parsed)) list = parsed.filter((v): v is string => typeof v === "string");
+    } catch {}
+    const set = new Set(list);
+    if (enabled) set.delete(id);
+    else set.add(id);
+    await tx
+      .update(settings)
+      .set({ value: JSON.stringify([...set]) })
+      .where(eq(settings.key, "rules_disabled"));
+  });
 }
 
 // ---------- пользовательские правила (prompt_rules) ----------
@@ -194,8 +213,22 @@ export async function refreshTemplateRulesForKey(
       text: r.text,
       sourceHash: hash,
     }));
-  // заменяем витрину целиком: сначала успешная сегментация, потом delete+insert
-  await db.delete(templateRules).where(eq(templateRules.templateKey, key));
-  if (rows.length) await db.insert(templateRules).values(rows);
-  return { skipped: false, count: rows.length };
+  // Заменяем витрину целиком: сначала успешная сегментация, потом delete+insert —
+  // и то и другое ОДНОЙ транзакцией. Порознь падение между ними теряло правила
+  // шаблона насовсем, а два параллельных refresh задваивали строки (после чего
+  // хэши совпадали и «нет изменений» держалось до следующей правки шаблона).
+  return db.transaction(async (tx) => {
+    const fresh = await tx
+      .select()
+      .from(templateRules)
+      .where(eq(templateRules.templateKey, key))
+      .for("update");
+    // пока ходили в модель, соседний refresh мог разложить ТОТ ЖЕ текст — не дублим
+    if (fresh.length && fresh.every((r) => r.sourceHash === hash)) {
+      return { skipped: true, count: fresh.length };
+    }
+    await tx.delete(templateRules).where(eq(templateRules.templateKey, key));
+    if (rows.length) await tx.insert(templateRules).values(rows);
+    return { skipped: false, count: rows.length };
+  });
 }

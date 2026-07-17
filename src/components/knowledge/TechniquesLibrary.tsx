@@ -106,6 +106,8 @@ export default function TechniquesLibrary({
         prompt: draft.prompt,
         negative: draft.negative,
         camera: draft.camera,
+        lens: draft.lens,
+        lighting: draft.lighting,
         tags: draft.tags,
       });
       if (res.ok) {
@@ -341,6 +343,20 @@ export default function TechniquesLibrary({
                 value={draft.camera}
                 onChange={(e) => setDraft({ ...draft, camera: e.target.value })}
                 placeholder={t("Камера (напр. Steadicam)", "Camera (e.g. Steadicam)")}
+                className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
+              />
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={draft.lens}
+                onChange={(e) => setDraft({ ...draft, lens: e.target.value })}
+                placeholder={t("Оптика (напр. 35mm)", "Lens (e.g. 35mm)")}
+                className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
+              />
+              <input
+                value={draft.lighting}
+                onChange={(e) => setDraft({ ...draft, lighting: e.target.value })}
+                placeholder={t("Свет (напр. low-key)", "Lighting (e.g. low-key)")}
                 className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 text-[11.5px] text-t200 outline-none focus:border-[var(--border-strong)]"
               />
             </div>

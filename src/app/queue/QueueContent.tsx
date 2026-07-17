@@ -5,6 +5,7 @@ import { getDb, episodes, generations, shots } from "@/lib/db";
 import { EmptyState } from "@/components/ui";
 import { getT } from "@/lib/i18n-server";
 import { safeParse } from "@/lib/params";
+import { activityFingerprint } from "@/lib/generation";
 import GenPoller from "@/components/GenPoller";
 import QueueList from "@/components/queue/QueueList";
 
@@ -84,7 +85,7 @@ export default async function QueueContent() {
 
   return (
     <>
-      <GenPoller activeCount={active.length} />
+      <GenPoller activeCount={active.length} initialFp={await activityFingerprint()} />
       <div className="flex flex-col gap-3 p-4 pb-10">
         <div className="section-label">{t("Активные", "Active")} · {active.length}</div>
         {active.length ? (

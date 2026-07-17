@@ -12,7 +12,7 @@ import {
 } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { getAllSettings } from "@/lib/settings";
-import { getCatalog, availableImageModels } from "@/lib/generation";
+import { activityFingerprint, getCatalog, availableImageModels } from "@/lib/generation";
 import { getTechniquesByIds, listEnabledTechniques } from "@/lib/director";
 import type { GroupShot } from "@/lib/llm/contracts";
 import { stripAt } from "@/lib/entityName";
@@ -411,7 +411,7 @@ export default async function ShotPage(ctx: {
     // для серии и при переключении групп не перерисовываются. Здесь — только
     // деталь текущей группы.
     <PromptTrackProvider initialFamily={initialPromptFamily}>
-      <GenPoller activeCount={activeCount} />
+      <GenPoller activeCount={activeCount} initialFp={await activityFingerprint()} />
 
       {/* detail (на десктопе справа резервируем место под панель действий) */}
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32 lg:pb-6 lg:pr-[212px]">

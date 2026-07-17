@@ -6,13 +6,24 @@ import { useRouter } from "next/navigation";
 /**
  * Клиентский поллинг статусов (TZ M4а): пока на экране есть активные задачи,
  * раз в ~6 секунд дергаем сервер и обновляем данные страницы.
+ *
+ * initialFp — отпечаток состояния на момент РЕНДЕРА страницы. Он и есть базлайн:
+ * без него первый тик запоминал свежий отпечаток как исходный, и статус, который
+ * успел проставить вебхук/крон/соседний таб между рендером и первым тиком, уже
+ * никогда не приводил к рефрешу — страница навсегда залипала на «генерируется».
  */
-export default function GenPoller({ activeCount }: { activeCount: number }) {
+export default function GenPoller({
+  activeCount,
+  initialFp,
+}: {
+  activeCount: number;
+  initialFp?: string;
+}) {
   const router = useRouter();
   const busy = useRef(false);
   // последний отпечаток состояния задач: рефрешим тяжёлую RSC-страницу (полный
   // пейлоад через туннель) ТОЛЬКО когда он сменился, а не безусловно каждый тик
-  const lastFp = useRef<string | null>(null);
+  const lastFp = useRef<string | null>(initialFp ?? null);
 
   useEffect(() => {
     if (activeCount <= 0) return;
@@ -34,10 +45,10 @@ export default function GenPoller({ activeCount }: { activeCount: number }) {
         const fp = data?.fp;
         if (typeof fp === "string") {
           // Рефреш в двух случаях. (1) poll сам что-то записал (updated > 0) — это
-          // покрывает и первый тик (приземление внутри первого POST иначе пряталось
-          // бы за только что запомненным fp — страница залипала бы на «генерируется»),
-          // и _poll-ошибки связи, которых в отпечатке нет (бейдж «нет связи» должен
-          // появляться). (2) отпечаток сменился — изменения, случившиеся вне poll.
+          // покрывает и _poll-ошибки связи, которых в отпечатке нет (бейдж «нет
+          // связи» должен появляться). (2) отпечаток разошёлся с базлайном — любые
+          // изменения помимо poll, включая пришедшие ДО первого тика (базлайн взят
+          // на рендере страницы, см. initialFp).
           const changed =
             (data?.updated ?? 0) > 0 || (lastFp.current !== null && fp !== lastFp.current);
           if (changed) router.refresh();

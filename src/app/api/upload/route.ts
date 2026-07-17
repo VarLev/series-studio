@@ -14,6 +14,33 @@ export const maxDuration = 60;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 
+// Потолок размера: тело целиком лежит в памяти (formData + arrayBuffer), поэтому
+// без лимита один большой файл кладёт процесс. Референс — картинка с телефона,
+// результат — ролик на 5–15 секунд; запас взят с большим зазором к обоим.
+const MAX_BYTES: Record<string, number> = { reference: 20 * 1024 * 1024, result: 200 * 1024 * 1024 };
+
+/**
+ * Тип файла по СИГНАТУРЕ, а не по заголовку от клиента: form-data несёт тот
+ * content-type, который прислали, и «image/png» с чем угодно внутри проходил
+ * насквозь до хранилища. Возвращаем null, если сигнатура не опознана.
+ */
+function sniffType(buf: Buffer): string | null {
+  const starts = (...bytes: number[]) => bytes.every((b, i) => buf[i] === b);
+  if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (starts(0x47, 0x49, 0x46, 0x38)) return "image/gif";
+  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  if (buf.length > 12 && buf.toString("ascii", 4, 8) === "ftyp") {
+    const brand = buf.toString("ascii", 8, 12);
+    if (brand.startsWith("qt")) return "video/quicktime";
+    return "video/mp4"; // isom/mp42/avc1/M4V… — всё это mp4-семейство
+  }
+  if (starts(0x1a, 0x45, 0xdf, 0xa3)) return "video/webm"; // EBML (webm/mkv)
+  return null;
+}
+
 function extFor(type: string): string {
   const map: Record<string, string> = {
     "image/jpeg": ".jpg",
@@ -46,12 +73,28 @@ export async function POST(req: NextRequest) {
   if (!allowed.includes(file.type)) {
     return NextResponse.json({ error: `Неподдерживаемый тип файла: ${file.type}` }, { status: 400 });
   }
+  // размер проверяем ДО чтения тела в память
+  const limit = MAX_BYTES[kind === "result" ? "result" : "reference"];
+  if (file.size > limit) {
+    return NextResponse.json(
+      { error: `Файл больше ${Math.round(limit / 1024 / 1024)} МБ` },
+      { status: 413 },
+    );
+  }
   const rawBuffer = Buffer.from(await file.arrayBuffer());
+  // тип берём по сигнатуре: заголовку от клиента верить нельзя
+  const sniffed = sniffType(rawBuffer);
+  if (!sniffed || !allowed.includes(sniffed)) {
+    return NextResponse.json(
+      { error: `Содержимое файла не похоже на ${kind === "result" ? "видео/картинку" : "картинку"}` },
+      { status: 400 },
+    );
+  }
   // крупные изображения ужимаем без видимой потери качества (EXIF-поворот,
   // длинная сторона ≤ 2048, пережатие) — видео и GIF проходят как есть
-  const norm = IMAGE_TYPES.includes(file.type)
-    ? await normalizeUploadImage(rawBuffer, file.type)
-    : { data: rawBuffer, contentType: file.type, ext: extFor(file.type) };
+  const norm = IMAGE_TYPES.includes(sniffed)
+    ? await normalizeUploadImage(rawBuffer, sniffed)
+    : { data: rawBuffer, contentType: sniffed, ext: extFor(sniffed) };
   const buffer = norm.data;
   const id = crypto.randomUUID();
   const db = await getDb();

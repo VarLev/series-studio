@@ -1,6 +1,6 @@
 "use server";
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb, entities, generations, prompts, shotEntities, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
@@ -11,15 +11,11 @@ import type { ShotPrompt } from "@/lib/llm/contracts";
 
 type Result = { ok: true; promptId: string } | { ok: false; error: string };
 
-async function nextVersion(shotId: string): Promise<number> {
-  const db = await getDb();
-  const [last] = await db
-    .select()
-    .from(prompts)
-    .where(eq(prompts.shotId, shotId))
-    .orderBy(desc(prompts.version))
-    .limit(1);
-  return (last?.version ?? 0) + 1;
+/** Конфликт уникального индекса (shot_id, version) — гонка параллельных генераций. */
+function isVersionRace(e: unknown): boolean {
+  if ((e as { code?: string })?.code === "23505") return true;
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.includes("prompts_shot_version_idx");
 }
 
 async function insertVersion(
@@ -40,10 +36,13 @@ async function insertVersion(
   const charList = linkedEntities
     .filter((e) => e.type === "character")
     .map((e) => ({ name: e.name, elementName: e.elementName }));
-  await db.insert(prompts).values({
+  const values = {
     id,
     shotId,
-    version: await nextVersion(shotId),
+    // версия считается ОДНИМ стейтментом со вставкой: раздельные SELECT max + INSERT
+    // на параллельных генерациях одного шота (30–200 с, несколько триггеров) читали
+    // одинаковый max и чеканили дубли версий, ломая version-based поллеры
+    version: sql<number>`(select coalesce(max(p.version), 0) + 1 from prompts p where p.shot_id = ${shotId})`,
     parentId,
     targetModel,
     // имена → якоря @element_name, затем @@Craig → @Craig (модель могла задвоить)
@@ -55,7 +54,17 @@ async function insertVersion(
       techniques: data.used_technique_ids,
     }),
     feedbackNote,
-  });
+  };
+  // подсчёт и вставка всё же не атомарны друг относительно друга под нагрузкой:
+  // остаток гонки ловит уникальный индекс (shot_id, version) — тогда просто заново
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await db.insert(prompts).values(values);
+      break;
+    } catch (e) {
+      if (attempt >= 4 || !isVersionRace(e)) throw e;
+    }
+  }
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (shot && shot.status === "draft") {
     await db.update(shots).set({ status: "prompted" }).where(eq(shots.id, shotId));

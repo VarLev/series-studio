@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, generations, references } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
-import { availableImageModels } from "@/lib/generation";
+import { activityFingerprint, availableImageModels } from "@/lib/generation";
 import GenPoller from "@/components/GenPoller";
 import SeriesRefs from "@/components/refs/SeriesRefs";
 
@@ -45,7 +45,7 @@ export default async function RefsContent({ episodeId }: { episodeId: string }) 
 
   return (
     <>
-      <GenPoller activeCount={activeJobs.length} />
+      <GenPoller activeCount={activeJobs.length} initialFp={await activityFingerprint()} />
       <SeriesRefs
         episodeId={episodeId}
         refs={refs}

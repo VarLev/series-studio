@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, secretEquals } from "@/lib/auth";
 import { activityFingerprint, pollActiveGenerations } from "@/lib/generation";
 
 export const maxDuration = 60;
@@ -11,7 +11,10 @@ export const maxDuration = 60;
  */
 export async function POST(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
-  const viaCron = cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+  // сравнение постоянного времени (см. вебхук Higgsfield); пустой секрет — не крон,
+  // тогда решает сессия
+  const viaCron =
+    Boolean(cronSecret) && secretEquals(req.headers.get("x-cron-secret") ?? "", cronSecret!);
   if (!viaCron && !(await isAuthenticated())) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

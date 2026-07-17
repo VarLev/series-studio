@@ -403,11 +403,11 @@ function isParsableJson(s: string): boolean {
 }
 
 /**
- * Сбалансированные {...}-подстроки верхнего уровня (с учётом строк и эскейпов).
- * Многословный ответ модели (план → JSON → пояснение) содержит несколько
- * кандидатов — вернём их все, выберет вызывающий.
+ * Сбалансированные open/close-подстроки верхнего уровня (с учётом строк и
+ * эскейпов). Многословный ответ модели (план → JSON → пояснение) содержит
+ * несколько кандидатов — вернём их все, выберет вызывающий.
  */
-function balancedObjects(text: string): string[] {
+function balancedSpans(text: string, open: string, close: string): string[] {
   const out: string[] = [];
   let depth = 0;
   let start = -1;
@@ -425,10 +425,10 @@ function balancedObjects(text: string): string[] {
       if (depth > 0) inStr = true;
       continue;
     }
-    if (ch === "{") {
+    if (ch === open) {
       if (depth === 0) start = i;
       depth++;
-    } else if (ch === "}") {
+    } else if (ch === close) {
       if (depth > 0 && --depth === 0 && start !== -1) {
         out.push(text.slice(start, i + 1));
         start = -1;
@@ -439,20 +439,36 @@ function balancedObjects(text: string): string[] {
 }
 
 /**
+ * Кандидаты-JSON в тексте: объекты и массивы сканируются РАЗДЕЛЬНЫМИ проходами.
+ * Раздельность важна: в общем проходе непарная скобка в прозе («см. пункт [3] —
+ * вот {json}») спрятала бы объект внутри незакрытого массива.
+ */
+function jsonCandidates(text: string): string[] {
+  return [...balancedSpans(text, "{", "}"), ...balancedSpans(text, "[", "]")];
+}
+
+/**
  * Достать JSON из ответа модели. Модель может писать прозу/план ВОКРУГ JSON
  * (инцидент Enhance на Opus: первый code-fence — не JSON, а после JSON — текст,
  * из-за чего старый парсер «первый fence или от первой скобки до конца» падал
  * оба раза и runJson делал бесполезный дорогой ретрай). Порядок попыток:
- *  1) валидный JSON среди ВСЕХ fenced-блоков;
- *  2) крупнейший сбалансированный {...} в тексте, который парсится;
- *  3) старое поведение — от первой скобки до конца (последний шанс).
+ *  1) ВЕСЬ ответ целиком — обычный случай «модель вернула только JSON». Идёт
+ *     первым ради ответа-МАССИВА [{shot},{shot}] (Sonnet через CLI, см.
+ *     groupPatchSchema в contracts.ts): пословный разбор ниже вернул бы из него
+ *     отдельные {shot}-объекты, крупнейший прошёл бы groupPatchSchema как
+ *     пустой патч (shots:[]) — и реворк молча обнулял бы шоты группы;
+ *  2) валидный JSON среди ВСЕХ fenced-блоков;
+ *  3) крупнейший сбалансированный {...} или [...] в тексте, который парсится;
+ *  4) старое поведение — от первой скобки до конца (последний шанс).
  */
 function extractJson(text: string): string {
+  const whole = text.trim();
+  if (isParsableJson(whole)) return whole;
   const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1].trim());
   for (const f of fences) {
     if (isParsableJson(f)) return f;
   }
-  const balanced = balancedObjects(text)
+  const balanced = jsonCandidates(text)
     .filter(isParsableJson)
     .sort((a, b) => b.length - a.length);
   if (balanced[0]) return balanced[0];

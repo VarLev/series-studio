@@ -22,8 +22,15 @@ export async function loginAction(
   _prev: { error: string } | null,
   formData: FormData,
 ): Promise<{ error: string } | null> {
-  const ok = await login(String(formData.get("password") ?? ""));
-  if (!ok) return { error: "Неверный пароль" };
+  const res = await login(String(formData.get("password") ?? ""));
+  if (!res.ok) {
+    // пауза от анти-брутфорса — это НЕ «неверный пароль»: не сбиваем с толку
+    return {
+      error: res.retryAfterSec
+        ? `Слишком много попыток. Повторите через ${res.retryAfterSec} с`
+        : "Неверный пароль",
+    };
+  }
   redirect("/episodes");
 }
 
