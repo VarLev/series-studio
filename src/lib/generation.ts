@@ -16,6 +16,7 @@ import {
   shots,
   videoModels,
 } from "@/lib/db";
+import { buildBeatMarkers } from "@/lib/beatMarkers";
 import { stripAt } from "@/lib/entityName";
 import {
   availableVideoProviders,
@@ -641,6 +642,10 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
   // токенов Higgsfield/Kling по сети и задерживает появление карточки).
   // Сперва резолвим промпты всех моделей: нет промпта → ошибка ДО любых вставок.
   const plan = input.modelIds.map((modelId) => ({ modelId, promptRow: promptRowFor(modelId) }));
+  // Раскадровка группы, снятая один раз на всю постановку: все модели этого
+  // запуска снимают одно и то же, а маркеры смены шота в плеере остаются при
+  // видео навсегда — правка группы задним числом их уже не сдвинет
+  const beatsSnapshot = JSON.stringify(buildBeatMarkers(shot.beatsJson));
   const pending: Pending[] = [];
   for (const { modelId, promptRow } of plan) {
     const model = catalog.find((m) => m.id === modelId);
@@ -665,6 +670,7 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
       }),
       status: "queued",
       source: "api",
+      beatsJson: beatsSnapshot,
     });
     pending.push({ genId, modelId, promptRow, quality, model });
   }

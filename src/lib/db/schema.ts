@@ -144,6 +144,11 @@ export const generations = pgTable("generations", {
   winner: boolean("winner").notNull().default(false),
   providerJobId: text("provider_job_id"),
   resultStoragePath: text("result_storage_path"),
+  // снапшот шотов группы (BeatMarker[]) на момент постановки задачи — маркеры
+  // смены шота на таймлайне плеера. Принадлежит ЭТОМУ видео: правка группы после
+  // генерации маркеры готового видео не меняет. null — видео до появления фичи
+  // (их раскадровка «на момент генерации» неизвестна, маркеров нет)
+  beatsJson: text("beats_json"),
   // кредиты бывают дробными (Seedance 22.5) — real, не integer
   creditsSpent: real("credits_spent"),
   error: text("error"),

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { isAuthenticated } from "@/lib/auth";
+import { buildBeatMarkers } from "@/lib/beatMarkers";
 import { putFile } from "@/lib/storage";
 import { normalizeUploadImage } from "@/lib/image";
 import { getDb, references, generations, shots } from "@/lib/db";
@@ -58,6 +59,9 @@ export async function POST(req: NextRequest) {
   if (kind === "result") {
     const shotId = String(form.get("shotId") ?? "");
     if (!shotId) return NextResponse.json({ error: "shotId обязателен" }, { status: 400 });
+    // группа нужна до вставки: за видео закрепляется снапшот её шотов — маркеры
+    // смены шота в плеере (правка группы задним числом их уже не сдвинет)
+    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     const storagePath = await putFile(`results/${shotId}/${id}${norm.ext}`, buffer, norm.contentType);
     await db.insert(generations).values({
       id,
@@ -68,9 +72,9 @@ export async function POST(req: NextRequest) {
       status: "done",
       resultStoragePath: storagePath,
       source: "kling-web",
+      beatsJson: JSON.stringify(buildBeatMarkers(shot?.beatsJson)),
     });
     await recalcShotStatus(shotId);
-    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (shot) revalidatePath(`/episodes/${shot.episodeId}/shots/${shotId}`);
     return NextResponse.json({ ok: true, id, storagePath });
   }

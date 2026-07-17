@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
+import { parseBeatMarkers } from "@/lib/beatMarkers";
 import { getDb, episodes, generations, prompts, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { safeParse } from "@/lib/params";
@@ -51,6 +52,10 @@ export default async function ReviewPage(ctx: {
         promptVersion: row.promptId ? (promptVersionById.get(row.promptId) ?? null) : null,
         credits: row.creditsSpent,
         source: row.source,
+        // маркеры смены шота — снапшот раскадровки ЭТОГО видео, снятый при
+        // генерации: у кандидатов разных дат они могут отличаться, поэтому
+        // висят на кандидате, а не на группе
+        beatMarkers: parseBeatMarkers(row.beatsJson),
       })),
   );
 

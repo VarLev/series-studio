@@ -234,6 +234,11 @@ const MIGRATIONS: string[][] = [
   // v5 — вкл/выкл библиотеки приёмов целиком живёт в settings.techniques_enabled,
   // поштучная колонка не нужна
   [`ALTER TABLE techniques DROP COLUMN IF EXISTS enabled`],
+  // v6 — маркеры смены шота на таймлайне видео: за каждым видео закрепляется
+  // снапшот шотов группы на момент постановки задачи, независимый от дальнейших
+  // правок группы. Бэкфилла нет намеренно — для старых видео состояние группы «на
+  // момент генерации» неизвестно, а подставлять им текущее было бы враньём
+  [`ALTER TABLE generations ADD COLUMN IF NOT EXISTS beats_json text`],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };
