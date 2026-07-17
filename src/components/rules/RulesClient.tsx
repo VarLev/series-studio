@@ -12,12 +12,13 @@ import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import ConfirmButton from "@/components/ConfirmButton";
 import { toast } from "@/components/Toaster";
-import { SectionLabel } from "@/components/ui";
 import { useT } from "@/components/I18nProvider";
+import TechniquesLibrary, { type TechniqueCard } from "@/components/knowledge/TechniquesLibrary";
 import {
   SYSTEM_RULES,
   DYNAMIC_BLOCKS,
   SITE_LABELS,
+  ruleTextParts,
   type RuleSite,
 } from "@/lib/llm/rulesRegistry";
 import {
@@ -127,16 +128,58 @@ function Toggle({
   );
 }
 
+/**
+ * Раздел страницы — спойлер, ЗАКРЫТЫЙ по умолчанию: правил много, и развёрнутые
+ * разделы превращали /rules в бесконечную простыню, где не видно оглавления.
+ */
+function Section({
+  title,
+  count,
+  hint,
+  children,
+}: {
+  title: string;
+  count?: number;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-ink-700">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3.5 py-3 text-left"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-t300">
+            {title}
+            {typeof count === "number" ? ` · ${count}` : ""}
+          </span>
+          {hint && <span className="mt-1 block text-[10.5px] leading-relaxed text-t400">{hint}</span>}
+        </span>
+        <span className="shrink-0 text-[10px] text-t400">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2 border-t border-[var(--border-subtle)] p-3">{children}</div>
+      )}
+    </div>
+  );
+}
+
 export default function RulesClient({
   disabledIds,
   userRules,
   templateRules,
   templateStatus,
+  techniques,
+  techniquesEnabled,
 }: {
   disabledIds: string[];
   userRules: UserRuleCard[];
   templateRules: TemplateRuleCard[];
   templateStatus: TemplateStatusCard[];
+  techniques: TechniqueCard[];
+  techniquesEnabled: boolean;
 }) {
   const t = useT();
   const router = useRouter();
@@ -215,23 +258,21 @@ export default function RulesClient({
   return (
     <div className="flex flex-col gap-3 px-4 pb-10">
       {/* ---------- 1. Пользовательские правила ---------- */}
-      <div className="flex items-center gap-3">
-        <SectionLabel>{t("Пользовательские правила", "Your rules")}</SectionLabel>
-        <span className="flex-1" />
-        <button
-          onClick={openNew}
-          className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:text-violet-100"
-        >
-          {t("+ Добавить правило", "+ Add rule")}
-        </button>
-      </div>
-      <p className="text-[10.5px] leading-relaxed text-t400">
-        {t(
+      <Section
+        title={t("Пользовательские правила", "Your rules")}
+        count={userRules.length}
+        hint={t(
           "Короткие директивы, которые вклеиваются в системный промпт высокоприоритетным блоком. Область действия: «Разбивка» — разбивка сюжета и правки групп (Rework/Вставка/Enhance); «Видео-промпт» — генерация и ревизия промптов шотов (с фильтром по треку Seedance/Kling).",
           "Short directives injected into the system prompt as a high-priority block. Scope: “Breakdown” covers story breakdown and group edits (Rework/Insert/Enhance); “Video prompt” covers shot prompt generation and revision (with Seedance/Kling track filter).",
         )}
-      </p>
-      <div className="flex flex-col gap-1.5">
+      >
+        <button
+          onClick={openNew}
+          className="min-h-10 w-full rounded-lg border border-[var(--border-default)] text-[10px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:bg-ink-500"
+        >
+          {t("+ Добавить правило", "+ Add rule")}
+        </button>
+        <div className="flex flex-col gap-1.5">
         {userRules.map((r) => (
           <div
             key={r.id}
@@ -249,22 +290,23 @@ export default function RulesClient({
             <Toggle enabled={r.enabled} onChange={(v) => toggleUserRule(r.id, v)} />
           </div>
         ))}
-        {userRules.length === 0 && (
-          <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-4 text-center text-[11px] text-t400">
-            {t("Своих правил пока нет", "No custom rules yet")}
-          </div>
-        )}
-      </div>
+          {userRules.length === 0 && (
+            <div className="rounded-lg border border-dashed border-[var(--border-default)] px-3 py-4 text-center text-[11px] text-t400">
+              {t("Своих правил пока нет", "No custom rules yet")}
+            </div>
+          )}
+        </div>
+      </Section>
 
       {/* ---------- 2. Системные правила ---------- */}
-      <SectionLabel>{t("Системные правила", "System rules")}</SectionLabel>
-      <p className="text-[10.5px] leading-relaxed text-t400">
-        {t(
+      <Section
+        title={t("Системные правила", "System rules")}
+        count={SYSTEM_RULES.length}
+        hint={t(
           "Текст этих правил живёт в коде и обновляется с релизами; здесь их можно включать и выключать. Бейджи показывают, в какие вызовы модели правило вклеивается.",
           "Rule texts live in code and update with releases; here you can toggle them on/off. Badges show which model calls each rule is injected into.",
         )}
-      </p>
-      <div className="flex flex-col gap-1.5">
+      >
         {SYSTEM_RULES.map((r) => {
           const on = !disabled.has(r.id);
           const open = openId === r.id;
@@ -283,25 +325,40 @@ export default function RulesClient({
                 <Toggle enabled={on} onChange={(v) => toggleRuleState(r.id, v)} />
               </div>
               {open && (
-                <pre className="max-h-80 overflow-auto whitespace-pre-wrap border-t border-[var(--border-subtle)] bg-ink-800 p-3 font-mono text-[10px] leading-relaxed text-t200">
-                  {r.text}
-                </pre>
+                <div className="border-t border-[var(--border-subtle)] bg-ink-800">
+                  {/* ядро правила + надстройки под конкретные вызовы: один принцип
+                      написан один раз, дальше — только то, что своё у этапа */}
+                  {ruleTextParts(r).map((part, i) => (
+                    <div key={i} className={i ? "border-t border-[var(--border-subtle)]" : ""}>
+                      {part.sites && (
+                        <div className="flex items-center gap-1.5 px-3 pt-2.5">
+                          <span className="text-[9px] uppercase tracking-[0.08em] text-t400">
+                            {t("только для", "only for")}
+                          </span>
+                          <UsageBadges usedIn={part.sites} />
+                        </div>
+                      )}
+                      <pre className="max-h-80 overflow-auto whitespace-pre-wrap p-3 font-mono text-[10px] leading-relaxed text-t200">
+                        {part.text}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           );
         })}
-      </div>
+      </Section>
 
       {/* ---------- 3. Динамические блоки ---------- */}
-      <SectionLabel>{t("Динамические блоки", "Dynamic blocks")}</SectionLabel>
-      <div className="rounded-lg border border-[rgba(224,178,80,.35)] bg-[rgba(224,178,80,.07)] px-3 py-2.5 text-[10.5px] leading-relaxed text-t300">
-        ⚠︎{" "}
-        {t(
-          "Эти блоки собираются из данных проекта (референсы, гардероб, локация…) при каждом вызове — их текст меняется от группы к группе. Отключение может сломать функцию: например, фиксацию гардероба или привязку к стартовому кадру.",
-          "These blocks are assembled from project data (references, wardrobe, location…) on every call — their text differs per group. Disabling one can break a feature, e.g. the wardrobe lock or the start-frame anchor.",
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
+      <Section title={t("Динамические блоки", "Dynamic blocks")} count={DYNAMIC_BLOCKS.length}>
+        <div className="rounded-lg border border-[rgba(224,178,80,.35)] bg-[rgba(224,178,80,.07)] px-3 py-2.5 text-[10.5px] leading-relaxed text-t300">
+          ⚠︎{" "}
+          {t(
+            "Эти блоки собираются из данных проекта (референсы, гардероб, локация…) при каждом вызове — их текст меняется от группы к группе. Отключение может сломать функцию: например, фиксацию гардероба или привязку к стартовому кадру.",
+            "These blocks are assembled from project data (references, wardrobe, location…) on every call — their text differs per group. Disabling one can break a feature, e.g. the wardrobe lock or the start-frame anchor.",
+          )}
+        </div>
         {DYNAMIC_BLOCKS.map((b) => {
           const on = !disabled.has(b.id);
           return (
@@ -325,27 +382,25 @@ export default function RulesClient({
             </div>
           );
         })}
-      </div>
+      </Section>
 
       {/* ---------- 4. Правила из шаблонов ---------- */}
-      <div className="flex items-center gap-3">
-        <SectionLabel>{t("Правила из шаблонов", "Template rules")}</SectionLabel>
-        <span className="flex-1" />
+      <Section
+        title={t("Правила из шаблонов", "Template rules")}
+        count={templateRules.length}
+        hint={t(
+          "Витрина правил, извлечённых моделью из редактируемых шаблонов (База знаний → Шаблоны промптов). Только просмотр: править нужно сам шаблон, затем нажать «Обновить». Пересегментируются только изменившиеся шаблоны (3 вызова модели простых запросов максимум).",
+          "A read-only view of the rules the model extracted from your editable templates (Knowledge → Prompt templates). Edit the template itself, then hit Refresh. Only changed templates are re-segmented (at most 3 simple-model calls).",
+        )}
+      >
         <button
           onClick={doRefreshTemplates}
           disabled={refreshing}
-          className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:text-violet-100 disabled:opacity-50"
+          className="min-h-10 w-full rounded-lg border border-[var(--border-default)] text-[10px] font-semibold uppercase tracking-[0.08em] text-violet-200 hover:bg-ink-500 disabled:opacity-50"
         >
           {refreshing ? t("Обновляю…", "Refreshing…") : t("⟳ Обновить из шаблонов", "⟳ Refresh from templates")}
         </button>
-      </div>
-      <p className="text-[10.5px] leading-relaxed text-t400">
-        {t(
-          "Витрина правил, извлечённых моделью из редактируемых шаблонов (Настройки → Шаблоны промптов). Только просмотр: править нужно сам шаблон, затем нажать «Обновить». Пересегментируются только изменившиеся шаблоны (3 вызова модели простых запросов максимум).",
-          "A read-only view of the rules the model extracted from your editable templates (Settings → Prompt templates). Edit the template itself, then hit Refresh. Only changed templates are re-segmented (at most 3 simple-model calls).",
-        )}
-      </p>
-      {templateStatus.map((s) => {
+        {templateStatus.map((s) => {
         const label = TEMPLATE_LABELS[s.templateKey] ?? { ru: s.templateKey, en: s.templateKey };
         const rules = templateRules.filter((r) => r.templateKey === s.templateKey);
         return (
@@ -393,9 +448,16 @@ export default function RulesClient({
                 {t("Нажмите «Обновить из шаблонов», чтобы извлечь правила", "Hit “Refresh from templates” to extract rules")}
               </div>
             )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
+      </Section>
+
+      {/* ---------- 5. Режиссёрские приёмы ---------- */}
+      {/* приёмы живут здесь, а не в «Базе знаний»: это инструкция модели (Enhance
+          закрепляет приём за шотом, промпт-фабрика вплетает его камеру), а не
+          справочник для чтения. У библиотеки свой выключатель и свой спойлер */}
+      <TechniquesLibrary enabled={techniquesEnabled} techniques={techniques} />
 
       {/* ---------- Sheet: создание/правка пользовательского правила ---------- */}
       <Sheet

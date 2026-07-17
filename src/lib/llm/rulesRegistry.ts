@@ -41,8 +41,15 @@ export interface SystemRule {
   title: string;
   /** одна фраза «зачем это правило» (рус.) */
   description: string;
-  /** точный текст, который уходит в system-промпт */
+  /** точный текст, который уходит в system-промпт (общий для всех вызовов) */
   text: string;
+  /**
+   * Добавка к тексту под КОНКРЕТНЫЙ вызов — когда принцип общий, а говорить о нём
+   * надо на языке этого вызова (разбивка оперирует полями JSON, промпт-фабрика —
+   * блоками готового промпта). Так общая часть живёт в одном экземпляре, а не
+   * копией в двух почти одинаковых правилах.
+   */
+  textBySite?: Partial<Record<RuleSite, string>>;
   usedIn: RuleSite[];
 }
 
@@ -59,25 +66,28 @@ const BREAKDOWN_SITES: RuleSite[] = ["breakdown", "revise_group", "insert_groups
 const SHOT_PROMPT_SITES: RuleSite[] = ["shot_prompt_seedance", "shot_prompt_kling"];
 
 /**
- * Один шот = один непрерывный взгляд камеры — сторона РАЗБИВКИ (и всех правок
- * групп). Инцидент эп.24 (2026-07-17): в одном шоте «Priscilla смотрит, как
- * машина с Jacob и Simon уезжает» — модель видеогенерации склеила два вида и
- * дорисовала Priscilla у машины.
+ * «Один шот = один вид» — ОДИН принцип на весь конвейер. Инцидент эп.24
+ * (2026-07-17): в одном шоте «Priscilla смотрит, как машина с Jacob и Simon
+ * уезжает» — модель видеогенерации склеила два вида и дорисовала Priscilla у
+ * машины. Ломается это на двух разных этапах, поэтому у правила ядро + две
+ * добавки: разбивка режет шоты и говорит полями JSON (framing/camera/action),
+ * промпт-фабрика рендерит уже нарезанное и говорит блоками готового промпта
+ * (SHOT/Framing/Action/Strict rules). Раньше это были два отдельных правила с
+ * двумя тумблерами, и общая часть в них дублировалась слово в слово.
  */
-export const SHOT_VIEW_RULES = `Один шот = один непрерывный взгляд камеры (обязательно):
-* внутри одного шота НЕТ монтажных склеек и смены вида: одна камера, одна точка съёмки, один план; камера может плавно двигаться (наезд, панорама, проводка), но не «перепрыгивать» на другой вид;
+const VIEW_CORE = `Один шот = одна непрерывная точка съёмки (обязательно):
+* внутри одного шота НЕТ монтажных склеек и смены вида: одна камера, одна точка съёмки, один план; камера может плавно двигаться (наезд/push-in, панорама/pan, проводка/tracking), но не «перепрыгивать» на другой вид — смена вида это уже СЛЕДУЮЩИЙ шот;
 * НЕ совмещай в одном шоте два предмета съёмки или две точки зрения («X смотрит, как вдали Y…», «пока A говорит, в другом конце B…») — это ДВА шота: отдельный шот-реакция с X и отдельный шот с Y;
-* в полях framing и camera шота перечисляй, кто РЕАЛЬНО в кадре; в action описывай ТОЛЬКО происходящее в этом кадре — персонажей вне кадра в action НЕ упоминай (их место — соседний шот);
+* шот описывает ТОЛЬКО то, что видно в этом кадре: кто не перечислен среди видимых — того в кадре НЕТ, и в действии его упоминать нельзя (его место — соседний шот).`;
+
+/** Добавка для разбивки и правок групп: язык полей JSON, право резать шоты. */
+const VIEW_BREAKDOWN_ADDON = `Как это выглядит в твоём ответе:
+* в полях framing и camera шота перечисляй, кто РЕАЛЬНО в кадре; в action описывай ТОЛЬКО происходящее в этом кадре;
 * новый объект внимания, новый ракурс или новая крупность = НОВЫЙ шот.`;
 
-/**
- * Тот же принцип — сторона ПРОМПТ-ФАБРИКИ: один SHOT-блок готового
- * видео-промпта = одна непрерывная точка съёмки, с замком видимости персонажей.
- */
-export const VIEW_LOCK_BLOCK =
-  "ОДИН SHOT-БЛОК = ОДНА НЕПРЕРЫВНАЯ ТОЧКА СЪЁМКИ (без склеек внутри шота):\n" +
-  "- внутри SHOT-блока камера одна и вид один; допустимо только плавное движение (push-in, pan, " +
-  "tracking) — никакой смены плана/ракурса/объекта внутри шота; смена вида = следующий SHOT;\n" +
+/** Добавка для промпт-фабрики: язык готового промпта + замок видимости. */
+const VIEW_PROMPT_ADDON =
+  "Как это выглядит в промпте (шот здесь = SHOT-блок):\n" +
   "- Framing шота ИСЧЕРПЫВАЮЩЕ перечисляет, кто и что видно в кадре: кого нет в Framing — того в кадре НЕТ;\n" +
   "- таймлайн Action (0.0–1.0 sec: …) развивает ТОТ ЖЕ кадр: НЕ вводи в Action персонажей, машины, " +
   "объекты или места, которых нет в Framing этого шота;\n" +
@@ -112,9 +122,18 @@ export const SYSTEM_RULES: SystemRule[] = [
     id: "shot_view_rules",
     title: "Один шот = один вид",
     description:
-      "Внутри шота нет склеек и смены плана; два предмета съёмки = два шота (инцидент эп.24: Priscilla дорисована у машины).",
-    text: SHOT_VIEW_RULES,
-    usedIn: BREAKDOWN_SITES,
+      "Внутри шота нет склеек и смены плана; два предмета съёмки = два шота; в промпте — замок видимости «Do not show @X» (инцидент эп.24: Priscilla дорисована у машины).",
+    text: VIEW_CORE,
+    textBySite: {
+      breakdown: VIEW_BREAKDOWN_ADDON,
+      revise_group: VIEW_BREAKDOWN_ADDON,
+      insert_groups: VIEW_BREAKDOWN_ADDON,
+      enhance_group: VIEW_BREAKDOWN_ADDON,
+      shot_prompt_seedance: VIEW_PROMPT_ADDON,
+      shot_prompt_kling: VIEW_PROMPT_ADDON,
+      revise_prompt: VIEW_PROMPT_ADDON,
+    },
+    usedIn: [...BREAKDOWN_SITES, ...SHOT_PROMPT_SITES, "revise_prompt"],
   },
   // ---------- разбивка сюжета ----------
   {
@@ -297,14 +316,6 @@ export const SYSTEM_RULES: SystemRule[] = [
     usedIn: SHOT_PROMPT_SITES,
   },
   {
-    id: "prompt_view_lock",
-    title: "Один SHOT = одна точка съёмки",
-    description:
-      "Без склеек внутри SHOT-блока; Framing перечисляет всех видимых; замок видимости «Do not show @X» (инцидент эп.24).",
-    text: VIEW_LOCK_BLOCK,
-    usedIn: [...SHOT_PROMPT_SITES, "revise_prompt"],
-  },
-  {
     id: "prompt_compact",
     title: "Компактность промпта (≤3500)",
     description: "Плотный промпт без повторов: один факт — один раз, Strict rules ≤ 5 строк.",
@@ -458,10 +469,38 @@ export const ALL_TOGGLEABLE_IDS: ReadonlySet<string> = new Set([
 
 const SYSTEM_RULE_BY_ID = new Map(SYSTEM_RULES.map((r) => [r.id, r]));
 
-/** Текст системного правила с учётом вкл/выкл: выключено → "". */
-export function systemRuleText(id: string, disabled: ReadonlySet<string>): string {
+/**
+ * Текст системного правила с учётом вкл/выкл: выключено → "".
+ * site — вызов, куда вклеиваем: к общему тексту добавится его надстройка
+ * (textBySite), если у правила она есть.
+ */
+export function systemRuleText(
+  id: string,
+  disabled: ReadonlySet<string>,
+  site?: RuleSite,
+): string {
   if (disabled.has(id)) return "";
-  return SYSTEM_RULE_BY_ID.get(id)?.text ?? "";
+  const rule = SYSTEM_RULE_BY_ID.get(id);
+  if (!rule) return "";
+  const addon = site ? rule.textBySite?.[site] : undefined;
+  return addon ? `${rule.text}\n${addon}` : rule.text;
+}
+
+/**
+ * Разбор текста правила для показа на /rules: ядро + добавки, каждая со своими
+ * бейджами вызовов. Одинаковые добавки склеиваем в одну карточку.
+ */
+export function ruleTextParts(rule: SystemRule): Array<{ sites: RuleSite[] | null; text: string }> {
+  const parts: Array<{ sites: RuleSite[] | null; text: string }> = [{ sites: null, text: rule.text }];
+  if (!rule.textBySite) return parts;
+  const bySameText = new Map<string, RuleSite[]>();
+  for (const site of rule.usedIn) {
+    const addon = rule.textBySite[site];
+    if (!addon) continue;
+    bySameText.set(addon, [...(bySameText.get(addon) ?? []), site]);
+  }
+  for (const [text, sites] of bySameText) parts.push({ sites, text });
+  return parts;
 }
 
 /** Гейт динамического блока: выключен → "", иначе собранный текст как есть. */

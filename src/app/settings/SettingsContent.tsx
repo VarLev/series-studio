@@ -25,10 +25,6 @@ export default async function SettingsContent() {
         simpleModel={settings.llm_simple_model}
         hfConnected={hfConnected}
         klingConnected={klingConnected}
-        breakdownTemplate={settings.tpl_breakdown}
-        storyboardTemplate={settings.tpl_storyboard}
-        videoTemplate={settings.tpl_video}
-        klingVideoTemplate={settings.tpl_video_kling}
       />
     </>
   );

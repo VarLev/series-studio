@@ -153,7 +153,7 @@ export async function llmBreakdown(
   const settings = await getAllSettings();
   // «База правил»: выключенные записи реестра + пользовательские правила разбивки
   const off = await getDisabledRuleIds();
-  const R = (id: string) => systemRuleText(id, off);
+  const R = (id: string) => systemRuleText(id, off, "breakdown");
   const customRules = await customRulesContext("breakdown");
   // диапазон хронометража эпизода задаётся бегунком на вкладке «Сюжет» (дефолт 3–5 мин)
   const durMin = duration?.min ?? 3;
@@ -272,7 +272,7 @@ export async function llmReviseGroup(input: {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const off = await getDisabledRuleIds();
-  const R = (id: string) => systemRuleText(id, off);
+  const R = (id: string) => systemRuleText(id, off, "revise_group");
   const customRules = await customRulesContext("revise_group");
   const refCtx = off.has("dyn_refs_context") ? "" : await shotRefsContext(input.shotId);
   const anchorsBlock = input.anchors?.length
@@ -371,7 +371,7 @@ export async function llmInsertGroups(input: {
   const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const off = await getDisabledRuleIds();
-  const R = (id: string) => systemRuleText(id, off);
+  const R = (id: string) => systemRuleText(id, off, "insert_groups");
   const customRules = await customRulesContext("insert_groups");
   return runJson(
     {
@@ -436,7 +436,7 @@ export async function llmEnhanceGroup(input: {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const off = await getDisabledRuleIds();
-  const R = (id: string) => systemRuleText(id, off);
+  const R = (id: string) => systemRuleText(id, off, "enhance_group");
   const customRules = await customRulesContext("enhance_group");
   const refCtx = off.has("dyn_refs_context") ? "" : await shotRefsContext(input.shotId);
   const anchorsBlock = input.anchors.length
@@ -556,8 +556,8 @@ export async function llmShotPrompt(
   const isKling = promptFamily(targetModel) === "kling";
   // «База правил»: выключенные записи реестра + пользовательские правила видео-промптов
   const off = await getDisabledRuleIds();
-  const R = (id: string) => systemRuleText(id, off);
   const site: RuleSite = isKling ? "shot_prompt_kling" : "shot_prompt_seedance";
+  const R = (id: string) => systemRuleText(id, off, site);
   const customRules = await customRulesContext(site);
   const knowledge = off.has("dyn_knowledge") ? "" : await knowledgeContext(targetModel);
   // у каждого семейства свой шаблон: Seedance (tpl_video) и Kling (tpl_video_kling —
@@ -801,10 +801,11 @@ export async function llmShotPrompt(
   sceneBlock = gateBlock("dyn_scene", off, sceneBlock);
 
   // GLOBAL CONTINUITY (правило prompt_continuity, инцидент «Craig на фоне» 2026-07-13)
-  // и «один SHOT = одна точка съёмки» (prompt_view_lock, инцидент эп.24) — тексты
-  // в реестре правил (rulesRegistry.ts), здесь только подстановка с учётом вкл/выкл.
+  // и «один шот = один вид» (shot_view_rules, инцидент эп.24; сюда приезжает его
+  // ядро + надстройка промпт-фабрики) — тексты в реестре правил (rulesRegistry.ts),
+  // здесь только подстановка с учётом вкл/выкл.
   const continuityBlock = R("prompt_continuity");
-  const viewLockBlock = R("prompt_view_lock");
+  const viewLockBlock = R("shot_view_rules");
 
   const wardrobeBlock = gateBlock(
     "dyn_wardrobe",
@@ -985,7 +986,7 @@ export async function llmRevisePrompt(
   const isKlingRev = promptFamily(prev.targetModel) === "kling";
   // «База правил»: выключенные записи реестра + пользовательские правила видео-промптов
   const off = await getDisabledRuleIds();
-  const R = (id: string) => systemRuleText(id, off);
+  const R = (id: string) => systemRuleText(id, off, "revise_prompt");
   const customRules = await customRulesContext("revise_prompt", isKlingRev ? "kling" : "seedance");
   const knowledge = off.has("dyn_knowledge") ? "" : await knowledgeContext(prev.targetModel);
   const reviseTemplate = isKlingRev ? settings.tpl_video_kling : settings.tpl_video;
@@ -1018,7 +1019,7 @@ export async function llmRevisePrompt(
       // база знаний в кэшируемом префиксе — как в llmShotPrompt
       cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${reviseStartBlock}\n\n${R("prompt_view_lock")}\n\n${reviseStyleBlock}\n\n` +
+        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${reviseStyleBlock}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. " +
         (R("revise_prompt_hygiene") ? `${R("revise_prompt_hygiene")}\n` : "") +
