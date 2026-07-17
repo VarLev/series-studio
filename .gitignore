@@ -44,3 +44,5 @@ next-env.d.ts
 # local data (PGlite + file storage)
 .data/
 
+.backups/data-2026-07-16T13-12-05.zip
+.backups/data-2026-07-16T14-31-07.zip
