@@ -123,6 +123,8 @@ export default function PromptBlock({
   }>({});
   const doneRef = useRef(false);
   const [copied, setCopied] = useState(false);
+  // точка нажатия на тексте промпта — по ней отличаем тап от протаскивания
+  const pressAt = useRef<{ x: number; y: number } | null>(null);
   const [technique, setTechnique] = useState<UsedTechnique | null>(null);
   // удаление промпта трека — двухшаговое (взвод → подтверждение)
   const [armDelete, setArmDelete] = useState(false);
@@ -301,6 +303,22 @@ export default function PromptBlock({
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  /**
+   * Тап по тексту раскрывает/сворачивает промпт. Но ВЫДЕЛЕНИЕ текста тоже
+   * заканчивается кликом на этом блоке — и промпт схлопывался ровно в тот момент,
+   * когда его выделяли, чтобы скопировать. Тап от выделения отличаем по трём
+   * признакам: протащили мышь/палец, есть выделение, это второй клик двойного.
+   */
+  function onTextClick(e: React.MouseEvent) {
+    const start = pressAt.current;
+    pressAt.current = null;
+    if (e.detail > 1) return; // второй клик двойного — его откатит onDoubleClick
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+    setExpanded((v) => !v);
+  }
+
   async function copy() {
     if (!current) return;
     await navigator.clipboard.writeText(current.text);
@@ -416,10 +434,18 @@ export default function PromptBlock({
 
       {current && (
         <>
-        {/* клик по тексту — раскрыть/свернуть (не открывать редактор; правка по ✎) */}
+        {/* клик по тексту — раскрыть/свернуть (не открывать редактор; правка по ✎),
+            но только если это тап, а не выделение — см. onTextClick */}
         <div
-          onClick={() => setExpanded((v) => !v)}
-          className="block w-full cursor-pointer text-left"
+          onPointerDown={(e) => {
+            pressAt.current = { x: e.clientX, y: e.clientY };
+          }}
+          onClick={onTextClick}
+          // двойной клик выделяет слово: первый клик двойного успел свернуть блок —
+          // возвращаем как было, выделение при этом остаётся
+          onDoubleClick={() => setExpanded((v) => !v)}
+          // курсор честный: свёрнутый блок — кнопка «раскрыть», раскрытый — текст
+          className={`block w-full text-left ${expanded ? "cursor-text" : "cursor-pointer"}`}
         >
           <div
             className="relative overflow-hidden transition-[max-height]"
