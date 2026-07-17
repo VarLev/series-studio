@@ -36,6 +36,18 @@ export default function EpisodeTabs({
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>(
     shots.length > 0 ? "Шоты" : "Сюжет",
   );
+  /**
+   * Пока сюжет не разбит на группы, «Раскадровка» и «Шоты» пусты и делать там
+   * нечего — держим их закрытыми, чтобы не отправлять в тупик. Активную вкладку
+   * ВЫВОДИМ, а не синхронизируем состоянием: если группы исчезнут (replace-разбивка,
+   * удаление), запертая вкладка не должна остаться открытой.
+   */
+  const noShots = shots.length === 0;
+  const activeTab = noShots ? "Сюжет" : tab;
+  const lockHint = t(
+    "Сначала разбейте сюжет на группы шотов",
+    "Break the story into shot groups first",
+  );
   // выбор модели живёт здесь, а не в SynopsisEditor: переключение вкладок
   // размонтирует редактор, и выбор терялся (замечание заказчика)
   const [bdModel, setBdModel] = useState(breakdownModel);
@@ -47,27 +59,31 @@ export default function EpisodeTabs({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex gap-1.5 border-b border-[var(--border-subtle)] px-3.5 py-2">
         {TABS.map((tabDef) => {
-          const active = tab === tabDef.id;
+          const active = activeTab === tabDef.id;
+          const locked = noShots && tabDef.id !== "Сюжет";
           const base = t(tabDef.ru, tabDef.en);
           const label = tabDef.id === "Шоты" && shots.length ? `${base} · ${shots.length}` : base;
           return (
             <button
               key={tabDef.id}
               onClick={() => setTab(tabDef.id)}
-              className="min-h-[38px] flex-1 rounded-md border px-1 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.1em]"
+              disabled={locked}
+              title={locked ? lockHint : undefined}
+              className="min-h-[38px] flex-1 rounded-md border px-1 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] disabled:cursor-not-allowed"
               style={{
                 borderColor: active ? "var(--border-strong)" : "transparent",
                 background: active ? "var(--ink-600)" : "none",
                 color: active ? "var(--text-100)" : "var(--text-400)",
+                opacity: locked ? 0.35 : 1,
               }}
             >
-              {label}
+              {locked ? `🔒 ${label}` : label}
             </button>
           );
         })}
       </div>
 
-      {tab === "Сюжет" && (
+      {activeTab === "Сюжет" && (
         <SynopsisEditor
           episodeId={episodeId}
           initialTitle={initialTitle}
@@ -83,7 +99,7 @@ export default function EpisodeTabs({
         />
       )}
 
-      {tab === "Раскадровка" && (
+      {activeTab === "Раскадровка" && (
         <StoryboardTab
           episodeId={episodeId}
           shots={shots}
@@ -94,7 +110,7 @@ export default function EpisodeTabs({
       )}
 
       {/* вставные группы создаются той же моделью, что выбрана для раскадровки */}
-      {tab === "Шоты" && (
+      {activeTab === "Шоты" && (
         <ShotsList
           episodeId={episodeId}
           shots={shots}

@@ -250,6 +250,12 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
 
   const epNumber = String(episode.number).padStart(2, "0");
   const t = await getT();
+  // сюжет ещё не разбит на группы — REF и Галерея заперты (см. шапку ниже)
+  const noShots = shotItems.length === 0;
+  const lockHint = t(
+    "Сначала разбейте сюжет на группы шотов",
+    "Break the story into shot groups first",
+  );
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col md:max-w-3xl">
@@ -259,23 +265,46 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         title={episode.title || t("Без названия", "Untitled")}
         right={
           // очередь убрана (нижний таб-бар теперь на всех экранах); REF и Галерея
-          // открываются правым слайдером поверх экрана (intercepting @drawer)
+          // открываются правым слайдером поверх экрана (intercepting @drawer).
+          // Пока сюжет не разбит на группы, обоим экранам нечего показывать:
+          // референсы вешаются на группы, галерея собирает утверждённые шоты —
+          // держим кнопки запертыми, а не ведём в пустоту
           <div className="flex items-center gap-1.5">
-            <Link
-              href={`/episodes/${episode.id}/refs`}
-              title={t("Референсы серии", "Episode references")}
-              className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:bg-ink-500"
-            >
-              REF
-            </Link>
-            <Link
-              href={`/episodes/${episode.id}/gallery`}
-              title={t("Галерея утверждённых шотов", "Approved shots gallery")}
-              className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
-            >
-              <span className="text-[13px] leading-none">🎞</span>
-              <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
-            </Link>
+            {noShots ? (
+              <>
+                <span
+                  title={lockHint}
+                  className="flex min-h-8 cursor-not-allowed items-center gap-1 rounded-full border border-[var(--border-subtle)] px-3 py-1.5 font-mono text-[11px] font-semibold text-t400 opacity-50"
+                >
+                  🔒 REF
+                </span>
+                <span
+                  title={lockHint}
+                  className="flex min-h-8 cursor-not-allowed items-center gap-1 rounded-full border border-[var(--border-subtle)] px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t400 opacity-50"
+                >
+                  <span className="text-[13px] leading-none">🎞</span>
+                  <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
+                </span>
+              </>
+            ) : (
+              <>
+                <Link
+                  href={`/episodes/${episode.id}/refs`}
+                  title={t("Референсы серии", "Episode references")}
+                  className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:bg-ink-500"
+                >
+                  REF
+                </Link>
+                <Link
+                  href={`/episodes/${episode.id}/gallery`}
+                  title={t("Галерея утверждённых шотов", "Approved shots gallery")}
+                  className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
+                >
+                  <span className="text-[13px] leading-none">🎞</span>
+                  <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
+                </Link>
+              </>
+            )}
           </div>
         }
       />

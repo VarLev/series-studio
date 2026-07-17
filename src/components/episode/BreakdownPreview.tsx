@@ -240,8 +240,22 @@ export default function BreakdownPreview({
           </div>
         )}
 
+        {/* Карточка сверки: пересказ сюжета глазами модели + персонажи и локации,
+            которые она вычитала. Ничего не сохраняет (saveBreakdown берёт только
+            groups) и группой шотов НЕ является — нужна ровно чтобы поймать
+            неверно понятый сюжет ДО подтверждения. Без подписи её принимали за
+            первый блок раскадровки. */}
         {(breakdown.summary || breakdown.characters.length > 0 || breakdown.locations.length > 0) && (
           <div className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-ink-700 p-3">
+            <div className="mb-2 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-t400">
+              {t("Как модель поняла сюжет", "How the model read the story")}
+              <span className="ml-1.5 normal-case tracking-normal opacity-70">
+                {t(
+                  "· сверка перед подтверждением, не сохраняется и шотом не станет",
+                  "· a check before you confirm — not saved, never becomes a shot",
+                )}
+              </span>
+            </div>
             {breakdown.summary && (
               <div className="text-[11.5px] leading-relaxed text-t200">{breakdown.summary}</div>
             )}
