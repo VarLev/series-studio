@@ -10,7 +10,7 @@ import {
   saveLlmModelChoice,
 } from "@/lib/actions/episodes";
 import { countEpisodeShots } from "@/lib/actions/shots";
-import { useLongAction } from "@/components/useLongAction";
+import { useLongAction, type LongActionResult } from "@/components/useLongAction";
 import { toast } from "@/components/Toaster";
 import type { Breakdown } from "@/lib/llm/contracts";
 import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
@@ -26,6 +26,16 @@ const DUR_MAX = 15;
 const DUR_DEFAULT: [number, number] = [3, 5];
 
 type SaveState = "saved" | "saving" | "local" | "idle";
+
+/** Запуск разбивки: токен тайника на сервере + когда нажали кнопку. */
+type BdRun = { token: string; startedAt: number };
+
+/**
+ * Потолок ожидания разбивки, сек. НЕ меньше серверного (10 мин), иначе клиент
+ * сдаётся раньше, чем приходит настоящий ответ. Он же — срок годности маркера
+ * запуска: старше этого ждать нечего.
+ */
+const BD_CEILING_SEC = 660;
 
 function ModelSelect({
   value,
@@ -84,6 +94,11 @@ export default function SynopsisEditor({
   // раскадровка стоит реальных денег — предпросмотр переживает переключение
   // вкладок и перезагрузку страницы через localStorage (замечание заказчика)
   const bdKey = `ss-bd:${episodeId}`;
+  // Маркер ИДУЩЕЙ разбивки. Сам вызов живёт на сервере и кладёт результат в тайник
+  // под токеном, но токен и время старта жили только в памяти компонента: уход со
+  // страницы размонтировал редактор, и вернувшийся видел чистый экран, будто ничего
+  // не запускал, — а готовая (уже оплаченная) разбивка так и лежала в тайнике.
+  const bdRunKey = `ss-bdrun:${episodeId}`;
   // хронометраж эпизода задаётся бегунком; переживает вкладки/перезагрузку (per-episode)
   const durKey = `ss-dur:${episodeId}`;
   const [title, setTitle] = useState(initialTitle);
@@ -159,6 +174,20 @@ export default function SynopsisEditor({
           setDurMax(hi);
         }
       }
+      // разбивка, запущенная до ухода со страницы, продолжает идти на сервере —
+      // подхватываем её по маркеру: возвращаем счётчик и поллинг результата
+      const rawRun = localStorage.getItem(bdRunKey);
+      if (rawRun) {
+        const run = JSON.parse(rawRun) as Partial<BdRun>;
+        const fresh =
+          typeof run?.token === "string" &&
+          typeof run.startedAt === "number" &&
+          Date.now() - run.startedAt < BD_CEILING_SEC * 1000;
+        // протухший маркер (браузер стоял закрытым дольше потолка) убираем: ждать
+        // нечего, тайник за это время либо забрали, либо вызов давно умер
+        if (fresh) watchBreakdown({ token: run.token!, startedAt: run.startedAt! }, true);
+        else localStorage.removeItem(bdRunKey);
+      }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -198,37 +227,62 @@ export default function SynopsisEditor({
     scheduleSave(next);
   }
 
-  function onBreakdown() {
-    setError("");
-    // токен запуска: сервер кладёт результат в тайник под ним, и даже если ответ
-    // экшена потеряется в туннеле (llmBreakdown идёт минуты), поллинг его доберёт
-    const token = crypto.randomUUID();
+  function stashRun(run: BdRun | null) {
+    try {
+      if (run) localStorage.setItem(bdRunKey, JSON.stringify(run));
+      else localStorage.removeItem(bdRunKey);
+    } catch {}
+  }
+
+  /**
+   * Ждать разбивку по её токену: сервер кладёт результат в тайник под ним, и даже
+   * если ответ экшена потеряется в туннеле (llmBreakdown идёт минуты), поллинг его
+   * доберёт. resume=true — вызов УЖЕ идёт (мы вернулись на экран): второй раз его
+   * не запускаем, это вторые деньги, — только подписываемся на результат.
+   */
+  function watchBreakdown(run: BdRun, resume: boolean) {
     bd.start({
-      run: async () => {
-        const res = await breakdownEpisode(
-          episodeId,
-          breakdownModel,
-          { min: durMin, max: durMax },
-          token,
-        );
-        return res.ok ? { ok: true, value: res.breakdown } : res;
-      },
+      startedAt: run.startedAt,
+      run: resume
+        ? () => new Promise<LongActionResult<Breakdown>>(() => {})
+        : async () => {
+            const res = await breakdownEpisode(
+              episodeId,
+              breakdownModel,
+              { min: durMin, max: durMax },
+              run.token,
+            );
+            return res.ok ? { ok: true, value: res.breakdown } : res;
+          },
       poll: async () => {
-        const res = await pollBreakdownResult(episodeId, token);
+        const res = await pollBreakdownResult(episodeId, run.token);
         if (!res) return null;
         return res.ok ? { ok: true, value: res.breakdown } : res;
       },
       pollMs: 5000,
       // потолок ожидания клиента должен быть НЕ меньше серверного (10 мин), иначе
       // клиент сдаётся раньше, чем приходит настоящий ответ или внятная ошибка
-      ceilingSec: 660,
+      ceilingSec: BD_CEILING_SEC,
       ceilingMsg: t(
         "Ответа нет дольше 11 минут. Раскадровка могла не создаться — проверьте «Console» или попробуйте ещё раз.",
         "No response for over 11 minutes. The breakdown may not have been created — check the Console or try again.",
       ),
-      onOk: stashPreview,
-      onErr: setError,
+      onOk: (b) => {
+        stashRun(null);
+        stashPreview(b);
+      },
+      onErr: (msg) => {
+        stashRun(null);
+        setError(msg);
+      },
     });
+  }
+
+  function onBreakdown() {
+    setError("");
+    const run: BdRun = { token: crypto.randomUUID(), startedAt: Date.now() };
+    stashRun(run); // до запуска: упасть между стартом и записью маркера нельзя
+    watchBreakdown(run, false);
   }
 
   // Промис резолвится по ФИНИШУ (успех/ошибка), а не по возврату экшена:

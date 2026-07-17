@@ -37,14 +37,21 @@ export function useLongAction<T>() {
     /** потолок ожидания, сек — дальше onErr(ceilingMsg) */
     ceilingSec: number;
     ceilingMsg: string;
+    /**
+     * Когда вызов начался на самом деле. Нужен ПРОДОЛЖЕНИЮ уже идущего вызова
+     * после возврата на экран: счётчик и потолок обязаны считаться от настоящего
+     * старта, а не от момента, когда мы заново подписались на результат — иначе
+     * потолок отодвинется, а секунды пойдут с нуля и соврут. По умолчанию — сейчас.
+     */
+    startedAt?: number;
     onOk: (value: T) => void;
     onErr: (msg: string) => void;
   }) {
     cleanup();
     doneRef.current = false;
     setBusy(true);
-    setElapsed(0);
-    const startedAt = Date.now();
+    const startedAt = opts.startedAt ?? Date.now();
+    setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
 
     const finish = (res: LongActionResult<T>) => {
       if (doneRef.current) return;
