@@ -458,8 +458,8 @@ export const DYNAMIC_BLOCKS: DynamicBlockMeta[] = [
     description:
       "Физическое состояние, начавшееся в предыдущих группах сцены и активное на старте этой (рука на шее, предмет в руках, поза) — вычисляется из state_begin/state_end разбивки.",
     warning:
-      "Длящийся контакт/поза/предмет из прошлых групп исчезнет из промптов, Enhance и Rework — стык видео порвётся.",
-    usedIn: [...SHOT_PROMPT_SITES, "revise_group", "enhance_group"],
+      "Длящийся контакт/поза/предмет из прошлых групп исчезнет из промптов, ревизий, Enhance и Rework — стык видео порвётся.",
+    usedIn: [...SHOT_PROMPT_SITES, "revise_prompt", "revise_group", "enhance_group"],
   },
   {
     id: "dyn_wardrobe",

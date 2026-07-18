@@ -6,6 +6,7 @@
  * вкладке «База правил» (это инструкция модели, а не справочник).
  */
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ConfirmButton from "@/components/ConfirmButton";
 import { toast } from "@/components/Toaster";
@@ -203,6 +204,26 @@ export default function SettingsClient({
 
   return (
     <div className="flex flex-col gap-3 px-4 pb-10">
+      {/* карта устройства приложения: /how-it-works не перехвачен панелью —
+          открывается полноэкранно, панель закрывается сама (catchAll) */}
+      <Link
+        href="/how-it-works"
+        className="flex min-h-12 items-center gap-3 rounded-xl border border-[var(--border-strong)] bg-ink-700 p-3.5 hover:bg-ink-600"
+        style={{ boxShadow: "var(--glow-violet-sm)" }}
+      >
+        <span className="text-[17px] leading-none text-violet-200">⧉</span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-[13px] font-semibold text-t100">How it works</span>
+          <span className="text-[10.5px] leading-relaxed text-t400">
+            {t(
+              "Карта пути серии: сюжет → шоты → промпт → видео, и что на каждый шаг влияет",
+              "Map of the episode path: story → shots → prompt → video, and what affects each step",
+            )}
+          </span>
+        </span>
+        <span className="text-[13px] text-t400">→</span>
+      </Link>
+
       <SectionLabel>{t("Интерфейс", "Interface")}</SectionLabel>
       <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-ink-700 p-3.5 sm:flex-row">
         <label className="flex flex-1 flex-col gap-1">

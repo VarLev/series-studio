@@ -9,7 +9,9 @@ import {
 } from "./templates";
 
 export const DEFAULT_SETTINGS = {
-  llm_model: "claude-sonnet-4-6",
+  // основная текстовая модель (промпты + раскадровка). Дефолт — GPT-5.6 Sol (OpenAI);
+  // при llm_use_cli_gpt="1" (по умолчанию) идёт через Codex CLI по подписке ChatGPT
+  llm_model: "gpt-5.6-sol",
   // модель для простых запросов: правка групп, подбор приёмов, анализ референсов
   llm_simple_model: "claude-haiku-4-5",
   // "1" → текстовые Claude-вызовы идут через Claude Code CLI (подписка Pro/Max,

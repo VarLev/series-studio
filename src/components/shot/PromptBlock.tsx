@@ -108,12 +108,10 @@ export default function PromptBlock({
   const { family, setFamily, openByFamily, setOpen } = usePromptTrack();
   // что создавать кнопкой: один трек или оба
   const [createChoice, setCreateChoice] = useState<PromptFamily | "both">("seedance");
-  // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт). Дефолт — Sonnet
-  // через подписку: если глобальная модель промптов выставлена на не-Claude (GPT),
-  // не наследуем её здесь; явный выбор Claude (Opus/Haiku) уважаем.
-  const [factoryModel, setFactoryModel] = useState(
-    isClaudeModel(llmModel) ? llmModel : "claude-sonnet-4-6",
-  );
+  // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт). По умолчанию —
+  // глобальная модель промптов (settings.llm_model) как есть, включая GPT
+  // (GPT идёт через Codex CLI). Можно переключить прямо здесь.
+  const [factoryModel, setFactoryModel] = useState(llmModel);
   const [error, setError] = useState("");
   // своя машина состояний вместо useTransition: нужен таймер и поллинг-подхват
   // результата, если ответ долгого запроса потеряется в туннеле. Стартуем всегда с

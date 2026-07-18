@@ -296,7 +296,9 @@ export async function llmReviseGroup(input: {
         "истинны на старте этой группы — правка НЕ должна им противоречить и не должна их «снимать» " +
         "(снять состояние может только явное действие, которого здесь нет):\n" +
         input.carriedState.map((s) => `- ${s}`).join("\n") +
-        "\n"
+        "\nКонтакт между персонажами (рука на шее и т.п.): в шоте, чей кадр включает затронутую часть " +
+        "тела, контакт ДОЛЖЕН быть виден — упомяни его в полях camera/action («в кадре только @X» при " +
+        "активном контакте руки @Y — ошибка: рука @Y тоже в кадре).\n"
       : "",
   );
   const anchorsBlock = input.anchors?.length
@@ -475,7 +477,9 @@ export async function llmEnhanceGroup(input: {
         "состояние может только явное действие, которого здесь нет); в якоря их НЕ предлагай — " +
         "приложение уже разносит их само:\n" +
         input.carriedState.map((s) => `- ${s}`).join("\n") +
-        "\n"
+        "\nКонтакт между персонажами (рука на шее и т.п.): в шоте, чей кадр включает затронутую часть " +
+        "тела, контакт ДОЛЖЕН быть виден — упомяни его в полях camera/action («в кадре только @X» при " +
+        "активном контакте руки @Y — ошибка: рука @Y тоже в кадре).\n"
       : "",
   );
   const anchorsBlock = input.anchors.length
@@ -873,7 +877,19 @@ export async function llmShotPrompt(
         "каждый факт истинным, пока Action какого-то шота его явно не изменит; если ни один шот его не " +
         "меняет — он действует ДО КОНЦА видео. В SHOT-блоках НЕ противоречь ему: где кадр включает " +
         "соответствующую часть тела/объект — покажи её в этом состоянии; втискивать факт в кадры, где " +
-        "этой части тела/объекта не видно, НЕ нужно."
+        "этой части тела/объекта не видно, НЕ нужно.\n" +
+        // инцидент 2026-07-18: SHOT 04 — профиль Simon, шея в кадре, но строка
+        // "Do not show @Jacob in shots 01, 03, 04" перекрыла GLOBAL CONTINUITY —
+        // видеомодель сгенерировала шею ПУСТОЙ. Точечный запрет сильнее общей
+        // фразы continuity, поэтому конфликт «контакт vs замок видимости»
+        // разруливаем явно.
+        "Контакт между персонажами (рука на шее, объятие и т.п.) — особый случай: в КАЖДОМ шоте, чей " +
+        "кадр включает затронутую часть тела, НАЗОВИ контакт прямо в Framing этого шота (напр. " +
+        "\"@Simon in profile; @Jacob's hand rests on his neck, @Jacob himself stays out of frame\") — " +
+        "одной строки в GLOBAL CONTINUITY недостаточно. Замок видимости контакт НЕ отменяет: персонаж, " +
+        "чья рука в кадре по состоянию, НЕ «полностью вне кадра» — НЕ пиши для такого шота строку " +
+        "\"Do not show @X\" целиком; исключай точнее: \"Do not show @X's face or body; only his hand " +
+        "on @Y's neck stays visible.\""
       : "",
   );
 
@@ -1130,6 +1146,30 @@ export async function llmRevisePrompt(
         `"${settings.series_style.trim()}". Он должен остаться в VISUAL STYLE и атмосфере GLOBAL CONTINUITY без изменений.`
       : "",
   );
+  // входящее сквозное состояние — ревизия не должна его терять или ослаблять
+  // (замечание пользователя может касаться совсем другого места промпта)
+  const reviseEpisodeShots = shot
+    ? await db
+        .select()
+        .from(shots)
+        .where(eq(shots.episodeId, shot.episodeId))
+        .orderBy(asc(shots.orderIndex))
+    : [];
+  const reviseCarried =
+    shot && !shot.isInsert ? carriedStateAtStart(reviseEpisodeShots, shot.id) : [];
+  const reviseCarriedBlock = gateBlock(
+    "dyn_carried_state",
+    off,
+    reviseCarried.length
+      ? "СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ (входящее, истинно с первого кадра этого видео) — сохрани его " +
+        "в промпте и НЕ ослабляй при правке:\n" +
+        reviseCarried.map((s) => `- ${s}`).join("\n") +
+        "\nКонтакт между персонажами: в каждом SHOT-блоке, чей кадр включает затронутую часть тела, " +
+        "контакт должен быть назван в Framing; строка \"Do not show @X\" в таком шоте исключает только " +
+        "лицо/фигуру @X, но НЕ его руку (пример: \"Do not show @X's face or body; only his hand on " +
+        "@Y's neck stays visible.\")."
+      : "",
+  );
   return runJson(
     {
       kind: "revision",
@@ -1139,7 +1179,7 @@ export async function llmRevisePrompt(
       // база знаний в кэшируемом префиксе — как в llmShotPrompt
       cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${reviseStyleBlock}\n\n` +
+        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${reviseStyleBlock}\n\n${reviseCarriedBlock}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. " +
         (R("revise_prompt_hygiene") ? `${R("revise_prompt_hygiene")}\n` : "") +
