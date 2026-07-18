@@ -275,6 +275,33 @@ export default async function CostsContent({ bare = false }: { bare?: boolean })
               </option>
             </select>
           </label>
+          {/* Подключение текстовых GPT-запросов: API (деньги) или OpenAI Codex CLI
+              (подписка ChatGPT Plus/Pro). Vision-GPT всегда идёт через API. */}
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-t300">
+              {t("Текстовые запросы GPT — подключение", "GPT text requests — connection")}
+              <span className="text-t400">
+                {" "}
+                —{" "}
+                {t(
+                  "CLI тратит подписку ChatGPT (Plus/Pro) вместо API-денег; нужен разовый вход: codex login",
+                  "CLI spends your ChatGPT subscription (Plus/Pro) instead of API money; one-time codex login required",
+                )}
+              </span>
+            </span>
+            <select
+              name="llm_use_cli_gpt"
+              defaultValue={settings.llm_use_cli_gpt}
+              className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-ink-700 px-3 font-mono text-[12.5px] text-t100 outline-none focus:border-[var(--border-strong)]"
+            >
+              <option value="0">
+                {t("OpenAI API — ключ, оплата за токены", "OpenAI API — key, pay per token")}
+              </option>
+              <option value="1">
+                {t("Codex CLI — подписка ChatGPT (Plus/Pro)", "Codex CLI — subscription (ChatGPT Plus/Pro)")}
+              </option>
+            </select>
+          </label>
           {fields.map((f) => (
             <label key={f.key} className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-t300">

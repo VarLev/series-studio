@@ -30,9 +30,11 @@ powershell -NoProfile -Command "if ((Test-NetConnection -ComputerName 127.0.0.1 
 if errorlevel 1 goto wait
 
 echo [4/4] Server is up. Starting the tunnel - the phone address is below
-echo        (a line like https://XXXX.trycloudflare.com):
+echo        (a line like https://XXXX.trycloudflare.com).
+echo        If TELEGRAM_BOT_TOKEN is set in .env.local, the address is also sent
+echo        to your Telegram bot.
 echo.
-"%CF%" tunnel --url http://127.0.0.1:3000
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\mobile-tunnel.ps1" -Cloudflared "%CF%"
 
 echo.
 echo Tunnel stopped. The server keeps running in the "Series Studio server" window.

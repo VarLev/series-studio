@@ -43,11 +43,39 @@ export const breakdownSchema = z.object({
       wardrobe: z
         .array(z.object({ name: z.string(), outfit: z.string().default("") }))
         .default([]),
+      // СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ как диф: длящиеся факты (контакт, предмет в
+      // руках, поза, задранная одежда), которые НАЧАЛИСЬ в этой группе и продолжают
+      // действовать после её конца (state_begin) / явно ЗАКОНЧИЛИСЬ в ней (state_end,
+      // дословной копией текста из state_begin). Активное состояние каждой группы
+      // приложение вычисляет само свёрткой по связке сцены (carriedStateAtStart) —
+      // модель НЕ повторяет состояние в промежуточных группах (это и был баг:
+      // «рука на шее» из группы 3 терялась к группе 7).
+      state_begin: z.array(z.string()).default([]),
+      state_end: z.array(z.string()).default([]),
       shots: z.array(groupShotSchema).default([]),
     }),
   ),
 });
 export type Breakdown = z.infer<typeof breakdownSchema>;
+
+/**
+ * Бэкфилл сквозного состояния (llmExtractCarriedState): дешёвая модель размечает
+ * state_begin/state_end по УЖЕ готовым группам эпизода — для раскадровок, созданных
+ * до появления полей, и как «пересборка связности» после тяжёлых ручных правок.
+ * order — сквозной порядковый номер группы, как подан в запросе.
+ */
+export const carriedStateSchema = z.object({
+  groups: z
+    .array(
+      z.object({
+        order: z.number().int(),
+        state_begin: z.array(z.string()).default([]),
+        state_end: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+});
+export type CarriedState = z.infer<typeof carriedStateSchema>;
 
 /**
  * Вставные группы (llmInsertGroups): по запросу пользователя модель создаёт

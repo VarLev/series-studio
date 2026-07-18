@@ -289,6 +289,18 @@ const MIGRATIONS: string[][] = [
      WHERE p.id = extra.id`,
     `CREATE UNIQUE INDEX IF NOT EXISTS prompts_shot_version_idx ON prompts (shot_id, version)`,
   ],
+  // v9 — снимок «первоначального состояния» группы для кнопки Revert. Бэкфилла в
+  // SQL нет: снимок — JSON из нескольких таблиц (shots + shot_entities +
+  // shot_anchors), его собирает ensureGroupOrigin() лениво при первом открытии
+  // группы. Новые группы получают снимок при создании (разбивка/вставка).
+  [`ALTER TABLE shots ADD COLUMN IF NOT EXISTS origin_json text`],
+  // v10 — сквозное физическое состояние группы как диф (state_begin/state_end из
+  // разбивки): активное состояние вычисляется на лету, в БД только сырые дифы.
+  // Бэкфилла в SQL нет — старые эпизоды размечает extractCarriedState (LLM) по кнопке
+  [
+    `ALTER TABLE shots ADD COLUMN IF NOT EXISTS state_begin_json text NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE shots ADD COLUMN IF NOT EXISTS state_end_json text NOT NULL DEFAULT '[]'`,
+  ],
 ];
 
 type GlobalWithDb = typeof globalThis & { __ssDb?: Promise<DB> };

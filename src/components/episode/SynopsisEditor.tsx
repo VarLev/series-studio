@@ -15,7 +15,7 @@ import { countEpisodeShots } from "@/lib/actions/shots";
 import { useLongAction, type LongActionResult } from "@/components/useLongAction";
 import { toast } from "@/components/Toaster";
 import type { Breakdown } from "@/lib/llm/contracts";
-import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
+import { LLM_MODELS, isClaudeModel, isGptModel } from "@/lib/llm/models";
 import { estTextUsd, estTokens, estBreakdownOutTokens, fmtUsd } from "@/lib/pricing";
 import BreakdownPreview from "./BreakdownPreview";
 import DualRange from "@/components/DualRange";
@@ -77,6 +77,7 @@ export default function SynopsisEditor({
   breakdownModel,
   onBreakdownModelChange,
   useCli = false,
+  useCliGpt = false,
 }: {
   episodeId: string;
   initialTitle: string;
@@ -90,6 +91,8 @@ export default function SynopsisEditor({
   onBreakdownModelChange: (m: string) => void;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
   useCli?: boolean;
+  /** llm_use_cli_gpt на /costs — GPT-вызовы идут через подписку ChatGPT (Codex CLI) */
+  useCliGpt?: boolean;
 }) {
   const t = useT();
   const draftKey = `ss-draft:${episodeId}`;
@@ -469,9 +472,11 @@ export default function SynopsisEditor({
             {bd.busy
               ? t(`Claude раскадрирует… ${bd.elapsed}с`, `Claude is storyboarding… ${bd.elapsed}s`)
               : (() => {
-                  // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
+                  // при включённом CLI вызов идёт через подписку — цена в $ не
+                  // расходуется (Claude → Claude Code CLI, GPT → Codex CLI)
                   const cost =
-                    useCli && isClaudeModel(breakdownModel)
+                    (useCli && isClaudeModel(breakdownModel)) ||
+                    (useCliGpt && isGptModel(breakdownModel))
                       ? "(CLI)"
                       : `~${fmtUsd(
                           estTextUsd(

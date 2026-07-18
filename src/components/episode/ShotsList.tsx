@@ -47,6 +47,7 @@ export default function ShotsList({
   shots,
   defaultModel,
   useCli = false,
+  useCliGpt = false,
   onStoryboard,
 }: {
   episodeId: string;
@@ -55,6 +56,8 @@ export default function ShotsList({
   defaultModel: string;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
   useCli?: boolean;
+  /** llm_use_cli_gpt на /costs — GPT-вызовы идут через подписку ChatGPT (Codex CLI) */
+  useCliGpt?: boolean;
   /** «раскадровать группу»: вкладка «Раскадровка» с этой группой уже в области */
   onStoryboard?: (shotId: string) => void;
 }) {
@@ -276,6 +279,7 @@ export default function ShotsList({
         defaultModel={defaultModel}
         baselineCount={shots.length}
         useCli={useCli}
+        useCliGpt={useCliGpt}
       />
     </div>
   );

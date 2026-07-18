@@ -21,8 +21,10 @@ import { getT } from "@/lib/i18n-server";
 import { StatusPill, SectionLabel, EmptyState } from "@/components/ui";
 import ConfirmButton from "@/components/ConfirmButton";
 import { deleteAllGenerations } from "@/lib/actions/deletes";
+import { ensureGroupOrigin } from "@/lib/groupOrigin";
 import EntityChips from "@/components/shot/EntityChips";
 import AnchorsSection from "@/components/shot/AnchorsSection";
+import StateSection from "@/components/shot/StateSection";
 import ShotRefs from "@/components/shot/ShotRefs";
 import PromptBlock from "@/components/shot/PromptBlock";
 import PromptDrawer from "@/components/shot/PromptDrawer";
@@ -30,11 +32,18 @@ import PromptTrackProvider from "@/components/shot/PromptTrackContext";
 import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
 import EnhanceButton from "@/components/shot/EnhanceButton";
+import RevertButton from "@/components/shot/RevertButton";
 import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
 import SceneToggle from "@/components/shot/SceneToggle";
 import ResultsStrip from "@/components/shot/ResultsStrip";
 import GenPoller from "@/components/GenPoller";
-import { chainLocation, chainTimeWeather, displayGroupNumbers } from "@/lib/beats";
+import {
+  carriedStateAtStart,
+  chainLocation,
+  chainTimeWeather,
+  displayGroupNumbers,
+  parseStateList,
+} from "@/lib/beats";
 import { getEpisodeShotRows } from "@/lib/shotChrome";
 import { listShotAnchors, listEpisodeAnchors } from "@/lib/anchors";
 
@@ -49,6 +58,11 @@ export default async function ShotPage(ctx: {
 
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
   if (!shot || shot.episodeId !== episodeId) notFound();
+
+  // зафиксировать точку отката для Revert. Для групп, созданных до этой фичи, —
+  // их текущее состояние (исходник «как при раскадровке» им взять неоткуда).
+  // Идемпотентно: пишет один раз, дальше только SELECT.
+  await ensureGroupOrigin(shotId);
 
   // шоты внутри группы (раскадровка v2); у старых групп beats_json пуст
   let beats: GroupShot[] = [];
@@ -67,6 +81,12 @@ export default async function ShotPage(ctx: {
   const displayNoById = displayGroupNumbers(rows);
   const shotIdx = rows.findIndex((s) => s.id === shotId);
   const prevShot = rows[shotIdx - 1] ?? null;
+
+  // сквозное состояние: входящее вычисляется свёрткой дифов по связке сцены,
+  // собственные дифы группы (начинается/заканчивается здесь) — из её строки
+  const incomingState = shot.isInsert ? [] : carriedStateAtStart(rows, shotId);
+  const stateBegin = parseStateList(shot.stateBeginJson);
+  const stateEnd = parseStateList(shot.stateEndJson);
 
   // якоря: прикреплённые к группе + пул эпизода для переиспользования (не прикреплённые)
   const attachedAnchors = await listShotAnchors(shotId);
@@ -378,6 +398,27 @@ export default async function ShotPage(ctx: {
         <AnchorsSection shotId={shotId} attached={attachedAnchors} available={availableAnchors} />
       </div>
 
+      {/* сквозное физическое состояние: у вставных групп связки нет — секцию не показываем */}
+      {!shot.isInsert && (
+        <div className="flex flex-col gap-1.5">
+          <SectionLabel
+            hint={t(
+              "длящиеся факты сцены · разносятся по группам сами",
+              "lasting facts of the scene · propagate across groups",
+            )}
+          >
+            {t("Сквозное состояние", "Carried state")}
+          </SectionLabel>
+          <StateSection
+            shotId={shotId}
+            episodeId={episodeId}
+            incoming={incomingState}
+            begin={stateBegin}
+            end={stateEnd}
+          />
+        </div>
+      )}
+
       <div className="flex flex-col gap-1.5">
         <SectionLabel
           hint={t("определил Claude · правится вручную", "detected by Claude · editable")}
@@ -448,8 +489,11 @@ export default async function ShotPage(ctx: {
                 · {t("видео", "videos")} {results.filter((r) => r.status === "done").length}
               </div>
             </div>
-            {/* Enhance — в шапке группы (перенос из блока шотов, замечание заказчика) */}
-            <EnhanceButton shotId={shotId} />
+            {/* Revert + Enhance — в шапке группы (замечание заказчика) */}
+            <div className="flex shrink-0 items-center gap-2 self-start">
+              <RevertButton shotId={shotId} />
+              <EnhanceButton shotId={shotId} />
+            </div>
           </div>
 
           {/* граница сюжетной сцены: тумблер «новая сцена / продолжение».
@@ -504,6 +548,7 @@ export default async function ShotPage(ctx: {
               llmModel={settings.llm_model}
               usedTechniquesByFamily={usedTechniquesByFamily}
               useCli={settings.llm_use_cli === "1"}
+              useCliGpt={settings.llm_use_cli_gpt === "1"}
             />
           </PromptDrawer>
 

@@ -212,6 +212,83 @@ function chainPick<T extends { id: string; sceneStart: boolean; isInsert: boolea
   return found ? get(found).trim() : "";
 }
 
+/** JSON-массив строк из state_begin_json/state_end_json — толерантно к мусору. */
+export function parseStateList(json: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(json || "[]");
+    if (Array.isArray(parsed)) {
+      return parsed.filter((s): s is string => typeof s === "string" && Boolean(s.trim()));
+    }
+  } catch {}
+  return [];
+}
+
+/**
+ * Ключ матчинга текстов состояния (state_end → state_begin, удаление из сцены):
+ * без регистра, пунктуации и лишних пробелов.
+ */
+export function stateKey(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}@]+/gu, " ").trim();
+}
+
+/**
+ * СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ на старте группы (момент 00:00 её видео) — свёртка
+ * дифов state_begin/state_end по связке сцены СТРОГО ДО текущей группы. Сама группа
+ * в свёртку не входит намеренно: возникший в ней факт описывают её собственные шоты
+ * (там проза и назвала переход), а числящийся в её state_end факт на старте ещё
+ * активен — видео обязано начаться с ним, снимут его шоты этой группы.
+ * Дифы модель отмечает один раз (в группе перехода), «помнит» состояние приложение —
+ * ровно как spreadWardrobeOverScenes и chainLocation, и по той же причине: просить
+ * модель повторять факт в каждой группе ненадёжно (инцидент «рука на шее»:
+ * поставлена в группе 3, к группе 7 из шотов пропала).
+ * state_end без пары в активном состоянии игнорируется; границу сцены (scene_start)
+ * состояние не пересекает; вставка (is_insert) — сама себе связка, входящего нет.
+ */
+export function carriedStateAtStart<
+  T extends {
+    id: string;
+    sceneStart: boolean;
+    isInsert: boolean;
+    stateBeginJson: string;
+    stateEndJson: string;
+  },
+>(rows: T[], shotId: string): string[] {
+  const chain = sceneChainOf(rows, shotId);
+  const idx = chain.findIndex((r) => r.id === shotId);
+  if (idx <= 0) return [];
+  // активное состояние: ключ → исходный текст первого begin (порядок возникновения)
+  const active = new Map<string, string>();
+  for (const g of chain.slice(0, idx)) {
+    for (const s of parseStateList(g.stateBeginJson)) {
+      const key = stateKey(s);
+      if (key && !active.has(key)) active.set(key, s.trim());
+    }
+    for (const s of parseStateList(g.stateEndJson)) active.delete(stateKey(s));
+  }
+  return [...active.values()];
+}
+
+/**
+ * Тексты state_end текущей группы, реально снимающие входящее состояние, — чтобы
+ * промпт-фабрика могла сказать модели: «это состояние заканчивается ЗДЕСЬ, смену
+ * описывают шоты». Ends без активной пары не возвращаются.
+ */
+export function endedInGroup<
+  T extends {
+    id: string;
+    sceneStart: boolean;
+    isInsert: boolean;
+    stateBeginJson: string;
+    stateEndJson: string;
+  },
+>(rows: T[], shotId: string): string[] {
+  const incoming = carriedStateAtStart(rows, shotId);
+  if (!incoming.length) return [];
+  const incomingKeys = new Set(incoming.map(stateKey));
+  const row = rows.find((r) => r.id === shotId);
+  return parseStateList(row?.stateEndJson).filter((s) => incomingKeys.has(stateKey(s)));
+}
+
 /** Локация связки (WHERE) — одна на всю сцену. */
 export function chainLocation<
   T extends { id: string; sceneStart: boolean; isInsert: boolean; location: string },

@@ -48,6 +48,15 @@ const DISALLOWED_TOOLS =
   "Bash,Edit,Write,Read,Glob,Grep,Task,TodoWrite,NotebookEdit,WebFetch,WebSearch";
 
 /**
+ * Высокий бюджет «мышления» (MAX_THINKING_TOKENS) для сложных творческих вызовов
+ * (разбивка, Enhance, вставки, промпт) — там рассуждение прямо повышает качество.
+ * ~в 2 раза выше дефолта CLI (~12k) и ниже потолка ultrathink (~31999). Это МАКСИМУМ,
+ * а не форсированный объём: модель тратит столько, сколько нужно, до этого предела.
+ * Переопределяется CLI_THINKING_TOKENS.
+ */
+const HIGH_THINKING_TOKENS = 24000;
+
+/**
  * Резолв бинаря. Ключевой момент (Windows): `claude` — это .cmd-шим, который
  * зовёт НАТИВНЫЙ claude.exe. Запускать нужно ИМЕННО .exe напрямую (shell:false):
  * тогда нет зависимости ни от PATH дочернего процесса, ни от кодировки cmd.exe —
@@ -161,16 +170,17 @@ export async function runClaudeCliText(
   delete env.ANTHROPIC_AUTH_TOKEN;
   delete env.ANTHROPIC_BASE_URL;
   delete env.ANTHROPIC_MODEL;
-  // ГЛАВНАЯ причина таймаутов реворка: Claude Code по умолчанию гонит модель с
-  // расширенным «мышлением» (в логах Console — ~12k output-токенов на вызов, из
-  // них сам JSON ~0.5k, остальное — рассуждения), и один вызов уходит на 170–210с,
-  // упираясь в таймаут. Проверено напрямую: с MAX_THINKING_TOKENS=0 тот же реворк
-  // отвечает за ~12с и 252 токена. Бюджет thinking режем ТОЧЕЧНО — только там, где
-  // задача механическая и вызывающий передал call.thinkingTokens (реворд шотов);
-  // Enhance/промпты/разбивку не трогаем, им рассуждение полезно. Глобально можно
-  // переопределить через CLI_THINKING_TOKENS (напр. 0 — почти выкл, 2048 — лёгкое).
-  const thinkingBudget = process.env.CLI_THINKING_TOKENS ?? call.thinkingTokens;
-  if (thinkingBudget != null && !env.MAX_THINKING_TOKENS) {
+  // «Мышление» модели задаём ЯВНО по типу задачи:
+  //  - механическая (реворк шотов, call.thinkingTokens=0) → почти выкл. Реворк по
+  //    умолчанию тонул в ~12k рассуждения и 170–210с; с MAX_THINKING_TOKENS=0 тот
+  //    же реворк — ~12с и 252 токена (проверено);
+  //  - сложное творчество (разбивка, Enhance, вставки, промпт — thinkingTokens не
+  //    передан) → ВЫСОКИЙ бюджет: рассуждение здесь напрямую улучшает качество, и
+  //    мы не полагаемся на дефолт CLI (~12k), а поднимаем потолок явно.
+  // Глобально переопределяется CLI_THINKING_TOKENS (напр. 0 — почти выкл).
+  const thinkingBudget =
+    process.env.CLI_THINKING_TOKENS ?? call.thinkingTokens ?? HIGH_THINKING_TOKENS;
+  if (!env.MAX_THINKING_TOKENS) {
     env.MAX_THINKING_TOKENS = String(thinkingBudget);
   }
 

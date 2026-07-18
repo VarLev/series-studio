@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "^2.1.207",
+    "@openai/codex": "^0.144.5",
     "@tailwindcss/postcss": "^4",
     "@types/archiver": "^8.0.0",
     "@types/node": "^20",

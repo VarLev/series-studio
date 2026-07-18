@@ -15,6 +15,10 @@ export const DEFAULT_SETTINGS = {
   // "1" → текстовые Claude-вызовы идут через Claude Code CLI (подписка Pro/Max,
   // не тратит API-деньги). Vision и не-Claude модели всегда через свои API.
   llm_use_cli: "0",
+  // "1" → текстовые GPT-вызовы идут через OpenAI Codex CLI (подписка ChatGPT
+  // Plus/Pro, не тратит API-деньги OpenAI). По умолчанию ВКЛючено — все GPT-
+  // запросы идут через CLI. Vision-GPT всегда через API. Нужен `codex login`.
+  llm_use_cli_gpt: "1",
   series_title: "The Edge of Stigma",
   series_rules:
     "Жанр: тёмная романтика / психологический триллер (Boys Love). " +

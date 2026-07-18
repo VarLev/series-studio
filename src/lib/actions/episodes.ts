@@ -8,6 +8,7 @@ import { llmBreakdown } from "@/lib/llm/factory";
 import { setSetting } from "@/lib/settings";
 import { composeActionMd, normalizeBeats, recomputeEpisodeTimecodes } from "@/lib/beats";
 import { buildEntityLinkIndex, linkGroupEntities, type EntityLinkIndex } from "@/lib/entityLink";
+import { ensureGroupOrigin } from "@/lib/groupOrigin";
 import { stripAt } from "@/lib/entityName";
 import type { Breakdown } from "@/lib/llm/contracts";
 
@@ -336,6 +337,9 @@ export async function saveBreakdown(
       emotionalTone: group.emotional_tone ?? "",
       status: "draft",
       sceneStart: group.scene_start,
+      // сквозное состояние (диф): активное состояние групп вычисляется на лету
+      stateBeginJson: JSON.stringify(group.state_begin ?? []),
+      stateEndJson: JSON.stringify(group.state_end ?? []),
       // персонажи, которых модель назвала, но в библии их нет: раньше они молча
       // пропадали (linkGroupEntities связывает только найденных) и всплывали уже
       // на этапе промптов — половина каста без референса. Теперь это красные
@@ -349,6 +353,8 @@ export async function saveBreakdown(
         .join(" "),
       wardrobe: wardrobeByGroup[gi],
     });
+    // снимок первоначального состояния для Revert (с уже привязанными персонажами)
+    await ensureGroupOrigin(shotId);
   }
   await recomputeEpisodeTimecodes(episodeId);
   await db.update(episodes).set({ status: "storyboarded" }).where(eq(episodes.id, episodeId));

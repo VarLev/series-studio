@@ -2,17 +2,25 @@
 
 import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, shots, shotEntities, references, entities } from "@/lib/db";
+import { getDb, shots, shotEntities, shotAnchors, anchors, references, entities } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import {
+  carriedStateAtStart,
   chainLocation,
   chainTimeWeather,
   composeActionMd,
   normalizeBeats,
+  parseStateList,
   recomputeEpisodeTimecodes,
   sceneChainOf,
+  stateKey,
 } from "@/lib/beats";
-import { llmEnhanceGroup, llmInsertGroups, llmReviseGroup } from "@/lib/llm/factory";
+import {
+  llmEnhanceGroup,
+  llmExtractCarriedState,
+  llmInsertGroups,
+  llmReviseGroup,
+} from "@/lib/llm/factory";
 import { createEpisodeAnchor, getShotAnchorTexts } from "@/lib/anchors";
 import { ensureShotRefsAnalyzed } from "@/lib/refs";
 import { reconcileShotPromptRefs } from "@/lib/refDirectives";
@@ -21,6 +29,7 @@ import { listEnabledTechniques } from "@/lib/director";
 import { getDisabledRuleIds } from "@/lib/rules";
 import { stripAt } from "@/lib/entityName";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
+import { ensureGroupOrigin, type GroupOriginSnapshot } from "@/lib/groupOrigin";
 import { z } from "zod";
 
 function shotPath(episodeId: string, shotId: string) {
@@ -38,6 +47,126 @@ export async function updateShot(
   await db.update(shots).set(patch).where(eq(shots.id, shotId));
   revalidatePath(shotPath(shot.episodeId, shotId));
   revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Дифы сквозного состояния группы (state_begin/state_end) — ручная правка чипов
+ * на карточке. Активное состояние остальных групп пересчитывается на лету
+ * (carriedStateAtStart), поэтому правка одной группы чинит все группы ниже разом.
+ */
+export async function updateShotState(
+  shotId: string,
+  begin: string[],
+  end: string[],
+): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  const clean = (arr: string[]) =>
+    JSON.stringify(arr.map((s) => s.trim()).filter(Boolean).slice(0, 20));
+  await db
+    .update(shots)
+    .set({ stateBeginJson: clean(begin), stateEndJson: clean(end) })
+    .where(eq(shots.id, shotId));
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Удалить сквозной факт из ВСЕЙ сцены: вычищает его из state_begin/state_end
+ * каждой группы связки (матчинг нормализованный — stateKey). Нужен чипам
+ * «входящего» состояния: сам факт живёт в группе-источнике, и с карточки
+ * группы 7 его иначе не снять — только идти искать, где он начался.
+ */
+export async function removeSceneState(shotId: string, text: string): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  const rows = await db
+    .select()
+    .from(shots)
+    .where(eq(shots.episodeId, shot.episodeId))
+    .orderBy(asc(shots.orderIndex));
+  const key = stateKey(text);
+  if (!key) return;
+  for (const g of sceneChainOf(rows, shotId)) {
+    const begin = parseStateList(g.stateBeginJson);
+    const end = parseStateList(g.stateEndJson);
+    const nextBegin = begin.filter((s) => stateKey(s) !== key);
+    const nextEnd = end.filter((s) => stateKey(s) !== key);
+    if (nextBegin.length !== begin.length || nextEnd.length !== end.length) {
+      await db
+        .update(shots)
+        .set({ stateBeginJson: JSON.stringify(nextBegin), stateEndJson: JSON.stringify(nextEnd) })
+        .where(eq(shots.id, g.id));
+    }
+  }
+  revalidatePath(shotPath(shot.episodeId, shotId));
+  revalidatePath(`/episodes/${shot.episodeId}`);
+}
+
+/**
+ * Бэкфилл сквозного состояния по ВСЕМУ эпизоду (кнопка «Разметить по эпизоду»):
+ * дешёвая модель читает готовые группы и возвращает дифы state_begin/state_end —
+ * для раскадровок, созданных до фичи, и как пересборка связности после тяжёлых
+ * ручных правок. Перезаписывает дифы всех НЕ вставных групп (вставки — вне связок).
+ */
+export async function extractCarriedState(
+  episodeId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAuth();
+  try {
+    const db = await getDb();
+    const rows = (
+      await db.select().from(shots).where(eq(shots.episodeId, episodeId)).orderBy(asc(shots.orderIndex))
+    ).filter((s) => !s.isInsert);
+    if (!rows.length) return { ok: false, error: "В эпизоде нет групп" };
+    const digest = (s: (typeof rows)[number]): string => {
+      try {
+        const b = JSON.parse(s.beatsJson || "[]") as Array<{
+          order?: number;
+          camera?: string;
+          action?: string;
+          draft?: boolean;
+        }>;
+        if (Array.isArray(b)) {
+          const lines = b
+            .filter((x) => !x.draft)
+            .map((x) => `Шот ${x.order ?? "?"}: ${[x.camera, x.action].filter(Boolean).join(" — ")}`)
+            .filter((l) => l.length > 10);
+          if (lines.length) return lines.join("\n");
+        }
+      } catch {}
+      return s.actionMd || "";
+    };
+    const res = await llmExtractCarriedState(
+      episodeId,
+      rows.map((s, i) => ({
+        order: i + 1,
+        title: s.title,
+        // первая группа эпизода — всегда начало сцены
+        sceneStart: i === 0 || s.sceneStart,
+        text: digest(s),
+      })),
+    );
+    const byOrder = new Map(res.groups.map((g) => [g.order, g]));
+    for (const [i, s] of rows.entries()) {
+      const g = byOrder.get(i + 1);
+      const clean = (arr: string[] | undefined) =>
+        JSON.stringify((arr ?? []).map((t) => t.trim()).filter(Boolean).slice(0, 20));
+      await db
+        .update(shots)
+        .set({ stateBeginJson: clean(g?.state_begin), stateEndJson: clean(g?.state_end) })
+        .where(eq(shots.id, s.id));
+    }
+    revalidatePath(`/episodes/${episodeId}`);
+    return { ok: true };
+  } catch (e) {
+    console.error("[extractCarriedState]", e);
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
 }
 
 export async function moveShot(shotId: string, direction: "up" | "down"): Promise<void> {
@@ -131,6 +260,8 @@ async function doReviseGroup(
 ): Promise<RevResult> {
   try {
     const db = await getDb();
+    // зафиксировать точку отката перед Rework — Revert вернёт до-Rework содержимое
+    await ensureGroupOrigin(shotId);
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (!shot) return { ok: false, error: "Группа не найдена" };
     let currentBeats: GroupShot[] = [];
@@ -192,6 +323,8 @@ async function doReviseGroup(
       targetOrders: scoped,
       // прикреплённые якоря — обязательные детали, которые правка не должна терять
       anchors: await getShotAnchorTexts(shotId),
+      // входящее сквозное состояние сцены — правка не должна ему противоречить
+      carriedState: carriedStateAtStart(allRows, shotId),
     });
 
     // точечная правка: детерминированно берём из ответа модели ТОЛЬКО целевые шоты,
@@ -247,6 +380,9 @@ export async function enhanceGroup(
   await requireAuth();
   try {
     const db = await getDb();
+    // зафиксировать точку отката ДО улучшения, чтобы Revert после Enhance вернул
+    // именно до-Enhance содержимое (для существующих групп — их текущее состояние)
+    await ensureGroupOrigin(shotId);
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     if (!shot) return { ok: false, error: "Группа не найдена" };
     let currentBeats: GroupShot[] = [];
@@ -302,6 +438,8 @@ export async function enhanceGroup(
       emotionalTone: shot.emotionalTone,
       sceneContext,
       anchors: existingAnchors,
+      // входящее сквозное состояние сцены — шлифовка не должна его терять
+      carriedState: carriedStateAtStart(allRows, shotId),
     });
     // Enhance только улучшает Main: все возвращённые шоты — основные (draft:false).
     // shots_draft — не черновики (создавать их промпт запрещает), а те же основные
@@ -387,6 +525,87 @@ export async function enhanceGroup(
     // стек в терминал сервера: тост клиента может не дожить до пользователя
     // (туннель), а «Failed query…» без стека дважды уводил отладку не туда
     console.error("[enhanceGroup]", e);
+    return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
+  }
+}
+
+/**
+ * Revert: вернуть группу в «первоначальное состояние» — содержимое из снимка origin
+ * (см. lib/groupOrigin.ts). Откатывает шоты/тайминг/заголовок/тон, чипы-заготовки,
+ * персонажей в кадре и якоря группы. НЕ трогает локацию/погоду (едины на сцену),
+ * статус, победителя, промпты, генерации и референсы — это результаты работы, а не
+ * содержимое раскадровки. У групп без снимка вернёт понятную ошибку.
+ */
+export async function revertGroup(
+  shotId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAuth();
+  try {
+    const db = await getDb();
+    const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+    if (!shot) return { ok: false, error: "Группа не найдена" };
+    let snap: GroupOriginSnapshot | null = null;
+    try {
+      if (shot.originJson) snap = JSON.parse(shot.originJson) as GroupOriginSnapshot;
+    } catch {}
+    if (!snap) {
+      return { ok: false, error: "У этой группы нет сохранённого исходного состояния" };
+    }
+
+    // содержимое группы (сценовые location/timeWeather и статус/результаты не трогаем)
+    await db
+      .update(shots)
+      .set({
+        title: snap.title,
+        durationSec: snap.durationSec,
+        beatsJson: snap.beatsJson,
+        actionMd: snap.actionMd,
+        cameraHint: snap.cameraHint,
+        emotionalTone: snap.emotionalTone,
+        sceneStart: snap.sceneStart,
+        unlinkedCharsJson: snap.unlinkedCharsJson,
+        // дифы сквозного состояния — часть раскадровки; у снимков до фичи полей
+        // нет — оставляем текущие значения
+        ...(snap.stateBeginJson != null ? { stateBeginJson: snap.stateBeginJson } : {}),
+        ...(snap.stateEndJson != null ? { stateEndJson: snap.stateEndJson } : {}),
+      })
+      .where(eq(shots.id, shotId));
+
+    // персонажи в кадре — пересобрать точно как в снимке (включая наряды/локацию-сущность)
+    await db.delete(shotEntities).where(eq(shotEntities.shotId, shotId));
+    if (snap.entities?.length) {
+      await db.insert(shotEntities).values(
+        snap.entities.map((e) => ({
+          shotId,
+          entityId: e.entityId,
+          auto: e.auto,
+          outfit: e.outfit,
+          outfitSource: e.outfitSource,
+        })),
+      );
+    }
+
+    // привязки якорей — только к тем, что ещё живут в пуле эпизода (какой-то мог быть
+    // удалён после фиксации снимка). Сами якоря не трогаем — они общие на эпизод.
+    await db.delete(shotAnchors).where(eq(shotAnchors.shotId, shotId));
+    if (snap.anchorIds?.length) {
+      const alive = await db
+        .select({ id: anchors.id })
+        .from(anchors)
+        .where(and(eq(anchors.episodeId, shot.episodeId), inArray(anchors.id, snap.anchorIds)));
+      const aliveSet = new Set(alive.map((a) => a.id));
+      const rows = snap.anchorIds
+        .filter((id) => aliveSet.has(id))
+        .map((anchorId) => ({ shotId, anchorId }));
+      if (rows.length) await db.insert(shotAnchors).values(rows);
+    }
+
+    await recomputeEpisodeTimecodes(shot.episodeId);
+    revalidatePath(shotPath(shot.episodeId, shotId));
+    revalidatePath(`/episodes/${shot.episodeId}`);
+    return { ok: true };
+  } catch (e) {
+    console.error("[revertGroup]", e);
     return { ok: false, error: e instanceof Error ? e.message : "Неизвестная ошибка" };
   }
 }
@@ -636,6 +855,8 @@ export async function insertShotGroups(
           .join(" "),
         wardrobe: group.wardrobe,
       });
+      // снимок первоначального состояния вставной группы для Revert
+      await ensureGroupOrigin(shotId);
     }
     await recomputeEpisodeTimecodes(anchor.episodeId);
     revalidatePath(`/episodes/${anchor.episodeId}`);

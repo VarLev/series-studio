@@ -122,3 +122,12 @@ export function visionModelFrom(simpleModel: string): string {
 export function isClaudeModel(model: string): boolean {
   return !/^(gpt|o\d|chatgpt|deepseek|gemini)/i.test(model);
 }
+
+/**
+ * Та же проверка, что providerOf()==="openai" в lib/llm/client.ts. Нужна для UI:
+ * если модель GPT и включён Codex CLI (llm_use_cli_gpt на /costs), вызов пойдёт
+ * через подписку ChatGPT, а не по API-цене — кнопки показывают «(CLI)» вместо $.
+ */
+export function isGptModel(model: string): boolean {
+  return /^(gpt|o\d|chatgpt)/i.test(model);
+}

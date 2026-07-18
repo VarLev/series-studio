@@ -93,6 +93,10 @@ export default function BreakdownPreview({
     scene_start: item.scene_start,
     characters: item.characters,
     wardrobe: item.wardrobe,
+    // дифы сквозного состояния: без них подтверждение молча теряло бы разметку.
+    // ?? [] — тайник/localStorage-черновик, сохранённый до появления полей
+    state_begin: item.state_begin ?? [],
+    state_end: item.state_end ?? [],
     shots: item.shots,
   });
 
@@ -374,6 +378,26 @@ export default function BreakdownPreview({
                   placeholder={t("Локация группы", "Group location")}
                   className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[10px] text-t300 outline-none placeholder:text-t400 focus:border-[var(--border-strong)] focus:bg-ink-700"
                 />
+                {/* сквозное состояние: ● возникает здесь / ○ заканчивается здесь —
+                    видно, что модель разметила, ещё до подтверждения */}
+                {(item.state_begin ?? []).map((s) => (
+                  <span
+                    key={`sb-${s}`}
+                    title={t("сквозное состояние: начинается здесь", "carried state: begins here")}
+                    className="rounded-full border border-[var(--border-subtle)] bg-ink-600 px-2 py-1 font-mono text-[9.5px] text-violet-200"
+                  >
+                    ● {s}
+                  </span>
+                ))}
+                {(item.state_end ?? []).map((s) => (
+                  <span
+                    key={`se-${s}`}
+                    title={t("сквозное состояние: заканчивается здесь", "carried state: ends here")}
+                    className="rounded-full border border-[var(--border-subtle)] bg-ink-600 px-2 py-1 font-mono text-[9.5px] text-t300 line-through"
+                  >
+                    ○ {s}
+                  </span>
+                ))}
                 {item.characters.map((c) => (
                   <span
                     key={c}

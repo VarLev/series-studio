@@ -15,7 +15,13 @@ import {
 import { getAllSettings } from "@/lib/settings";
 import { stripTimingRules } from "@/lib/templates";
 import { readFile } from "@/lib/storage";
-import { chainLocation, chainTimeWeather, parseTimeRange } from "@/lib/beats";
+import {
+  carriedStateAtStart,
+  chainLocation,
+  chainTimeWeather,
+  endedInGroup,
+  parseTimeRange,
+} from "@/lib/beats";
 import { getShotAnchorTexts } from "@/lib/anchors";
 import { refAnalysisText } from "@/lib/refAnalysis";
 import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives";
@@ -29,6 +35,7 @@ import { runJson, type LlmCall } from "./client";
 import type { z } from "zod";
 import {
   breakdownSchema,
+  carriedStateSchema,
   enhanceGroupSchema,
   groupPatchSchema,
   imageAnalysisSchema,
@@ -38,6 +45,7 @@ import {
   templateSegmentationSchema,
   type TemplateSegmentation,
   type Breakdown,
+  type CarriedState,
   type EnhanceGroup,
   type GroupPatch,
   type GroupShot,
@@ -191,12 +199,15 @@ export async function llmBreakdown(
         '"groups":[{"order":1,"title":"название группы","time":"00:00–00:14","duration_sec":14,' +
         '"location":"локация группы","time_weather":"время суток и погода, напр. night, rain","emotional_tone":"эмоциональный тон группы на английском, напр. calm / tense, ominous / tender","scene_start":true,"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если сюжет его описал для этой сцены, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
+        '"state_begin":["длящийся физический факт, ВОЗНИКШИЙ в этой группе, на английском; обычно []"],' +
+        '"state_end":["факт из state_begin ранней группы, явно ЗАКОНЧИВШИЙСЯ здесь, дословно; обычно []"],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
         `${R("breakdown_scenes")}\n` +
         `${R("breakdown_time_weather")}\n` +
         `${R("breakdown_emotional_tone")}\n` +
         `${R("breakdown_wardrobe")}\n` +
+        `${R("breakdown_carried_state")}\n` +
         "Соответствие формату задания: группа (не длиннее 15 секунд, пригодна для отдельной " +
         "AI-видеогенерации) — элемент groups[], её шоты — элементы shots[] внутри неё, " +
         "duration_sec — длительность группы в секундах. Время шотов (shots[].time) отсчитывается " +
@@ -268,6 +279,8 @@ export async function llmReviseGroup(input: {
   targetOrders?: number[];
   /** прикреплённые к группе якоря — обязательные детали, которые нельзя терять */
   anchors?: string[];
+  /** входящее сквозное состояние (carriedStateAtStart) — правка не должна его терять */
+  carriedState?: string[];
 }): Promise<GroupPatch> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
@@ -275,6 +288,17 @@ export async function llmReviseGroup(input: {
   const R = (id: string) => systemRuleText(id, off, "revise_group");
   const customRules = await customRulesContext("revise_group");
   const refCtx = off.has("dyn_refs_context") ? "" : await shotRefsContext(input.shotId);
+  const carriedBlock = gateBlock(
+    "dyn_carried_state",
+    off,
+    input.carriedState?.length
+      ? "СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ (входящее): эти факты возникли в предыдущих группах сцены и " +
+        "истинны на старте этой группы — правка НЕ должна им противоречить и не должна их «снимать» " +
+        "(снять состояние может только явное действие, которого здесь нет):\n" +
+        input.carriedState.map((s) => `- ${s}`).join("\n") +
+        "\n"
+      : "",
+  );
   const anchorsBlock = input.anchors?.length
     ? "ОБЯЗАТЕЛЬНЫЕ ДЕТАЛИ (ЯКОРЯ) этой группы — точечные пометки пользователя, которые ДОЛЖНЫ " +
       "сохраняться при правке. Не выбрасывай и не затирай их: если деталь относится к действию/облику " +
@@ -328,6 +352,7 @@ export async function llmReviseGroup(input: {
           .join("\n") +
         "\n" +
         (refCtx ? refCtx + "\n" : "") +
+        carriedBlock +
         anchorsBlock +
         (customRules ? customRules + "\n" : "") +
         "Верни ТОЛЬКО JSON без пояснений " +
@@ -432,6 +457,8 @@ export async function llmEnhanceGroup(input: {
    * а обязан учитывать существующие и вернуть anchors: [].
    */
   anchors: string[];
+  /** входящее сквозное состояние (carriedStateAtStart) — шлифовка не должна его терять */
+  carriedState?: string[];
 }): Promise<EnhanceGroup> {
   const { rules } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
@@ -439,6 +466,18 @@ export async function llmEnhanceGroup(input: {
   const R = (id: string) => systemRuleText(id, off, "enhance_group");
   const customRules = await customRulesContext("enhance_group");
   const refCtx = off.has("dyn_refs_context") ? "" : await shotRefsContext(input.shotId);
+  const carriedBlock = gateBlock(
+    "dyn_carried_state",
+    off,
+    input.carriedState?.length
+      ? "СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ (входящее): эти факты возникли в предыдущих группах сцены и " +
+        "истинны на старте этой группы. Шлифуя шоты, НЕ противоречь им и не «снимай» их (снять " +
+        "состояние может только явное действие, которого здесь нет); в якоря их НЕ предлагай — " +
+        "приложение уже разносит их само:\n" +
+        input.carriedState.map((s) => `- ${s}`).join("\n") +
+        "\n"
+      : "",
+  );
   const anchorsBlock = input.anchors.length
     ? "ЯКОРЯ ГРУППЫ (обязательные точечные детали пользователя) — учитывай их как данность при " +
       "шлифовке шотов (если деталь относится к облику/действию — она должна оставаться отражённой в " +
@@ -495,6 +534,7 @@ export async function llmEnhanceGroup(input: {
         (refCtx ? refCtx + "\n" : "") +
         (customRules ? customRules + "\n" : "") +
         "\n" +
+        carriedBlock +
         anchorsBlock +
         techIndexBlock +
         "Верни ТОЛЬКО JSON без пояснений (ВСЕ шоты — основные, draft:false):\n" +
@@ -517,6 +557,61 @@ export async function llmEnhanceGroup(input: {
         current,
     },
     enhanceGroupSchema,
+  );
+}
+
+/**
+ * Бэкфилл сквозного состояния: модель размечает state_begin/state_end по УЖЕ
+ * готовым группам эпизода — для раскадровок, созданных до появления полей, и
+ * как «пересборка связности» после тяжёлых ручных правок (кнопка на карточке
+ * группы). Группы подаются все разом (модель должна видеть всю сцену, иначе она
+ * не знает, где факт кончился); вставные группы вызывающий код не передаёт.
+ *
+ * Выбор модели: задача СЛОЖНАЯ — нужно удержать контекст всего эпизода и понять,
+ * какой факт длится, а какой кончился. Если Codex CLI подключён (llm_use_cli_gpt),
+ * размечает топовая GPT-5.6 Sol — по подписке ChatGPT это бесплатно. Дешёвая
+ * модель из настроек — только фолбэк без CLI: гонять топовую по API-деньгам
+ * ради разметки не хотим (замечание заказчика 2026-07-18).
+ */
+export async function llmExtractCarriedState(
+  episodeId: string,
+  groups: Array<{ order: number; title: string; sceneStart: boolean; text: string }>,
+): Promise<CarriedState> {
+  const settings = await getAllSettings();
+  const model =
+    settings.llm_use_cli_gpt === "1" ? "gpt-5.6-sol" : settings.llm_simple_model;
+  const digest = groups
+    .map(
+      (g) =>
+        `Группа ${g.order}${g.sceneStart ? " [НАЧАЛО НОВОЙ СЦЕНЫ]" : ""} «${g.title}»:\n${g.text}`,
+    )
+    .join("\n\n");
+  return runJson(
+    {
+      kind: "analysis",
+      model,
+      episodeId,
+      maxTokens: maxOutputTokens(model),
+      system:
+        "Ты размечаешь СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ в готовой раскадровке вертикального сериала. " +
+        "Каждая группа — отдельная AI-видеогенерация, и длящийся физический факт — контакт (рука на " +
+        "шее, объятие, захват), предмет в руках, поза (лежит, прижат к стене), сдвинутый реквизит, " +
+        "задранная/снятая одежда, травма по ходу сцены — теряется на стыке групп, если его не разметить.\n" +
+        "Для КАЖДОЙ группы определи:\n" +
+        "- state_begin: длящиеся факты, которые ВОЗНИКЛИ в этой группе И продолжают действовать после " +
+        "её конца (короткие фразы на английском, конкретно и телесно: \"@Jacob's palm rests on " +
+        "@Simon's neck\"). Персонажей называй их @токенами, как в тексте групп;\n" +
+        "- state_end: факты из state_begin БОЛЕЕ РАННИХ групп, которые в этой группе явно ПРЕКРАТИЛИСЬ " +
+        "(движение/действие их сняло) — текст скопируй ДОСЛОВНО из соответствующего state_begin.\n" +
+        "Правила: факт, начавшийся и кончившийся внутри одной группы, НЕ размечай; общую атмосферу, " +
+        "эмоции, локацию, погоду и одежду НЕ размечай; граница сцены ([НАЧАЛО НОВОЙ СЦЕНЫ]) обнуляет " +
+        "состояние — не переноси факты через неё и не закрывай их в первой группе новой сцены. У " +
+        "большинства групп оба массива пустые — это нормально, не выдумывай факты ради заполнения.\n" +
+        'Верни ТОЛЬКО JSON: {"groups":[{"order":1,"state_begin":["..."],"state_end":["..."]}]} — по ' +
+        "элементу на КАЖДУЮ группу, в том же порядке, с теми же order.",
+      user: digest,
+    },
+    carriedStateSchema,
   );
 }
 
@@ -757,6 +852,31 @@ export async function llmShotPrompt(
     : "",
   );
 
+  // СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ — длящиеся факты (контакт, предмет в руках,
+  // поза), начавшиеся в предыдущих группах сцены и активные на 00:00 этой группы.
+  // Вычисляется свёрткой дифов state_begin/state_end (carriedStateAtStart);
+  // группа-источник инъекции не получает — переход описывают её собственные шоты.
+  // Инцидент-мотиватор: «рука на шее» из группы 3 пропала из промпта группы 7 —
+  // дайджест соседней группы такой разрыв не ловит.
+  const incomingState = carriedStateAtStart(episodeShots, shotId);
+  const endedHere = new Set(endedInGroup(episodeShots, shotId));
+  const carriedStateBlock = gateBlock(
+    "dyn_carried_state",
+    off,
+    incomingState.length
+      ? "СКВОЗНОЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ (входящее): эти факты возникли в предыдущих группах сцены и " +
+        "ИСТИННЫ в момент начала этого видео — оно обязано НАЧАТЬСЯ с них:\n" +
+        incomingState
+          .map((s) => `- ${s}${endedHere.has(s) ? " (заканчивается В ЭТОЙ группе — смену описывают её шоты)" : ""}`)
+          .join("\n") +
+        "\nКак применять: зафиксируй эти факты в GLOBAL CONTINUITY (коротко, на английском). Держи " +
+        "каждый факт истинным, пока Action какого-то шота его явно не изменит; если ни один шот его не " +
+        "меняет — он действует ДО КОНЦА видео. В SHOT-блоках НЕ противоречь ему: где кадр включает " +
+        "соответствующую часть тела/объект — покажи её в этом состоянии; втискивать факт в кадры, где " +
+        "этой части тела/объекта не видно, НЕ нужно."
+      : "",
+  );
+
   // ЯКОРЯ — точечные детали пользователя (синяк, цвет одежды, предмет в кадре),
   // которых нет в референсах/энтити. Это ОБЯЗАТЕЛЬНЫЕ пометки: должны появиться в
   // кадре, приоритет за ними даже против референса/общего стиля.
@@ -930,7 +1050,7 @@ export async function llmShotPrompt(
       // полной оплаты (база знаний может весить 10–18К символов)
       cacheableSystemPrefix: `${videoTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${viewLockBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
+        `${bible}\n\n${sceneBlock}\n\n${continuityBlock}\n\n${viewLockBlock}\n\n${locationBlock}\n\n${locationRefBlock}\n\n${timeWeatherBlock}\n\n${styleBlock}\n\n${emotionalToneBlock}\n\n${carriedStateBlock}\n\n${anchorsBlock}\n\n${singleShotBlock}\n\n${startFrameBlock}\n\n${compositionBlock}\n\n${refContentBlock}\n\n${wardrobeBlock}\n\n${techniquesBlock}\n\n${compactBlock}\n\n` +
         `Составь промпт для модели ${targetModel} на английском языке, СТРОГО следуя структуре ` +
         "видео-промпта из шаблона выше (для простой сцены без диалога допустим короткий шаблон). " +
         "Обязательно включи в текст промпта: Format: vertical 9:16; Duration; No subtitles. No text overlays; " +

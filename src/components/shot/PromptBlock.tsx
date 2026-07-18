@@ -15,6 +15,7 @@ import {
   PROMPT_FAMILIES,
   promptFamily,
   isClaudeModel,
+  isGptModel,
   type PromptFamily,
 } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
@@ -75,6 +76,7 @@ export default function PromptBlock({
   llmModel,
   usedTechniquesByFamily = { seedance: [], kling: [] },
   useCli = false,
+  useCliGpt = false,
 }: {
   shotId: string;
   episodeId: string;
@@ -90,6 +92,8 @@ export default function PromptBlock({
   usedTechniquesByFamily?: Record<PromptFamily, UsedTechnique[]>;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
   useCli?: boolean;
+  /** llm_use_cli_gpt на /costs — GPT-вызовы идут через подписку ChatGPT (Codex CLI) */
+  useCliGpt?: boolean;
 }) {
   const router = useRouter();
   const t = useT();
@@ -168,8 +172,12 @@ export default function PromptBlock({
   // фабрика: ~4К входных токенов (шаблон+библия+приёмы) + типовой вывод; ×2 для обоих треков
   const genUsdOne = estTextUsd(factoryModel, 4000, OUT_TOKENS.prompt);
   const genUsd = genUsdOne == null ? null : genUsdOne * createFamilies.length;
-  // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
-  const genCost = useCli && isClaudeModel(factoryModel) ? "(CLI)" : `~${fmtUsd(genUsd)}`;
+  // при включённом CLI вызов идёт через подписку — цена в $ не расходуется
+  // (Claude → Claude Code CLI, GPT → Codex CLI)
+  const genCost =
+    (useCli && isClaudeModel(factoryModel)) || (useCliGpt && isGptModel(factoryModel))
+      ? "(CLI)"
+      : `~${fmtUsd(genUsd)}`;
 
   function openEditor() {
     // редактор открываем на текущей версии активного трека

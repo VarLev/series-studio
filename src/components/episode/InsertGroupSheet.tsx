@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sheet from "@/components/Sheet";
 import { insertShotGroups, countEpisodeShots } from "@/lib/actions/shots";
-import { LLM_MODELS, isClaudeModel } from "@/lib/llm/models";
+import { LLM_MODELS, isClaudeModel, isGptModel } from "@/lib/llm/models";
 import { estTextUsd, fmtUsd } from "@/lib/pricing";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
@@ -23,6 +23,7 @@ export default function InsertGroupSheet({
   defaultModel,
   baselineCount,
   useCli = false,
+  useCliGpt = false,
 }: {
   episodeId: string;
   /** сцена, в которую добавляем: шот-начало сцены + её номер; null — закрыто */
@@ -34,6 +35,8 @@ export default function InsertGroupSheet({
   baselineCount: number;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
   useCli?: boolean;
+  /** llm_use_cli_gpt на /costs — GPT-вызовы идут через подписку ChatGPT (Codex CLI) */
+  useCliGpt?: boolean;
 }) {
   const t = useT();
   const en = t("ru", "en") === "en"; // язык подписей моделей (как в SynopsisEditor)
@@ -58,8 +61,12 @@ export default function InsertGroupSheet({
   }
   useEffect(() => cleanupTimers, []);
 
-  // при включённом CLI Claude-вызов идёт через подписку — цена в $ не расходуется
-  const cost = useCli && isClaudeModel(model) ? "(CLI)" : `~${fmtUsd(estTextUsd(model, 2500, 4000))}`;
+  // при включённом CLI вызов идёт через подписку — цена в $ не расходуется
+  // (Claude → Claude Code CLI, GPT → Codex CLI)
+  const cost =
+    (useCli && isClaudeModel(model)) || (useCliGpt && isGptModel(model))
+      ? "(CLI)"
+      : `~${fmtUsd(estTextUsd(model, 2500, 4000))}`;
 
   function finishOk() {
     if (doneRef.current) return;

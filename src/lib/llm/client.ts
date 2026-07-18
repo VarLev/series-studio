@@ -5,6 +5,7 @@ import { getDb, llmUsage } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
 import { logModelCall } from "@/lib/modelLog";
 import { runClaudeCliText } from "./cli";
+import { runCodexCliText } from "./cli-codex";
 
 let client: Anthropic | null = null;
 let openaiClient: OpenAI | null = null;
@@ -192,7 +193,14 @@ export async function runText(call: LlmCall): Promise<string> {
     provider === "anthropic" &&
     !call.imageBase64 &&
     (call.forceCli || (await getSetting("llm_use_cli")) === "1");
-  const loggedProvider = viaCli ? "anthropic-cli" : provider;
+  // GPT-текст через OpenAI Codex CLI (подписка ChatGPT вместо API-денег), если
+  // включено в настройках (llm_use_cli_gpt, по умолчанию «1» — все GPT через CLI).
+  // Vision — всегда API: CLI не принимает картинку из памяти.
+  const viaCodexCli =
+    provider === "openai" &&
+    !call.imageBase64 &&
+    (await getSetting("llm_use_cli_gpt")) === "1";
+  const loggedProvider = viaCli ? "anthropic-cli" : viaCodexCli ? "openai-cli" : provider;
   const started = Date.now();
   const refs = (call.refIds ?? []).map((id) => ({ id }));
   try {
@@ -204,12 +212,17 @@ export async function runText(call: LlmCall): Promise<string> {
         // Обрезку по потолку CLI не сообщает (в его JSON нет stop_reason) —
         // детект max_tokens работает только на API-пути.
         await runClaudeCliText(call, (call.timeoutMs ?? LLM_TIMEOUT_MS) + 120_000)
-      : provider === "anthropic"
-        ? await runAnthropicText(call)
-        : await runOpenAiText(call, provider);
-    // подписка не тратит деньги — CLI-вызовы не попадают в llm_usage (расходы на
-    // /costs остаются честными); токены видны в журнале «Console» (model_log)
-    if (usage && !viaCli) await recordUsage(call, usage);
+      : viaCodexCli
+        ? // тот же запас по времени, что у Claude CLI: холодный старт процесса
+          // Codex + reasoning не должны упираться в общий потолок
+          await runCodexCliText(call, (call.timeoutMs ?? LLM_TIMEOUT_MS) + 120_000)
+        : provider === "anthropic"
+          ? await runAnthropicText(call)
+          : await runOpenAiText(call, provider);
+    // подписка не тратит деньги — CLI-вызовы (Claude и Codex) не попадают в
+    // llm_usage (расходы на /costs остаются честными); токены видны в журнале
+    // «Console» (model_log)
+    if (usage && !viaCli && !viaCodexCli) await recordUsage(call, usage);
     await logModelCall({
       channel: "llm",
       kind: call.kind,

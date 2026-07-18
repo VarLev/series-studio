@@ -317,6 +317,7 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
         shots={shotItems}
         breakdownModel={settings.llm_model}
         useCli={settings.llm_use_cli === "1"}
+        useCliGpt={settings.llm_use_cli_gpt === "1"}
         storyboard={storyboard}
       />
     </main>

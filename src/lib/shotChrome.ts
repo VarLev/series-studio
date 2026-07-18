@@ -30,6 +30,9 @@ export const getEpisodeShotRows = cache(async (episodeId: string) => {
       timeWeather: shots.timeWeather,
       sceneStart: shots.sceneStart,
       isInsert: shots.isInsert,
+      // дифы сквозного состояния — для carriedStateAtStart на карточке группы
+      stateBeginJson: shots.stateBeginJson,
+      stateEndJson: shots.stateEndJson,
     })
     .from(shots)
     .where(eq(shots.episodeId, episodeId))

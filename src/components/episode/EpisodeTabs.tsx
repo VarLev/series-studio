@@ -20,6 +20,7 @@ export default function EpisodeTabs({
   shots,
   breakdownModel,
   useCli = false,
+  useCliGpt = false,
   storyboard,
 }: {
   episodeId: string;
@@ -30,6 +31,8 @@ export default function EpisodeTabs({
   breakdownModel: string;
   /** llm_use_cli на /costs — Claude-вызовы идут через подписку, не по цене API */
   useCli?: boolean;
+  /** llm_use_cli_gpt на /costs — GPT-вызовы идут через подписку ChatGPT (Codex CLI) */
+  useCliGpt?: boolean;
   storyboard: StoryboardData;
 }) {
   const t = useT();
@@ -96,6 +99,7 @@ export default function EpisodeTabs({
           breakdownModel={bdModel}
           onBreakdownModelChange={setBdModel}
           useCli={useCli}
+          useCliGpt={useCliGpt}
         />
       )}
 
@@ -116,6 +120,7 @@ export default function EpisodeTabs({
           shots={shots}
           defaultModel={bdModel}
           useCli={useCli}
+          useCliGpt={useCliGpt}
           onStoryboard={(shotId) => {
             setSbScopeId(shotId);
             setTab("Раскадровка");
