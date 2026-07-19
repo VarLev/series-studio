@@ -273,6 +273,18 @@ export class HiggsfieldProvider implements GenerationProvider {
     await hfFetch(url, { method: "POST" });
   }
 
+  /**
+   * Медиа-референс для Cloud API. По сути тот же upload, что uploadFile, но в
+   * форме {id, url}: image_references принимает И uuid, И URL, поэтому id =
+   * public_url. Нужен для mediaForReference (композиции/референсы шота): без
+   * этого метода Cloud API их не грузил — композиционный референс падал с
+   * «пустой ответ загрузки медиа», а референсы персонажей молча пропадали.
+   */
+  async uploadMedia(data: Buffer, contentType: string): Promise<{ id: string; url: string }> {
+    const url = await this.uploadFile(data, contentType);
+    return { id: url, url };
+  }
+
   async uploadFile(data: Buffer, contentType: string): Promise<string> {
     const res = await hfFetch(`${BASE_URL}/files/generate-upload-url`, {
       method: "POST",

@@ -61,6 +61,7 @@ export default function ReviewPlayer({
   latestVersion,
   shotDurationSec,
   regenParams,
+  onClose,
 }: {
   episodeId: string;
   shotId: string;
@@ -75,6 +76,9 @@ export default function ReviewPlayer({
   /** длительность группы — запасная шкала бегунка, если сам файл её не сообщает */
   shotDurationSec: number;
   regenParams: { durationSec: number; aspectRatio: string; quality: string };
+  /** задан → плеер встроен (галерея): «назад»/Escape/после заметки закрывают
+      оверлей этим колбэком, а не уводят на страницу шота */
+  onClose?: () => void;
 }) {
   const router = useRouter();
   const t = useT();
@@ -103,6 +107,10 @@ export default function ReviewPlayer({
   const dragging = useRef(false);
 
   const shotHref = `/episodes/${episodeId}/shots/${shotId}`;
+  const close = useCallback(() => {
+    if (onClose) onClose();
+    else router.push(shotHref);
+  }, [onClose, router, shotHref]);
 
   // сброс плеера при смене кандидата — корректировка состояния во время рендера
   const [prevIdx, setPrevIdx] = useState(idx);
@@ -218,13 +226,13 @@ export default function ReviewPlayer({
           pickWinner();
           break;
         case "Escape":
-          router.push(shotHref);
+          close();
           break;
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [grabOpen, noteOpen, beat, togglePlay, step, pickWinner, router, shotHref]);
+  }, [grabOpen, noteOpen, beat, togglePlay, step, pickWinner, close]);
 
   function grabFrame() {
     const v = videoRef.current;
@@ -302,7 +310,7 @@ export default function ReviewPlayer({
       }
       setNoteOpen(false);
       setNote("");
-      router.push(shotHref);
+      close();
     });
   }
 

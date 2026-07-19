@@ -9,9 +9,8 @@ import { getDb, shots, shotEntities, shotAnchors, type DB } from "@/lib/db";
  * камеры, эмоциональный тон, флаг сцены, красные чипы-заготовки (unlinkedChars),
  * персонажи в кадре (shot_entities с нарядами) и привязанные якоря.
  *
- * location/timeWeather кладём для полноты, но в откат они НЕ идут: локация и
- * погода едины на сюжетную связку (не на группу) — их правит updateGroupLocation
- * по всей сцене, откат одной группы рассинхронил бы связку.
+ * location/timeWeather тоже входят: revertGroup возвращает их по всей сюжетной
+ * связке (как updateGroupLocation/Enhance), чтобы не рассинхронить сцену.
  */
 export type GroupOriginSnapshot = {
   v: 1;

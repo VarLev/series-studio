@@ -61,7 +61,6 @@ export default function ShotRefs({
 }) {
   const t = useT();
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [roleFor, setRoleFor] = useState<ShotRef | null>(null);
   const [nanoOpen, setNanoOpen] = useState(false);
   const [, startTransition] = useTransition();
   const roleLabel = (role: keyof typeof ROLE_LABEL) => t(ROLE_LABEL[role].ru, ROLE_LABEL[role].en);
@@ -127,12 +126,11 @@ export default function ShotRefs({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="h-full w-full object-cover" />
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setRoleFor(r);
-                }}
-                className="absolute left-0.5 top-0.5 z-10 rounded-[3px] border px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em]"
+              {/* бейдж роли — только индикатор; тап по миниатюре открывает единый
+                  слайдер (детали + смена роли). pointer-events-none — клик проходит
+                  сквозь бейдж на кнопку миниатюры под ним */}
+              <span
+                className="pointer-events-none absolute left-0.5 top-0.5 z-10 rounded-[3px] border px-1 py-0.5 text-[7.5px] font-semibold uppercase tracking-[0.08em]"
                 style={{
                   background: "rgba(6,5,9,.8)",
                   color:
@@ -150,7 +148,7 @@ export default function ShotRefs({
                 }}
               >
                 {roleLabel(r.role)}
-              </button>
+              </span>
               {/* значок «инфо» — намёк, что по миниатюре есть детали */}
               <span className="pointer-events-none absolute bottom-0.5 right-0.5 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[rgba(6,5,9,.8)] text-[8px] font-semibold text-t200">
                 ⓘ
@@ -172,96 +170,6 @@ export default function ShotRefs({
           <span className="text-[8px] font-medium">{t("из референсов", "from references")}</span>
         </button>
       </div>
-
-      {/* Роль референса (spec §3.6) */}
-      <Sheet open={Boolean(roleFor)} onClose={() => setRoleFor(null)} title={t("Роль референса", "Reference role")}>
-        {roleFor && (
-          <div className="flex flex-col gap-1.5 pb-2">
-            <button
-              onClick={() => {
-                startTransition(async () => {
-                  await setShotReferenceRole(roleFor.id, "start_frame");
-                  toast(t("Start-frame назначен · прежний стал композицией", "Start-frame set · the previous one became composition"));
-                });
-                setRoleFor(null);
-              }}
-              className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
-              style={{
-                borderColor: roleFor.role === "start_frame" ? "var(--warning)" : "var(--border-subtle)",
-                background: roleFor.role === "start_frame" ? "rgba(192,138,62,.08)" : "none",
-              }}
-            >
-              <span className="text-[12.5px] font-medium text-t100">Start-frame</span>
-              <span className="text-[10px] text-t400">
-                {t(
-                  "первый кадр видео · один на шот — прежний станет композицией",
-                  "first frame of the video · one per shot — the previous one becomes composition",
-                )}
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                startTransition(async () => {
-                  await setShotReferenceRole(roleFor.id, "composition");
-                  toast(t("Роль — референс композиции", "Role — composition reference"));
-                });
-                setRoleFor(null);
-              }}
-              className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
-              style={{
-                borderColor: roleFor.role === "composition" ? "var(--border-strong)" : "var(--border-subtle)",
-                background: roleFor.role === "composition" ? "var(--ink-600)" : "none",
-              }}
-            >
-              <span className="text-[12.5px] font-medium text-t100">
-                {t("Референс композиции", "Composition reference")}
-              </span>
-              <span className="text-[10px] text-t400">
-                {t(
-                  "кадрирование / свет / настроение — уходит моделям вместе с промптом",
-                  "framing / light / mood — sent to the models along with the prompt",
-                )}
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                startTransition(async () => {
-                  await setShotReferenceRole(roleFor.id, "layout");
-                  toast(t("Роль — layout (только пространство)", "Role — layout (spatial only)"));
-                });
-                setRoleFor(null);
-              }}
-              className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
-              style={{
-                borderColor: roleFor.role === "layout" ? "#6fc3d4" : "var(--border-subtle)",
-                background: roleFor.role === "layout" ? "rgba(111,195,212,.08)" : "none",
-              }}
-            >
-              <span className="text-[12.5px] font-medium text-t100">
-                {t("Layout — только пространство", "Layout — spatial only")}
-              </span>
-              <span className="text-[10px] text-t400">
-                {t(
-                  "геометрия комнаты и расстановка — БЕЗ копирования ракурса; видео начнётся с нового угла (привязка к прошлому без стартового кадра)",
-                  "room layout & positions — WITHOUT copying the camera angle; the video starts from a new angle (ties to the previous shot without a start frame)",
-                )}
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                startTransition(async () => {
-                  await detachShotReference(roleFor.id);
-                  toast(t("Откреплено от шота · референс остался в серии", "Detached from shot · reference stays in the episode"));
-                });
-                setRoleFor(null);
-              }}
-              className="min-h-11 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
-            >
-              {t("Открепить от шота", "Detach from shot")}
-            </button>
-          </div>
-        )}
-      </Sheet>
 
       {/* Прикрепление (spec §2.3): референсы серии + библии, Nano Banana, загрузка */}
       <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={t("Прикрепить референс", "Attach reference")}>
@@ -384,6 +292,97 @@ export default function ShotRefs({
               {detailFor.caption && (
                 <span className="text-[11px] text-t300">{detailFor.caption}</span>
               )}
+            </div>
+
+            {/* Управление ролью референса — объединено сюда из отдельного слайдера */}
+            <div className="flex flex-col gap-1.5">
+              <div className="section-label">{t("Роль референса", "Reference role")}</div>
+              <button
+                onClick={() => {
+                  const id = detailFor.id;
+                  startTransition(async () => {
+                    await setShotReferenceRole(id, "start_frame");
+                    toast(t("Start-frame назначен · прежний стал композицией", "Start-frame set · the previous one became composition"));
+                  });
+                  setDetailFor(null);
+                }}
+                className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
+                style={{
+                  borderColor: detailFor.role === "start_frame" ? "var(--warning)" : "var(--border-subtle)",
+                  background: detailFor.role === "start_frame" ? "rgba(192,138,62,.08)" : "none",
+                }}
+              >
+                <span className="text-[12.5px] font-medium text-t100">Start-frame</span>
+                <span className="text-[10px] text-t400">
+                  {t(
+                    "первый кадр видео · один на шот — прежний станет композицией",
+                    "first frame of the video · one per shot — the previous one becomes composition",
+                  )}
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  const id = detailFor.id;
+                  startTransition(async () => {
+                    await setShotReferenceRole(id, "composition");
+                    toast(t("Роль — референс композиции", "Role — composition reference"));
+                  });
+                  setDetailFor(null);
+                }}
+                className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
+                style={{
+                  borderColor: detailFor.role === "composition" ? "var(--border-strong)" : "var(--border-subtle)",
+                  background: detailFor.role === "composition" ? "var(--ink-600)" : "none",
+                }}
+              >
+                <span className="text-[12.5px] font-medium text-t100">
+                  {t("Референс композиции", "Composition reference")}
+                </span>
+                <span className="text-[10px] text-t400">
+                  {t(
+                    "кадрирование / свет / настроение — уходит моделям вместе с промптом",
+                    "framing / light / mood — sent to the models along with the prompt",
+                  )}
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  const id = detailFor.id;
+                  startTransition(async () => {
+                    await setShotReferenceRole(id, "layout");
+                    toast(t("Роль — layout (только пространство)", "Role — layout (spatial only)"));
+                  });
+                  setDetailFor(null);
+                }}
+                className="flex min-h-12 flex-col items-start justify-center rounded-lg border px-3"
+                style={{
+                  borderColor: detailFor.role === "layout" ? "#6fc3d4" : "var(--border-subtle)",
+                  background: detailFor.role === "layout" ? "rgba(111,195,212,.08)" : "none",
+                }}
+              >
+                <span className="text-[12.5px] font-medium text-t100">
+                  {t("Layout — только пространство", "Layout — spatial only")}
+                </span>
+                <span className="text-[10px] text-t400">
+                  {t(
+                    "геометрия комнаты и расстановка — БЕЗ копирования ракурса; видео начнётся с нового угла (привязка к прошлому без стартового кадра)",
+                    "room layout & positions — WITHOUT copying the camera angle; the video starts from a new angle (ties to the previous shot without a start frame)",
+                  )}
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  const id = detailFor.id;
+                  startTransition(async () => {
+                    await detachShotReference(id);
+                    toast(t("Откреплено от шота · референс остался в серии", "Detached from shot · reference stays in the episode"));
+                  });
+                  setDetailFor(null);
+                }}
+                className="min-h-11 rounded-lg border border-[rgba(194,71,106,.4)] text-[11px] font-semibold text-danger hover:bg-[rgba(194,71,106,.08)]"
+              >
+                {t("Открепить от шота", "Detach from shot")}
+              </button>
             </div>
 
             <div className="rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-3">

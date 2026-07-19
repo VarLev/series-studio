@@ -64,8 +64,9 @@ export default function EntityChips({
   const linked = optimisticEntities.filter((e) => e.linked);
   const available = optimisticEntities.filter((e) => !e.linked);
 
+  // окно сущности: изображение + инфо; для персонажа — ещё блоки одежды.
+  // Открывается для ЛЮБОГО типа (локация/стиль/пропс тоже), не только character.
   function openOutfit(e: ChipEntity) {
-    if (e.type !== "character") return;
     setOutfitFor(e);
     setOutfitText(e.outfit);
     setSource(e.outfitSource === "generated" ? "generated" : "bible");
@@ -87,9 +88,8 @@ export default function EntityChips({
               {/* тап по персонажу — якорь одежды этой группы */}
               <button
                 onClick={() => openOutfit(e)}
-                disabled={!isChar}
-                title={isChar ? eff || t("Задать одежду в группе", "Set outfit for this group") : undefined}
-                className="inline-flex items-center gap-1.5 disabled:cursor-default"
+                title={isChar ? eff || t("Задать одежду в группе", "Set outfit for this group") : t("Открыть сущность", "Open entity")}
+                className="inline-flex items-center gap-1.5"
               >
                 <EntityAvatar name={e.name} imageUrl={e.avatarUrl} size={22} />
                 <span className="text-[12px] font-medium text-t200">{e.name}</span>
@@ -282,14 +282,77 @@ export default function EntityChips({
         )}
       </Sheet>
 
-      {/* Одежда персонажа в группе: 2 блока (библия / сценарий) + выбор источника */}
+      {/* Окно сущности: изображение + инфо; для персонажа — ещё блоки одежды */}
       <Sheet
         open={Boolean(outfitFor)}
         onClose={() => setOutfitFor(null)}
-        title={`${t("Одежда в группе", "Outfit in this group")} · ${outfitFor?.name ?? ""}`}
+        title={
+          outfitFor
+            ? outfitFor.type === "character"
+              ? `${t("Одежда в группе", "Outfit in this group")} · ${outfitFor.name}`
+              : outfitFor.name
+            : ""
+        }
       >
         {outfitFor && (
           <div className="flex flex-col gap-4 pb-2">
+            {/* Изображение сущности (референс/аватар из библии) */}
+            {outfitFor.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={outfitFor.avatarUrl}
+                alt={outfitFor.name}
+                className="max-h-[46vh] w-full rounded-xl border border-[var(--border-subtle)] bg-ink-800 object-contain"
+              />
+            ) : (
+              <div className="flex items-center gap-2.5 rounded-xl border border-dashed border-[var(--border-subtle)] bg-ink-800 px-3 py-4">
+                <EntityAvatar name={outfitFor.name} imageUrl={null} size={40} />
+                <span className="text-[12px] text-t400">
+                  {t("Изображения нет — добавьте в «Библии»", "No image — add one in the Bible")}
+                </span>
+              </div>
+            )}
+
+            {/* Тип сущности + элемент-имя для промпта */}
+            <div className="flex items-center gap-2 text-[11px] text-t400">
+              <span className="rounded bg-ink-600 px-1.5 py-0.5 uppercase tracking-[0.08em]">
+                {ENTITY_TYPE_LABEL[outfitFor.type]
+                  ? t(ENTITY_TYPE_LABEL[outfitFor.type].ru, ENTITY_TYPE_LABEL[outfitFor.type].en)
+                  : outfitFor.type}
+              </span>
+              <span className="font-mono text-violet-200">{outfitFor.elementName}</span>
+            </div>
+
+            {/* Легенда иконок чипа — что означают и как получить */}
+            <div className="flex flex-col gap-2 border-t border-[var(--border-subtle)] pt-3">
+              <div className="section-label">{t("Обозначения", "Legend")}</div>
+              {outfitFor.type === "character" && (
+                <div className="flex items-start gap-2 text-[11px] leading-relaxed text-t400">
+                  <span className="w-4 shrink-0 text-center">👔</span>
+                  <span>
+                    {t(
+                      "Одежда: зелёная — для этой группы задан свой наряд; серая — берётся из библии. Наряд задаётся ниже, во втором блоке.",
+                      "Outfit: green — a group-specific outfit is set; grey — taken from the bible. Set it below, in the second block.",
+                    )}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-start gap-2 text-[11px] leading-relaxed text-t400">
+                <span className="shrink-0 rounded-[3px] bg-[rgba(139,95,176,.14)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-300">
+                  {t("авто", "auto")}
+                </span>
+                <span>
+                  {t(
+                    "Привязано автоматически — сущность нашёл Claude по сюжету. Без метки — добавлено вручную кнопкой «+».",
+                    "Auto-linked — the entity was detected by Claude from the story. Without the badge — added manually via «+».",
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {/* Одежда — только у персонажа */}
+            {outfitFor.type === "character" && (
+              <>
             {/* Блок 1 — одежда из библии (read-only, меняется в Библии) */}
             <div className="flex flex-col gap-1.5">
               <div className="section-label">{t("1 · Одежда из библии", "1 · Bible wardrobe")}</div>
@@ -369,6 +432,8 @@ export default function EntityChips({
             >
               {pending ? t("Сохранение…", "Saving…") : t("Сохранить", "Save")}
             </button>
+              </>
+            )}
           </div>
         )}
       </Sheet>

@@ -40,7 +40,14 @@ const REACTION_PAD_SEC = 0.6;
  * слов, а не оставляется на глазомер модели. Пустая реплика → 0.
  */
 export function estimateSpeechSeconds(dialogue: string): number {
-  const words = dialogue.trim().split(/\s+/).filter(Boolean);
+  // маркер подачи «[Имя](эмоция):» (DIALOGUE_RULES) — не произносимый текст:
+  // срезаем скобки до подсчёта, чтобы многословная эмоция (cold mockery) не
+  // раздувала расчётное время реплики
+  const words = dialogue
+    .replace(/\]\([^)\n]*\):/g, "]:")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   if (!words.length) return 0;
   return words.length / WORDS_PER_SEC + REACTION_PAD_SEC;
 }

@@ -58,6 +58,24 @@ export async function startGeneration(
   await requireAuth();
   try {
     if (!input.modelIds.length) return { ok: false, error: "Выберите хотя бы одну модель" };
+    // MCP-only для Higgsfield: молчаливый переход на Cloud API (это ДРУГОЙ платный
+    // кошелёк) запрещён. Если связь с Higgsfield MCP разорвана — задачу НЕ ставим и
+    // сообщаем прямо, чтобы пользователь переподключил MCP, а не платил из Cloud.
+    // Kling-модели идут через свой MCP (provider=kling-mcp) — их не блокируем.
+    const catalog = await getCatalog("video");
+    const usesHiggsfield = input.modelIds.some(
+      (id) => (catalog.find((m) => m.id === id)?.provider ?? "") !== "kling-mcp",
+    );
+    if (usesHiggsfield) {
+      const { isConnected } = await import("@/lib/higgsfieldMcp");
+      if (!(await isConnected())) {
+        return {
+          ok: false,
+          error:
+            "Нет связи с Higgsfield (MCP). Подключите его в «Настройки → Higgsfield» и повторите — генерация не запущена.",
+        };
+      }
+    }
     const estimate = await estimateTotal(input);
     const limit = Number(await getSetting("credit_confirm_limit")) || 0;
     if (!input.confirmed && limit > 0 && estimate > limit) {

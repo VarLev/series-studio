@@ -170,6 +170,7 @@ export async function getAccessToken(): Promise<string | null> {
   if (!tokens) return null;
   if (Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
   if (!tokens.refresh_token) {
+    console.error("[higgsfieldMcp] access-токен истёк, refresh-токена нет — MCP отключён, нужно переподключение");
     await deleteKey(K_TOKENS); // истёк без refresh — нужно переподключение
     return null;
   }
@@ -185,8 +186,19 @@ export async function getAccessToken(): Promise<string | null> {
     if (!fresh.refresh_token) fresh.refresh_token = tokens.refresh_token;
     await writeKey(K_TOKENS, fresh);
     return fresh.access_token;
-  } catch {
-    await deleteKey(K_TOKENS);
+  } catch (e) {
+    // Раньше ЛЮБОЙ сбой рефреша молча удалял токен → MCP отваливался на Cloud
+    // (другой платный кошелёк!) без единого сигнала, а сетевой флап через туннель
+    // ронял подключение на пустом месте. Теперь различаем: явный отказ авторизации
+    // (refresh отозван/истёк) — чистим и требуем переподключения; временный сбой
+    // (сеть моргнула, 5xx у Higgsfield) — токен СОХРАНЯЕМ, вернём null только на
+    // эту попытку и попробуем снова позже. Плюс пишем причину в лог сервера.
+    const msg = e instanceof Error ? e.message : String(e);
+    const authRejected = /\b(400|401|403)\b|invalid_grant|invalid_token/.test(msg);
+    console.error(
+      `[higgsfieldMcp] refresh не удался — ${authRejected ? "отказ авторизации, отключаю MCP" : "временный сбой, токен сохранён"}: ${msg}`,
+    );
+    if (authRejected) await deleteKey(K_TOKENS);
     return null;
   }
 }

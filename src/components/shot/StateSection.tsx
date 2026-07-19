@@ -132,20 +132,34 @@ export default function StateSection({
     <>
       <div className="flex flex-wrap items-center gap-1.5">
         {incoming.map((s) => (
-          <button
+          <span
             key={`in-${s}`}
-            title={s}
-            onClick={() => setDetail({ kind: "incoming", text: s })}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-dashed border-[var(--border-default)] bg-ink-700 px-2.5 py-1 text-left hover:border-[var(--border-strong)]"
+            className="inline-flex min-h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-ink-700 py-1 pl-2.5 pr-1"
           >
-            <span className="text-[11px] leading-none text-violet-300">⟶</span>
-            <span className="text-[12px] text-t300">{truncate(s)}</span>
-            {isEnded(s) && (
-              <span className="rounded-[3px] bg-[rgba(139,95,176,.14)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-300">
-                {t("конец", "ends")}
-              </span>
-            )}
-          </button>
+            <button
+              title={s}
+              onClick={() => setDetail({ kind: "incoming", text: s })}
+              className="inline-flex items-center gap-1.5 text-left"
+            >
+              <span className="text-[11px] leading-none text-violet-300">⟶</span>
+              <span className="text-[12px] text-t300">{truncate(s)}</span>
+              {isEnded(s) && (
+                <span className="rounded-[3px] bg-[rgba(139,95,176,.14)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-300">
+                  {t("конец", "ends")}
+                </span>
+              )}
+            </button>
+            {/* крестик — удалить входящий факт из всей сцены (как у entity) */}
+            <button
+              aria-label={t("Удалить из сцены", "Delete from the scene")}
+              title={t("Удалить из сцены", "Delete from the scene")}
+              disabled={pending}
+              onClick={() => removeFromScene(s)}
+              className="flex h-5 w-5 items-center justify-center rounded-full text-t400 hover:bg-ink-500 hover:text-danger disabled:opacity-50"
+            >
+              ×
+            </button>
+          </span>
         ))}
         {begin.map((s) => (
           <span
@@ -279,6 +293,38 @@ export default function StateSection({
                   {t("Убрать отметку конца", "Remove end mark")}
                 </button>
               )}
+            </div>
+
+            {/* Легенда иконок чипов — что означают и как получить */}
+            <div className="flex flex-col gap-2 border-t border-[var(--border-subtle)] pt-3">
+              <div className="section-label">{t("Обозначения", "Legend")}</div>
+              <div className="flex items-start gap-2 text-[11px] leading-relaxed text-t400">
+                <span className="w-4 shrink-0 text-center text-violet-300">⟶</span>
+                <span>
+                  {t(
+                    "Входящее — факт возник в предыдущей группе сцены и активен здесь. Появляется сам, отдельно добавлять не нужно.",
+                    "Incoming — the fact began in an earlier group of the scene and is active here. Appears automatically, no need to add it.",
+                  )}
+                </span>
+              </div>
+              <div className="flex items-start gap-2 text-[11px] leading-relaxed text-t400">
+                <span className="w-4 shrink-0 text-center text-violet-300">●</span>
+                <span>
+                  {t(
+                    "Начинается здесь — новый длящийся факт этой группы. Добавляется кнопкой «+» и разносится по следующим группам сцены.",
+                    "Begins here — a new lasting fact of this group. Added via «+» and propagated to the following groups of the scene.",
+                  )}
+                </span>
+              </div>
+              <div className="flex items-start gap-2 text-[11px] leading-relaxed text-t400">
+                <span className="w-4 shrink-0 text-center text-t400">○</span>
+                <span>
+                  {t(
+                    "Заканчивается здесь — факт, отмеченный завершённым в этой группе (кнопка «Заканчивается здесь»). Дальше по сцене не разносится.",
+                    "Ends here — a fact marked as over in this group (the «Ends here» button). Stops propagating through the scene.",
+                  )}
+                </span>
+              </div>
             </div>
           </div>
         )}

@@ -9,6 +9,7 @@ import {
   latestPromptVersion,
   deletePromptVersion,
   listPromptVersions,
+  cancelPromptGen,
 } from "@/lib/actions/prompts";
 import {
   LLM_MODELS,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/llm/models";
 import { estTextUsd, OUT_TOKENS, fmtUsd } from "@/lib/pricing";
 import { usePromptTrack } from "@/components/shot/PromptTrackContext";
+import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 
 export interface PromptVersion {
@@ -262,12 +264,25 @@ export default function PromptBlock({
   }
 
   function onGenerate() {
+    // повторное нажатие во время генерации — ОТМЕНА: сервер отбросит результат
+    // текущей эпохи (версия не создастся, на данные не повлияет), клиент перестаёт
+    // ждать. Сразу можно запустить заново.
+    if (generating) {
+      void cancelPromptGen(shotId);
+      doneRef.current = true;
+      cleanupTimers();
+      clearMarker();
+      setGenerating(false);
+      toast(t("Генерация промпта отменена", "Prompt generation cancelled"));
+      return;
+    }
     setError("");
     setElapsed(0);
     const families = createFamilies;
     // версия-ориентир: успех = появилось столько новых версий, сколько треков создаём
     const baseline = versions[0]?.version ?? 0;
     const startedAt = Date.now();
+    const epoch = crypto.randomUUID();
     try {
       localStorage.setItem(genKey, JSON.stringify({ families, baseline, startedAt }));
     } catch {}
@@ -276,7 +291,7 @@ export default function PromptBlock({
 
     // основной запрос: ok → успех; понятная ошибка сервера → показать;
     // обрыв соединения → не падаем, ждём, пока поллинг подхватит результат
-    generateShotPromptsFor(shotId, families, factoryModel)
+    generateShotPromptsFor(shotId, families, factoryModel, epoch)
       .then((res) => {
         if (res.ok) {
           setFamily(families[0]); // показать созданный трек
@@ -551,12 +566,12 @@ export default function PromptBlock({
           </div>
           <button
             onClick={onGenerate}
-            disabled={generating}
-            className="min-h-11 w-full rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-60"
+            title={generating ? t("Идёт генерация — нажмите, чтобы отменить", "Generating — click to cancel") : undefined}
+            className="min-h-11 w-full rounded-md bg-violet-500 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
             {generating
-              ? t(`Фабрика работает… ${elapsed}с`, `Factory running… ${elapsed}s`)
+              ? t(`Отменить · ${genCost} · ${elapsed}с`, `Cancel · ${genCost} · ${elapsed}s`)
               : targetHasPrompt
                 ? t(`Новая версия промпта · ${genCost}`, `New prompt version · ${genCost}`)
                 : t(`Сгенерировать промпт · ${genCost}`, `Generate prompt · ${genCost}`)}
@@ -565,8 +580,8 @@ export default function PromptBlock({
         {generating && (
           <div className="text-[10px] leading-snug text-t400">
             {t(
-              "Идёт генерация. Можно не ждать на экране — промпт сохранится даже при обрыве связи и подхватится сам.",
-              "Generating. You don't have to wait here — the prompt is saved even if the connection drops and will be picked up automatically.",
+              "Идёт генерация. Можно не ждать на экране — промпт сохранится даже при обрыве связи и подхватится сам. Повторное нажатие кнопки отменит запрос.",
+              "Generating. You don't have to wait here — the prompt is saved even if the connection drops and will be picked up automatically. Press the button again to cancel.",
             )}
           </div>
         )}

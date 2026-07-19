@@ -168,8 +168,10 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
   async submit(job: JobRequest): Promise<SubmittedJob> {
     const params: Record<string, unknown> = {
       model: job.model,
-      // у generate_video нет negative_prompt — вписываем запреты в конец промпта
-      prompt: job.negativePrompt ? `${job.prompt}\n\nAvoid: ${job.negativePrompt}` : job.prompt,
+      // negative_prompt НЕ отправляем: поля у generate_video нет, а вклейка
+      // «Avoid: …»-хвоста скармливала текст-модерации запретную лексику из негатива
+      // (инцидент 2026-07-19: три nsfw-отказа подряд, тот же промпт без хвоста прошёл)
+      prompt: job.prompt,
       ...job.params,
     };
     const roles = MEDIA_ROLES[job.model] ?? ["start_image", "end_image"];
@@ -277,6 +279,7 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
    * Reference Element — именованный многоразовый персонаж воркспейса Higgsfield.
    * В промпте на него ссылаются плейсхолдером <<<element_id>>>; работает и с
    * Seedance 2.0, и с Kling 3.0 (Omni) — подтверждено живыми сабмитами 2026-07-12.
+   * Сайтовый формат @[Name](element_id) через MCP НЕ работает (2026-07-19).
    */
   async createElement(name: string, mediaId: string, mediaUrl: string): Promise<string> {
     const res = await callMcpTool("show_reference_elements", {

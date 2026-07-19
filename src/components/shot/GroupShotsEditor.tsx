@@ -1203,6 +1203,7 @@ export default function GroupShotsEditor({
               <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-t400">
                 {t("Шот", "Shot")} {b.order}
                 {b.time ? ` · ${b.time}` : ""}
+                {` · ${beatSeconds(b)}${t("с", "s")}`}
               </span>
               {b.technique_id ? (
                 <span
@@ -1354,14 +1355,15 @@ export default function GroupShotsEditor({
                   className={`${fieldCls} resize-y text-[12px] leading-relaxed text-t200`}
                 />
                 {/* Диалог — по строке на реплику каждого персонажа (мультиперсонажный
-                    формат «[Имя]: -фраза»); textarea допускает переводы строк */}
+                    формат «[Имя]: -фраза», манера речи — «[Имя](эмоция): -фраза»);
+                    textarea допускает переводы строк */}
                 <textarea
                   value={b.dialogue}
                   onChange={(e) => patch(i, { dialogue: e.target.value })}
                   rows={2}
                   placeholder={t(
-                    "Диалог — по строке на реплику:\n[Имя]: -фраза",
-                    "Dialogue — one line per cue:\n[Name]: -line",
+                    "Диалог — по строке на реплику:\n[Имя]: -фраза\n[Имя](whisper): -фраза",
+                    "Dialogue — one line per cue:\n[Name]: -line\n[Name](whisper): -line",
                   )}
                   className={`${fieldCls} resize-y whitespace-pre-wrap text-[12px] text-violet-200 placeholder:text-t400`}
                 />

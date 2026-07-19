@@ -3,10 +3,14 @@ import { getDb, generations, shots } from "@/lib/db";
 import { getFileUrl } from "@/lib/storage";
 import { getT } from "@/lib/i18n-server";
 import { EmptyState } from "@/components/ui";
+import GalleryClient, { type GalleryItem } from "@/components/episode/GalleryClient";
 
 /**
- * Содержимое галереи победителей без обёртки страницы — используется и полной
+ * Содержимое галереи эпизода без обёртки страницы — используется и полной
  * страницей, и правым слайдером (intercepting-роут @drawer/(.)gallery).
+ * Показывает ВСЕ готовые видео шотов; утверждённые (winner) помечены. Сама сетка
+ * и плеер-оверлей живут в GalleryClient (клиент): клик открывает ReviewPlayer
+ * поверх галереи, «назад» возвращает в неё.
  */
 export default async function GalleryContent({ episodeId }: { episodeId: string }) {
   const db = await getDb();
@@ -16,36 +20,45 @@ export default async function GalleryContent({ episodeId }: { episodeId: string 
     .where(eq(shots.episodeId, episodeId))
     .orderBy(asc(shots.orderIndex));
   const shotById = new Map(shotRows.map((s) => [s.id, s]));
-  const winners = shotRows.length
+  const videos = shotRows.length
     ? await db
         .select()
         .from(generations)
         .where(
           and(
-            eq(generations.winner, true),
+            eq(generations.kind, "video"),
             eq(generations.status, "done"),
             inArray(generations.shotId, shotRows.map((s) => s.id)),
           ),
         )
     : [];
-  // порядок: по шоту, внутри шота — по времени создания
-  winners.sort((a, b) => {
+  // порядок: по шоту; внутри шота утверждённый (winner) сверху, затем по времени
+  videos.sort((a, b) => {
     const ao = shotById.get(a.shotId!)?.orderIndex ?? 0;
     const bo = shotById.get(b.shotId!)?.orderIndex ?? 0;
-    return ao - bo || a.createdAt.getTime() - b.createdAt.getTime();
+    if (ao !== bo) return ao - bo;
+    if (a.winner !== b.winner) return a.winner ? -1 : 1;
+    return a.createdAt.getTime() - b.createdAt.getTime();
   });
 
-  const items = await Promise.all(
-    winners
+  const items: GalleryItem[] = await Promise.all(
+    videos
       .filter((g) => g.shotId && g.resultStoragePath)
-      .map(async (g) => ({
-        genId: g.id,
-        shot: shotById.get(g.shotId!)!,
-        model: g.model,
-        url: await getFileUrl(g.resultStoragePath!),
-        isVideo: Boolean(g.resultStoragePath!.match(/\.(mp4|webm|mov)$/i)),
-      })),
+      .map(async (g) => {
+        const shot = shotById.get(g.shotId!)!;
+        return {
+          genId: g.id,
+          shotId: g.shotId!,
+          shotOrder: shot.orderIndex,
+          shotTitle: shot.title || shot.actionMd.slice(0, 50),
+          model: g.model,
+          winner: g.winner,
+          url: await getFileUrl(g.resultStoragePath!),
+          isVideo: Boolean(g.resultStoragePath!.match(/\.(mp4|webm|mov)$/i)),
+        };
+      }),
   );
+  const hasWinner = items.some((it) => it.winner);
 
   const t = await getT();
 
@@ -54,52 +67,19 @@ export default async function GalleryContent({ episodeId }: { episodeId: string 
       {items.length === 0 && (
         <EmptyState>
           {t(
-            "Утверждённых шотов пока нет. Выберите «Победителя» в ревью — шот попадёт сюда.",
-            "No approved shots yet. Pick a Winner in review — the shot lands here.",
+            "Видео пока нет. Сгенерируйте шоты — их результаты появятся здесь.",
+            "No videos yet. Generate shots — their results show up here.",
           )}
         </EmptyState>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        {items.map(({ genId, shot, url, isVideo, model }) => (
-          <div
-            key={genId}
-            className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-ink-700"
-          >
-            {url &&
-              (isVideo ? (
-                <video src={url} controls preload="metadata" className="aspect-[9/16] w-full bg-black object-cover" />
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={url} alt="" loading="lazy" decoding="async" className="aspect-[9/16] w-full object-cover" />
-              ))}
-            <div className="flex items-center gap-1.5 px-2 py-1.5">
-              <span className="chrome-text font-display text-[14px] font-bold">
-                {String(shot.orderIndex).padStart(2, "0")}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[11px] text-t200">
-                {shot.title || shot.actionMd.slice(0, 50)}
-              </span>
-              <span className="shrink-0 font-mono text-[9px] text-t400">{model}</span>
-              {url && (
-                <a
-                  href={url}
-                  download
-                  title={t("Скачать", "Download")}
-                  className="shrink-0 rounded px-1 text-[13px] text-t400 hover:text-violet-200"
-                >
-                  ⬇
-                </a>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      {items.length > 0 && (
+      {items.length > 0 && <GalleryClient items={items} />}
+      {/* zip собирает финальную сборку — только утверждённые (winner) */}
+      {hasWinner && (
         <a
           href={`/api/episodes/${episodeId}/export`}
           className="flex min-h-12 items-center justify-center rounded-lg border border-[var(--border-strong)] text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-200 hover:border-violet-400 hover:text-violet-100"
         >
-          {t("Скачать всё (zip) ↓", "Download all (zip) ↓")}
+          {t("Скачать утверждённые (zip) ↓", "Download approved (zip) ↓")}
         </a>
       )}
     </div>

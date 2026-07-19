@@ -10,6 +10,7 @@ import { getFileUrls } from "@/lib/storage";
 import { thumbForResult } from "@/lib/poster";
 import Link from "next/link";
 import { ScreenHeader } from "@/components/ui";
+import { ImageIcon, FilmIcon } from "@/components/icons";
 import EpisodeTabs from "@/components/episode/EpisodeTabs";
 import GenPoller from "@/components/GenPoller";
 import type { ShotListItem } from "@/components/episode/ShotsList";
@@ -274,16 +275,15 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
               <>
                 <span
                   title={lockHint}
-                  className="flex min-h-8 cursor-not-allowed items-center gap-1 rounded-full border border-[var(--border-subtle)] px-3 py-1.5 font-mono text-[11px] font-semibold text-t400 opacity-50"
+                  className="flex min-h-8 cursor-not-allowed items-center justify-center rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-t400 opacity-50"
                 >
-                  🔒 REF
+                  <ImageIcon />
                 </span>
                 <span
                   title={lockHint}
-                  className="flex min-h-8 cursor-not-allowed items-center gap-1 rounded-full border border-[var(--border-subtle)] px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t400 opacity-50"
+                  className="flex min-h-8 cursor-not-allowed items-center justify-center rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-t400 opacity-50"
                 >
-                  <span className="text-[13px] leading-none">🎞</span>
-                  <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
+                  <FilmIcon />
                 </span>
               </>
             ) : (
@@ -291,17 +291,16 @@ export default async function EpisodePage(ctx: { params: Promise<{ id: string }>
                 <Link
                   href={`/episodes/${episode.id}/refs`}
                   title={t("Референсы серии", "Episode references")}
-                  className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 font-mono text-[11px] font-semibold text-violet-200 hover:border-[var(--border-strong)] hover:bg-ink-500"
+                  className="flex min-h-8 items-center justify-center rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 text-violet-200 hover:border-[var(--border-strong)] hover:bg-ink-500"
                 >
-                  REF
+                  <ImageIcon />
                 </Link>
                 <Link
                   href={`/episodes/${episode.id}/gallery`}
                   title={t("Галерея утверждённых шотов", "Approved shots gallery")}
-                  className="flex min-h-8 items-center gap-1 rounded-full border border-[var(--border-default)] bg-ink-600 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
+                  className="flex min-h-8 items-center justify-center rounded-full border border-[var(--border-default)] bg-ink-600 px-3 py-1.5 text-t100 hover:border-[var(--border-strong)] hover:bg-ink-500"
                 >
-                  <span className="text-[13px] leading-none">🎞</span>
-                  <span className="hidden md:inline">{t("Галерея", "Gallery")}</span>
+                  <FilmIcon />
                 </Link>
               </>
             )}

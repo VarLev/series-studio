@@ -33,6 +33,7 @@ import ActionBar from "@/components/shot/ActionBar";
 import EditableAction from "@/components/shot/EditableAction";
 import EnhanceButton from "@/components/shot/EnhanceButton";
 import RevertButton from "@/components/shot/RevertButton";
+import UploadButton from "@/components/UploadButton";
 import GroupShotsEditor from "@/components/shot/GroupShotsEditor";
 import SceneToggle from "@/components/shot/SceneToggle";
 import ResultsStrip from "@/components/shot/ResultsStrip";
@@ -456,12 +457,12 @@ export default async function ShotPage(ctx: {
 
       {/* detail (на десктопе справа резервируем место под панель действий) */}
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 pb-32 lg:pb-6 lg:pr-[212px]">
-          <div className="flex items-center gap-3.5">
-            <div className="chrome-text font-display text-[46px] font-bold leading-[0.9] tracking-[0.03em]">
-              {grpN}
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <div className="flex items-center gap-1.5">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3.5">
+              <div className="chrome-text font-display text-[46px] font-bold leading-[0.9] tracking-[0.03em]">
+                {grpN}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
                 <StatusPill status={shot.status} />
                 {shot.isInsert && (
                   <span
@@ -475,24 +476,26 @@ export default async function ShotPage(ctx: {
                   </span>
                 )}
               </div>
-              <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
-                {shot.timecode ? `${shot.timecode} · ` : ""}
-                {shot.durationSec} {t("сек", "sec")}
-                {mainBeats.length ? ` · ${t("шотов", "shots")} ${mainBeats.length}` : ""}
-                {beats.length > mainBeats.length
-                  ? ` (+${beats.length - mainBeats.length} draft)`
-                  : ""}{" "}
-                ·{" "}
-                {versions.length
-                  ? `${t("промпт", "prompt")} v${current!.version}`
-                  : t("промпта нет", "no prompt")}{" "}
-                · {t("видео", "videos")} {results.filter((r) => r.status === "done").length}
+              {/* Revert + Enhance — в шапке группы (замечание заказчика) */}
+              <div className="flex shrink-0 items-center gap-2">
+                <RevertButton shotId={shotId} />
+                <EnhanceButton shotId={shotId} />
               </div>
             </div>
-            {/* Revert + Enhance — в шапке группы (замечание заказчика) */}
-            <div className="flex shrink-0 items-center gap-2 self-start">
-              <RevertButton shotId={shotId} />
-              <EnhanceButton shotId={shotId} />
+            {/* инфо-строка — отдельной строкой во всю ширину, чтобы не жалась в столбик
+                между номером группы и кнопками на узком экране */}
+            <div className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-t300">
+              {shot.timecode ? `${shot.timecode} · ` : ""}
+              {shot.durationSec} {t("сек", "sec")}
+              {mainBeats.length ? ` · ${t("шотов", "shots")} ${mainBeats.length}` : ""}
+              {beats.length > mainBeats.length
+                ? ` (+${beats.length - mainBeats.length} draft)`
+                : ""}{" "}
+              ·{" "}
+              {versions.length
+                ? `${t("промпт", "prompt")} v${current!.version}`
+                : t("промпта нет", "no prompt")}{" "}
+              · {t("видео", "videos")} {results.filter((r) => r.status === "done").length}
             </div>
           </div>
 
@@ -579,6 +582,14 @@ export default async function ShotPage(ctx: {
                 )}
               </EmptyState>
             )}
+            {/* ручное добавление видео, «выпавшего» из генерации (туннель потерял
+                результат провайдера) — тот же путь, что и провайдер: /api/upload kind=result */}
+            <UploadButton
+              kind="result"
+              shotId={shotId}
+              label={t("＋ Добавить видео вручную (mp4)", "＋ Add video manually (mp4)")}
+              className="mt-1 flex min-h-10 w-full items-center justify-center rounded-lg border border-dashed border-[var(--border-default)] px-3 text-[11px] font-semibold text-t300 hover:border-[var(--border-strong)] hover:text-violet-200 disabled:opacity-50"
+            />
           </div>
       </div>
 
@@ -598,6 +609,11 @@ export default async function ShotPage(ctx: {
         groupDurationSec={shot.durationSec}
         aspectRatio={promptAspect}
         defaultStartFrameId={defaultStartFrame?.id ?? null}
+        latestByFamily={{
+          seedance: currentByFamily.seedance?.version,
+          kling: currentByFamily.kling?.version,
+        }}
+        versionById={Object.fromEntries(promptVersionById)}
       />
     </PromptTrackProvider>
   );

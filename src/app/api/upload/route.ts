@@ -106,15 +106,18 @@ export async function POST(req: NextRequest) {
     // смены шота в плеере (правка группы задним числом их уже не сдвинет)
     const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
     const storagePath = await putFile(`results/${shotId}/${id}${norm.ext}`, buffer, norm.contentType);
+    // ручная загрузка результата — источник неизвестен (видео могло выпасть из
+    // любой генерации: Higgsfield/Seedance/Kling). Помечаем нейтрально «manual»,
+    // а не «kling-web» (историческая метка Копи-пака с kling.ai вводила в заблуждение)
     await db.insert(generations).values({
       id,
       shotId,
       promptId: (form.get("promptId") as string) || null,
       provider: "manual",
-      model: "kling-web",
+      model: "manual",
       status: "done",
       resultStoragePath: storagePath,
-      source: "kling-web",
+      source: "manual",
       beatsJson: JSON.stringify(buildBeatMarkers(shot?.beatsJson)),
     });
     await recalcShotStatus(shotId);

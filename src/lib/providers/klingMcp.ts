@@ -70,7 +70,9 @@ export class KlingMcpProvider implements GenerationProvider {
     const args = [
       {
         name: "prompt",
-        value: job.negativePrompt ? `${job.prompt}\n\nAvoid: ${job.negativePrompt}` : job.prompt,
+        // без «Avoid: …»-хвоста из негатива: модерация читает его как позитивный
+        // текст (инцидент 2026-07-19 на higgsfield-mcp, здесь тот же риск)
+        value: job.prompt,
       },
       { name: "duration", value: String(job.params.duration ?? 5) },
       { name: "aspect_ratio", value: String(job.params.aspect_ratio ?? "9:16") },

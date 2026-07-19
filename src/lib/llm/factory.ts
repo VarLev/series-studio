@@ -202,7 +202,7 @@ export async function llmBreakdown(
         '"state_begin":["длящийся физический факт, ВОЗНИКШИЙ в этой группе, на английском; обычно []"],' +
         '"state_end":["факт из state_begin ранней группы, явно ЗАКОНЧИВШИЙСЯ здесь, дословно; обычно []"],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза; манера речи — [Имя](эмоция): -фраза, эмоция по-английски (whisper/shouting/mocking); каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
         `${R("breakdown_scenes")}\n` +
         `${R("breakdown_time_weather")}\n` +
         `${R("breakdown_emotional_tone")}\n` +
@@ -363,7 +363,7 @@ export async function llmReviseGroup(input: {
           : "(ВСЕ шоты группы, включая неизменённые):\n") +
         '{"title":"название группы","duration_sec":14,' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}\n' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза; манера речи — [Имя](эмоция): -фраза, эмоция по-английски (whisper/shouting/mocking); каждая реплика с новой строки; либо пустая строка"}]}\n' +
         // Sonnet через CLI при точечной правке склонен отдать голый массив шотов
         // вместо объекта — это валило валидацию и запускало дорогой ретрай. Требуем
         // объект явно (плюс схема groupPatchSchema теперь принимает и голый массив).
@@ -425,7 +425,7 @@ export async function llmInsertGroups(input: {
         '"characters":["персонажи группы"],' +
         '"wardrobe":[{"name":"персонаж","outfit":"наряд ТОЛЬКО если запрос или сцена его описали, иначе пустая строка, НА АНГЛИЙСКОМ"}],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза; манера речи — [Имя](эмоция): -фраза, эмоция по-английски (whisper/shouting/mocking); каждая реплика с новой строки; либо пустая строка"}]}]}\n' +
         "Время шотов отсчитывается ОТ НАЧАЛА ГРУППЫ: первый шот каждой группы — с 00:00.",
       user:
         `Контекст сцены (для связности, НЕ переписывать):\n${input.sceneContext}\n\n` +
@@ -436,7 +436,7 @@ export async function llmInsertGroups(input: {
 }
 
 /**
- * Enhance: Opus переоценивает ОДНУ группу целиком (всегда через CLI/подписку) —
+ * Enhance: выбранная модель промптов (settings.llm_model) переоценивает ОДНУ группу целиком —
  * возвращает улучшенные шоты с таймингом, закреплённый за каждым шотом приём,
  * уточнённые локацию/погоду/тон и список персонажей реально в кадре. Заменяет
  * прежний автоподбор приёмов на этапе генерации промпта (перенесён сюда).
@@ -462,7 +462,7 @@ export async function llmEnhanceGroup(input: {
   /** входящее сквозное состояние (carriedStateAtStart) — шлифовка не должна его терять */
   carriedState?: string[];
 }): Promise<EnhanceGroup> {
-  const { rules } = await seriesSystemBase();
+  const { rules, model } = await seriesSystemBase();
   const bible = await bibleContext(undefined, { mode: "names" });
   const off = await getDisabledRuleIds();
   const R = (id: string) => systemRuleText(id, off, "enhance_group");
@@ -520,8 +520,11 @@ export async function llmEnhanceGroup(input: {
   return runJson(
     {
       kind: "breakdown",
-      model: "claude-opus-4-8", // Enhance всегда на Opus
-      forceCli: true, // и всегда через подписку (CLI)
+      // Enhance следует за глобальной моделью промптов (settings.llm_model).
+      // forceCli — «через подписку»: Claude идёт через Claude Code CLI; GPT — через
+      // Codex CLI, если включён llm_use_cli_gpt (по умолчанию «1»).
+      model,
+      forceCli: true,
       episodeId: input.episodeId,
       maxTokens: 12000,
       system:
@@ -546,7 +549,7 @@ export async function llmEnhanceGroup(input: {
         '"emotional_tone":"эмоциональный тон, напр. calm / tense","characters_in_frame":["@Simon"],' +
         '"anchors":["синяк на левой скуле","красный шарф"],' +
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
-        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза, каждая реплика с новой строки; либо пустая строка",' +
+        '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза; манера речи — [Имя](эмоция): -фраза, эмоция по-английски (whisper/shouting/mocking); каждая реплика с новой строки; либо пустая строка",' +
         (techOff ? "" : '"technique_id":"b19 или пусто",') +
         '"draft":false}]}\n' +
         "Все шоты в массиве shots — основные (draft:false). НЕ создавай ключей shots_draft/draft_shots/drafts " +
@@ -630,6 +633,19 @@ function enforceTemplateInvariants(res: ShotPrompt): ShotPrompt {
   const tail: string[] = [];
   if (!/9\s*:\s*16/.test(res.prompt)) tail.push("Format: vertical 9:16.");
   if (!/no subtitles/i.test(res.prompt)) tail.push("No subtitles. No text overlays.");
+  // Замок числа шотов: видеомодель вставляет лишний мастер-план ПОВЕРХ заявленной
+  // нарезки, материализуя GLOBAL CONTINUITY/layout-референс в свой кадр — обычно
+  // на стыке двух одиночных планов, где её тянет «переустановить» географию
+  // (инцидент 2026-07-18: 6 катов вместо 5, лишний wide между SHOT 04 и 05, оба
+  // героя на диване). Мягкое «Five-shot sequence» в шапке она игнорирует —
+  // дублируем явным запретом в хвосте промпта (зона Strict rules читается строже).
+  const shotCount = (res.prompt.match(/^\s*SHOT\s*\d+/gim) ?? []).length;
+  if (shotCount >= 2 && !/do not add (?:extra )?(?:shots|cuts)/i.test(res.prompt)) {
+    tail.push(
+      `Exactly ${shotCount} shots as listed — do not add extra shots or cuts, and never insert ` +
+        "an establishing, master, or wide shot that is not in the list.",
+    );
+  }
   if (tail.length) res.prompt = `${res.prompt.trimEnd()}\n\n${tail.join("\n")}`;
   res.params.aspect_ratio = "9:16"; // сериал вертикальный
   return res;
@@ -1080,7 +1096,9 @@ export async function llmShotPrompt(
         "собственные (персонажи, локации, бренды) — латиницей по-английски; для сущностей библии " +
         "используй их element_name. Реплики в DIALOGUE LOCK — на английском (переведи, если в " +
         "исходнике они на другом языке).\n" +
-        [R("prompt_character_names"), R("prompt_identity_refs")].filter(Boolean).join("\n") +
+        [R("prompt_character_names"), R("prompt_identity_refs"), R("prompt_dialogue_delivery")]
+          .filter(Boolean)
+          .join("\n") +
         "\n" +
         'Верни ТОЛЬКО JSON: {"prompt":"...","negative_prompt":"...","reference_element_names":["..."],' +
         '"used_technique_ids":["..."],"params":{"aspect_ratio":"9:16","duration":15}}' +
@@ -1179,7 +1197,7 @@ export async function llmRevisePrompt(
       // база знаний в кэшируемом префиксе — как в llmShotPrompt
       cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${reviseStyleBlock}\n\n${reviseCarriedBlock}\n\n` +
+        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${R("prompt_dialogue_delivery")}\n\n${reviseStyleBlock}\n\n${reviseCarriedBlock}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. " +
         (R("revise_prompt_hygiene") ? `${R("revise_prompt_hygiene")}\n` : "") +

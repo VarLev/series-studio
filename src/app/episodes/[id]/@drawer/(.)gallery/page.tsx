@@ -5,13 +5,13 @@ import GalleryContent from "../../gallery/GalleryContent";
 
 export const dynamic = "force-dynamic";
 
-/** Галерея победителей в правом слайдере — поверх экрана эпизода, без перезагрузки. */
+/** Галерея видео в правом слайдере — поверх экрана эпизода, без перезагрузки. */
 export default async function GalleryDrawer(ctx: { params: Promise<{ id: string }> }) {
   await requireAuth();
   const { id } = await ctx.params;
   const t = await getT();
   return (
-    <SideDrawer title={t("Галерея победителей", "Winners gallery")}>
+    <SideDrawer title={t("Галерея", "Gallery")}>
       <GalleryContent episodeId={id} />
     </SideDrawer>
   );

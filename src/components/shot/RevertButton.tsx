@@ -61,8 +61,8 @@ export default function RevertButton({ shotId }: { shotId: string }) {
       onClick={onClick}
       disabled={pending}
       title={t(
-        "Вернуть группу к состоянию раскадровки: шоты, тайминг, заголовок, тон, персонажи в кадре и якоря. Локацию/погоду сцены, статус и результаты (промпты, видео) не трогает. Отменяет Enhance и ручные правки содержимого.",
-        "Revert the group to its storyboard state: shots, timing, title, tone, characters in frame and anchors. Leaves scene location/weather, status and results (prompts, videos) untouched. Undoes Enhance and manual content edits.",
+        "Вернуть группу к состоянию раскадровки: шоты, тайминг, заголовок, тон, локация/погода (по всей сцене), персонажи в кадре и якоря. Статус и результаты (промпты, видео) не трогает. Отменяет Enhance и ручные правки содержимого.",
+        "Revert the group to its storyboard state: shots, timing, title, tone, location/weather (across the scene), characters in frame and anchors. Leaves status and results (prompts, videos) untouched. Undoes Enhance and manual content edits.",
       )}
       className={`flex min-h-9 shrink-0 items-center gap-1.5 self-start rounded-full border px-3 text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors disabled:opacity-60 ${
         armed

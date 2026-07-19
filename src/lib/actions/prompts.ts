@@ -2,8 +2,9 @@
 
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb, entities, generations, prompts, shotEntities, shots } from "@/lib/db";
+import { getDb, entities, generations, prompts, settings, shotEntities, shots } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
+import { setSetting } from "@/lib/settings";
 import { llmShotPrompt, llmRevisePrompt } from "@/lib/llm/factory";
 import { PROMPT_FAMILIES, promptFamily, type PromptFamily } from "@/lib/llm/models";
 import { anchorCharacterNames, collapseAt } from "@/lib/entityName";
@@ -76,6 +77,35 @@ async function insertVersion(
   return id;
 }
 
+// --- Отмена генерации промпта («эпоха») ------------------------------------
+// Каждой генерации промпта клиент присваивает случайную epoch и регистрирует её
+// активной для шота. Если задачу отменили ИЛИ запустили новую (epoch сменилась),
+// результат старого LLM-вызова в данные НЕ записывается. Сам вызов на сервере
+// отозвать нельзя, но его выхлоп отбрасывается ПЕРЕД insertVersion — версия не
+// создаётся, на данные он не влияет, а новую задачу можно запустить сразу.
+const epochKey = (shotId: string) => `prompt_epoch_${shotId}`;
+
+async function markEpoch(shotId: string, epoch: string): Promise<void> {
+  await setSetting(epochKey(shotId), epoch);
+}
+
+/** true — задача с этой epoch больше не актуальна (отменена/заменена новой). */
+async function epochStale(shotId: string, epoch?: string): Promise<boolean> {
+  if (!epoch) return false; // вызов без epoch — прежнее поведение, отмена не нужна
+  const db = await getDb();
+  const [row] = await db.select().from(settings).where(eq(settings.key, epochKey(shotId)));
+  return (row?.value ?? epoch) !== epoch;
+}
+
+/**
+ * Отменить активную генерацию промпта шота: ставим эпоху, которой ни у кого нет,
+ * — идущий LLM-вызов при завершении увидит несовпадение и НЕ запишет результат.
+ */
+export async function cancelPromptGen(shotId: string): Promise<void> {
+  await requireAuth();
+  await setSetting(epochKey(shotId), `cancelled_${crypto.randomUUID()}`);
+}
+
 /**
  * Лёгкий опрос: номер последней версии промпта шота (0 — промпта нет). Клиент
  * поллит его во время генерации, чтобы подхватить результат, даже если ответ
@@ -138,10 +168,17 @@ export async function generateShotPrompt(
   shotId: string,
   targetModel: string,
   llmModel?: string,
+  epoch?: string,
+  markActive = true,
 ): Promise<Result> {
   await requireAuth();
   try {
+    // markActive=false — вызов из generateShotPromptsFor, эпоха уже помечена там
+    // (повторная пометка затёрла бы отмену, пришедшую между треками)
+    if (epoch && markActive) await markEpoch(shotId, epoch);
     const data = await llmShotPrompt(shotId, targetModel, llmModel);
+    // отменена (или заменена новой задачей) — результат в данные НЕ пишем
+    if (await epochStale(shotId, epoch)) return { ok: false, error: "Генерация отменена" };
     const promptId = await insertVersion(shotId, targetModel, data, null, null);
     return { ok: true, promptId };
   } catch (e) {
@@ -158,12 +195,16 @@ export async function generateShotPromptsFor(
   shotId: string,
   families: PromptFamily[],
   llmModel?: string,
+  epoch?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireAuth();
+  // всю постановку (оба трека) регистрируем одной эпохой — тогда отмена между
+  // треками не теряется (иначе второй трек пометил бы задачу активной заново)
+  if (epoch) await markEpoch(shotId, epoch);
   for (const family of families) {
     const meta = PROMPT_FAMILIES.find((f) => f.id === family);
     if (!meta) return { ok: false, error: `Неизвестный трек: ${family}` };
-    const res = await generateShotPrompt(shotId, meta.targetModel, llmModel);
+    const res = await generateShotPrompt(shotId, meta.targetModel, llmModel, epoch, false);
     if (!res.ok) {
       return {
         ok: false,
@@ -255,13 +296,16 @@ export async function deletePromptVersion(
 }
 
 /** U4 — замечание → версия N+1 через промпт-фабрику. */
-export async function revisePrompt(promptId: string, feedback: string): Promise<Result> {
+export async function revisePrompt(promptId: string, feedback: string, epoch?: string): Promise<Result> {
   await requireAuth();
   try {
     const db = await getDb();
     const [prev] = await db.select().from(prompts).where(eq(prompts.id, promptId));
     if (!prev) return { ok: false, error: "Промпт не найден" };
+    if (epoch) await markEpoch(prev.shotId, epoch);
     const data = await llmRevisePrompt(promptId, feedback);
+    // отменена (или заменена новой задачей) — результат в данные НЕ пишем
+    if (await epochStale(prev.shotId, epoch)) return { ok: false, error: "Генерация отменена" };
     // приёмы прошлой версии не теряются, если ревизия не выбрала свои
     if (!data.used_technique_ids.length) {
       const prevParams = JSON.parse(prev.paramsJson || "{}") as { techniques?: string[] };

@@ -18,10 +18,11 @@ export default function ActionBar({
   hasPrompt,
   models,
   defaultModelIds,
-  startFrames,
   groupDurationSec,
   aspectRatio,
   defaultStartFrameId,
+  latestByFamily,
+  versionById,
 }: {
   episodeId: string;
   shotId: string;
@@ -30,10 +31,13 @@ export default function ActionBar({
   hasPrompt: boolean;
   models: CatalogModel[];
   defaultModelIds: string[];
-  startFrames: StartFrameOption[];
+  /** оставлен для совместимости вызова; UI выбора start-frame убран из шторки */
+  startFrames?: StartFrameOption[];
   groupDurationSec: number;
   aspectRatio: string;
   defaultStartFrameId: string | null;
+  latestByFamily: Partial<Record<PromptFamily, number>>;
+  versionById: Record<string, number>;
 }) {
   const t = useT();
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -92,10 +96,11 @@ export default function ActionBar({
         promptFamilies={promptFamilies}
         models={models}
         defaultModelIds={defaultModelIds}
-        startFrames={startFrames}
         groupDurationSec={groupDurationSec}
         aspectRatio={aspectRatio}
         defaultStartFrameId={defaultStartFrameId}
+        latestByFamily={latestByFamily}
+        versionById={versionById}
       />
     </>
   );

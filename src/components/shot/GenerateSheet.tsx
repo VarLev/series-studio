@@ -51,10 +51,11 @@ export default function GenerateSheet({
   promptFamilies,
   models,
   defaultModelIds,
-  startFrames,
   groupDurationSec,
   aspectRatio,
   defaultStartFrameId,
+  latestByFamily,
+  versionById,
 }: {
   open: boolean;
   onClose: () => void;
@@ -63,10 +64,16 @@ export default function GenerateSheet({
   promptFamilies: Record<PromptFamily, boolean>;
   models: CatalogModel[];
   defaultModelIds: string[];
-  startFrames: StartFrameOption[];
+  /** оставлен для совместимости вызова; UI выбора start-frame убран (замечание заказчика) */
+  startFrames?: StartFrameOption[];
   groupDurationSec: number;
   aspectRatio: string;
+  /** start-frame сцены-продолжения подставляется автоматически, без ручного выбора */
   defaultStartFrameId: string | null;
+  /** последняя версия промпта каждого трека — показываем, какая уйдёт на генерацию */
+  latestByFamily: Partial<Record<PromptFamily, number>>;
+  /** id версии → её номер (для явно открытой/выбранной версии) */
+  versionById: Record<string, number>;
 }) {
   const t = useT();
   // «открытая» версия активного трека — именно она уйдёт на генерацию (переген
@@ -92,9 +99,9 @@ export default function GenerateSheet({
   // standard). Контрол показываем, только если среди выбранных есть Seedance-модель.
   const [bitrate, setBitrate] = useState<"high" | "standard">("high");
   const hasSeedance = [...selected].some((id) => promptFamily(id) === "seedance");
-  // роль start-frame из референсов шота подставляется автоматически (spec §3.1)
-  const [startFrame, setStartFrame] = useState<string>(defaultStartFrameId ?? "");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // start-frame сцены-продолжения подставляется автоматически (spec §3.1); ручного
+  // выбора в этой шторке больше нет (замечание заказчика)
+  const startFrame = defaultStartFrameId ?? "";
   const [confirmInfo, setConfirmInfo] = useState<{ estimate: number; limit: number } | null>(null);
   const [confirmStep, setConfirmStep] = useState(0); // двухшаговое подтверждение
   const [error, setError] = useState("");
@@ -153,7 +160,8 @@ export default function GenerateSheet({
   const klingFallback =
     quality === "480p" &&
     [...selected].some((id) => !(models.find((m) => m.id === id)?.qualities.includes("480p") ?? false));
-  const chosenFrame = startFrames.find((f) => f.id === startFrame) ?? null;
+  // версия промпта, которая уйдёт на генерацию: явно открытая, иначе последняя трека
+  const activeVersion = openPromptId ? versionById[openPromptId] : latestByFamily[family];
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -378,91 +386,6 @@ export default function GenerateSheet({
         ))}
       </div>
 
-      <div className="section-label mb-2 mt-4">Start-frame (image-to-video)</div>
-      {chosenFrame ? (
-        <div className="flex items-center gap-2.5 rounded-lg border border-[rgba(192,138,62,.4)] bg-ink-700 p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={chosenFrame.url}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="aspect-[9/16] w-9 rounded-md border border-[var(--border-subtle)] object-cover"
-          />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[12px] font-medium text-t100">
-              {chosenFrame.label}
-            </span>
-            <span className="block font-mono text-[9px] text-warning">start-frame</span>
-          </span>
-          <button
-            onClick={() => setPickerOpen(true)}
-            className="rounded-md border border-[var(--border-default)] px-2.5 py-1.5 text-[10px] font-semibold text-t200"
-          >
-            {t("Выбрать", "Choose")}
-          </button>
-          <button
-            aria-label="Reset start-frame"
-            onClick={() => setStartFrame("")}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-t400 hover:text-danger"
-          >
-            ×
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setPickerOpen(true)}
-          className="flex min-h-11 w-full items-center justify-center rounded-lg border border-dashed border-[var(--border-default)] text-[11px] text-t300 hover:border-[var(--border-strong)]"
-        >
-          {t("Выбрать из референсов…", "Choose from references…")}
-        </button>
-      )}
-      {pickerOpen && (
-        <div className="mt-2 flex gap-2 overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-ink-800 p-2">
-          {startFrames.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => {
-                setStartFrame(f.id);
-                setPickerOpen(false);
-              }}
-              className="w-[76px] shrink-0"
-            >
-              <span
-                className="relative block h-11 overflow-hidden rounded-md border-2"
-                style={{
-                  borderColor:
-                    startFrame === f.id
-                      ? "var(--warning)"
-                      : f.badge
-                        ? "var(--violet-400)"
-                        : "var(--border-subtle)",
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
-                {f.badge && (
-                  <span className="absolute left-0 top-0 rounded-br bg-[rgba(6,5,9,.82)] px-1 font-mono text-[7px] font-semibold text-violet-200">
-                    ▦
-                  </span>
-                )}
-              </span>
-              <span className="mt-0.5 block truncate text-center font-mono text-[8px] text-t400">
-                {f.badge ?? f.label}
-              </span>
-            </button>
-          ))}
-          {!startFrames.length && (
-            <span className="px-2 py-3 text-[11px] text-t400">
-              {t(
-                "Нет референсов — добавьте на карточке шота или в референсах серии.",
-                "No references — add them on the shot card or in episode references.",
-              )}
-            </span>
-          )}
-        </div>
-      )}
-
       <div className="mt-4 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5">
         <span className="text-[11px] text-t300">{t("Оценка списания:", "Estimated charge:")}</span>
         <span className="font-mono text-[10px] text-t400">
@@ -496,33 +419,44 @@ export default function GenerateSheet({
       )}
       {error && <div className="mt-3 text-[11.5px] text-danger">{error}</div>}
 
-      <button
-        onClick={() => {
-          if (confirmInfo && confirmStep === 1) {
-            // второй шаг подтверждения (spec §3.1) — запуск только третьим нажатием
-            setConfirmStep(2);
-            return;
-          }
-          launch();
-        }}
-        disabled={pending || selected.size === 0}
-        className="mt-4 min-h-[52px] w-full rounded-lg text-[12px] font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-50"
-        style={{
-          background: confirmInfo ? "var(--danger)" : "var(--violet-500)",
-          boxShadow: confirmInfo ? "none" : "var(--glow-violet-sm)",
-        }}
+      {/* sticky-футер: кнопка запуска и версия промпта всегда видны, без доскролла */}
+      <div
+        className="sticky bottom-0 z-10 -mx-4 mt-4 border-t border-[var(--border-subtle)] bg-ink-700 px-4 pt-3"
+        style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
       >
-        {pending
-          ? t("Отправка…", "Submitting…")
-          : confirmInfo
-            ? confirmStep >= 2
-              ? t(`Точно запустить · ${confirmInfo.estimate} кр`, `Really launch · ${confirmInfo.estimate} cr`)
-              : t(`Подтвердить ${confirmInfo.estimate} кр`, `Confirm ${confirmInfo.estimate} cr`)
-            : t(
-                `Запустить ${selected.size} ${selected.size === 1 ? "задачу" : "задачи"}`,
-                `Launch ${selected.size} ${selected.size === 1 ? "job" : "jobs"}`,
-              )}
-      </button>
+        {activeVersion != null && (
+          <div className="mb-2 text-center font-mono text-[10px] text-t400">
+            {t("Промпт", "Prompt")} {family === "kling" ? "Kling" : "Seedance"} · v{activeVersion}
+          </div>
+        )}
+        <button
+          onClick={() => {
+            if (confirmInfo && confirmStep === 1) {
+              // второй шаг подтверждения (spec §3.1) — запуск только третьим нажатием
+              setConfirmStep(2);
+              return;
+            }
+            launch();
+          }}
+          disabled={pending || selected.size === 0}
+          className="min-h-[52px] w-full rounded-lg text-[12px] font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-50"
+          style={{
+            background: confirmInfo ? "var(--danger)" : "var(--violet-500)",
+            boxShadow: confirmInfo ? "none" : "var(--glow-violet-sm)",
+          }}
+        >
+          {pending
+            ? t("Отправка…", "Submitting…")
+            : confirmInfo
+              ? confirmStep >= 2
+                ? t(`Точно запустить · ${confirmInfo.estimate} кр`, `Really launch · ${confirmInfo.estimate} cr`)
+                : t(`Подтвердить ${confirmInfo.estimate} кр`, `Confirm ${confirmInfo.estimate} cr`)
+              : t(
+                  `Запустить ${selected.size} ${selected.size === 1 ? "задачу" : "задачи"}`,
+                  `Launch ${selected.size} ${selected.size === 1 ? "job" : "jobs"}`,
+                )}
+        </button>
+      </div>
     </Sheet>
   );
 }

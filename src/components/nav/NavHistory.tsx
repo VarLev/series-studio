@@ -35,6 +35,16 @@ export function isPanelRoute(path: string): boolean {
   return PANEL_ROUTES.some((r) => path === r || path.startsWith(`${r}/`));
 }
 
+/**
+ * Intercepting @drawer-роуты эпизода (refs/gallery) — тоже ОДИН слой поверх
+ * экрана, а не «экран под слайдером». Без этого lastBasePath перезаписывался
+ * самим адресом слайдера, и «×»/затемнение делали replace на ТОТ ЖЕ URL —
+ * панель не закрывалась (спасала только перезагрузка).
+ */
+export function isDrawerRoute(path: string): boolean {
+  return /^\/episodes\/[^/]+\/(refs|gallery)(\/|$)/.test(path);
+}
+
 /** Экран ПОД панелью — последний маршрут, который панелью не является. */
 export function basePath(): string | null {
   return lastBasePath;
@@ -63,8 +73,8 @@ export function markReplace(): void {
 export function NavHistoryTracker() {
   const pathname = usePathname();
   useEffect(() => {
-    // экран под панелью помним всегда, включая точку входа
-    if (!isPanelRoute(pathname)) lastBasePath = pathname;
+    // экран под панелью/слайдером помним всегда, включая точку входа
+    if (!isPanelRoute(pathname) && !isDrawerRoute(pathname)) lastBasePath = pathname;
     // первая отрисовка (точка входа) и повторные ре-раны с тем же путём
     // (StrictMode/refresh) навигацией не считаются
     if (lastPath === null) {

@@ -582,6 +582,8 @@ export async function submitJobs(input: SubmitInput): Promise<{ queued: number }
    *    все референсы уходят как image_1..image_7 (start-frame занимает <<<image_1>>>);
    *  - higgsfield: элементы <<<element_id>>>, фолбэк image_references+@imageN
    *    (только Seedance; kling3_0 без элементов референсы не принимает).
+   *    ВАЖНО: сайтовый формат @[Name](element_id) через MCP generate_video НЕ
+   *    работает — референсы перестают цепляться вовсе (проверено 2026-07-19).
    */
   function promptForModel(
     provider: GenerationProvider,

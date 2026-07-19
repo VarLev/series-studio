@@ -532,9 +532,9 @@ export async function enhanceGroup(
 /**
  * Revert: вернуть группу в «первоначальное состояние» — содержимое из снимка origin
  * (см. lib/groupOrigin.ts). Откатывает шоты/тайминг/заголовок/тон, чипы-заготовки,
- * персонажей в кадре и якоря группы. НЕ трогает локацию/погоду (едины на сцену),
- * статус, победителя, промпты, генерации и референсы — это результаты работы, а не
- * содержимое раскадровки. У групп без снимка вернёт понятную ошибку.
+ * локацию/погоду (по всей сюжетной связке), персонажей в кадре и якоря группы. НЕ
+ * трогает статус, победителя, промпты, генерации и референсы — это результаты работы,
+ * а не содержимое раскадровки. У групп без снимка вернёт понятную ошибку.
  */
 export async function revertGroup(
   shotId: string,
@@ -552,7 +552,7 @@ export async function revertGroup(
       return { ok: false, error: "У этой группы нет сохранённого исходного состояния" };
     }
 
-    // содержимое группы (сценовые location/timeWeather и статус/результаты не трогаем)
+    // содержимое самой группы (статус/победитель/промпты/генерации не трогаем — результаты)
     await db
       .update(shots)
       .set({
@@ -570,6 +570,21 @@ export async function revertGroup(
         ...(snap.stateEndJson != null ? { stateEndJson: snap.stateEndJson } : {}),
       })
       .where(eq(shots.id, shotId));
+
+    // локация/погода едины на сюжетную связку (до следующего scene_start) — как при
+    // ручной правке/Enhance, возвращаем их из снимка ПО ВСЕЙ связке. У вставной группы
+    // (isInsert) локация/погода свои — откатываем только ей.
+    const allRows = await db
+      .select()
+      .from(shots)
+      .where(eq(shots.episodeId, shot.episodeId))
+      .orderBy(asc(shots.orderIndex));
+    const chain = shot.isInsert ? [shot] : sceneChainOf(allRows, shotId);
+    const chainIds = (chain.length ? chain : [shot]).map((s) => s.id);
+    await db
+      .update(shots)
+      .set({ location: snap.location, timeWeather: snap.timeWeather })
+      .where(inArray(shots.id, chainIds));
 
     // персонажи в кадре — пересобрать точно как в снимке (включая наряды/локацию-сущность)
     await db.delete(shotEntities).where(eq(shotEntities.shotId, shotId));

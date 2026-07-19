@@ -7,25 +7,12 @@ import {
   saveManualVersion,
   generateShotPrompt,
   latestPromptVersion,
+  cancelPromptGen,
 } from "@/lib/actions/prompts";
 import { useLongAction } from "@/components/useLongAction";
 import { toast } from "@/components/Toaster";
 import { useT } from "@/components/I18nProvider";
 import type { PromptVersion } from "@/components/shot/PromptBlock";
-
-/** Движения камеры (Kling Camera Toolkit) — быстрые вставки в позицию курсора. */
-const CAMERA_MOVES = [
-  "Slow dolly in",
-  "Dolly out",
-  "Crane up",
-  "Crane down",
-  "Orbit 360°",
-  "Push-in + tilt up",
-  "Handheld tracking shot",
-  "Static locked-off shot",
-  "Whip pan",
-  "Slow zoom out reveal",
-];
 
 /** Простой построчный diff (LCS) для режима «показать отличия». */
 function diffLines(a: string, b: string): Array<{ text: string; kind: "same" | "add" | "del" }> {
@@ -109,6 +96,15 @@ export default function PromptEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const latest = versions[0];
   const busy = pending || verWatch.busy;
+
+  // Отмена генерации промпта: сервер отбросит результат текущей epoch (версия не
+  // создастся, на данные не повлияет), клиент перестаёт ждать. Сразу после этого
+  // можно запустить новую задачу — у неё будет своя epoch.
+  function cancelGen() {
+    void cancelPromptGen(shotId);
+    verWatch.cancel();
+    toast(t("Генерация промпта отменена", "Prompt generation cancelled"));
+  }
 
   const mention = useMemo(() => findMention(text, caret), [text, caret]);
   const mentionItems: MentionItem[] = useMemo(() => {
@@ -222,9 +218,10 @@ export default function PromptEditor({
     // свежий ориентир с сервера: пропсовые versions могли устареть
     const baseline = await latestPromptVersion(shotId).catch(() => latest.version);
     startingRef.current = false;
+    const epoch = crypto.randomUUID();
     verWatch.start({
       run: async () => {
-        const res = await revisePrompt(latest.id, note.trim());
+        const res = await revisePrompt(latest.id, note.trim(), epoch);
         return res.ok ? { ok: true, value: baseline + 1 } : res;
       },
       poll: async () => {
@@ -272,12 +269,19 @@ export default function PromptEditor({
         </div>
         <button
           onClick={() => {
+            // повторное нажатие во время работы — отмена: результат отбросится, можно
+            // сразу запустить новую задачу
+            if (verWatch.busy) {
+              cancelGen();
+              return;
+            }
             setError("");
             // первая версия из редактора — трек Seedance (Kling создаётся на карточке
             // шота); версий ещё нет, поэтому успех = появилась хоть одна (поллинг)
+            const epoch = crypto.randomUUID();
             verWatch.start({
               run: async () => {
-                const res = await generateShotPrompt(shotId, "seedance-2.0");
+                const res = await generateShotPrompt(shotId, "seedance-2.0", undefined, epoch);
                 return res.ok ? { ok: true, value: 1 } : res;
               },
               poll: async () => {
@@ -294,12 +298,13 @@ export default function PromptEditor({
               onErr: setError,
             });
           }}
-          disabled={busy}
+          disabled={pending}
+          title={verWatch.busy ? t("Идёт сборка — нажмите, чтобы перестать ждать", "Building — click to stop waiting") : undefined}
           className="min-h-12 rounded-lg bg-violet-500 px-6 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-violet-400 disabled:opacity-60"
           style={{ boxShadow: "var(--glow-violet-sm)" }}
         >
           {verWatch.busy
-            ? t(`Фабрика работает… ${verWatch.elapsed}с`, `Factory running… ${verWatch.elapsed}s`)
+            ? t(`Отменить · ${verWatch.elapsed}с`, `Cancel · ${verWatch.elapsed}s`)
             : t("Собрать промпт · Claude", "Build prompt · Claude")}
         </button>
         {error && <div className="text-[11px] text-danger">{error}</div>}
@@ -458,25 +463,11 @@ export default function PromptEditor({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto px-3">
-          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-t400">
-            {t("Камера", "Camera")}
-          </span>
-          {CAMERA_MOVES.map((m) => (
-            <button
-              key={m}
-              onClick={() => insertAtCursor(m)}
-              className="min-h-7 shrink-0 rounded-md border border-[var(--border-subtle)] bg-ink-600 px-2.5 font-mono text-[10px] text-t200 hover:border-[var(--border-strong)] hover:text-violet-100"
-            >
-              {m}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* нижняя панель: замечание → новая версия / ручное сохранение */}
       <div
-        className="flex flex-col gap-2 border-t border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5"
+        className="flex flex-col gap-2 border-t border-[var(--border-subtle)] bg-ink-700 px-3 py-2.5 mb-[58px] lg:mb-0"
         style={{ paddingBottom: "max(10px, env(safe-area-inset-bottom))" }}
       >
         {error && <div className="text-[11px] text-danger">{error}</div>}
@@ -492,13 +483,14 @@ export default function PromptEditor({
         />
         <div className="flex items-stretch gap-2">
           <button
-            onClick={makeVersion}
-            disabled={busy}
+            onClick={verWatch.busy ? cancelGen : makeVersion}
+            disabled={pending}
+            title={verWatch.busy ? t("Идёт генерация — нажмите, чтобы перестать ждать", "Generating — click to stop waiting") : undefined}
             className="min-h-[46px] flex-1 rounded-md bg-violet-500 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
             style={{ boxShadow: "var(--glow-violet-sm)" }}
           >
             {verWatch.busy
-              ? t(`Claude думает… ${verWatch.elapsed}с`, `Claude is thinking… ${verWatch.elapsed}s`)
+              ? t(`Отменить · ${verWatch.elapsed}с`, `Cancel · ${verWatch.elapsed}s`)
               : t(`Создать v${(latest?.version ?? 0) + 1}`, `Create v${(latest?.version ?? 0) + 1}`)}
           </button>
           <button

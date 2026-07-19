@@ -112,9 +112,16 @@ export default function ResultsStrip({
             {failed && (
               <div className="flex aspect-[9/16] flex-col items-start justify-center gap-1.5 bg-[rgba(194,71,106,.06)] p-3">
                 <span className="rounded-full border border-[rgba(194,71,106,.4)] bg-[rgba(194,71,106,.14)] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#e08aa4]">
-                  {g.status === "nsfw" ? t("Отказ · контент-фильтр", "Refused · content filter") : t("Ошибка", "Error")}
+                  {g.status !== "nsfw"
+                    ? t("Ошибка", "Error")
+                    : /ip_detected/i.test(g.error ?? "")
+                      ? // провайдер увидел «реального человека» в референсах — это не NSFW
+                        t("Отказ · распознан реальный человек", "Refused · real-person match")
+                      : t("Отказ · контент-фильтр", "Refused · content filter")}
                 </span>
-                <span className="line-clamp-3 text-[10.5px] leading-snug text-t300">{g.error}</span>
+                <span title={g.error ?? undefined} className="line-clamp-3 text-[10.5px] leading-snug text-t300">
+                  {g.error}
+                </span>
               </div>
             )}
 

@@ -38,10 +38,13 @@ export function compositionLine(anchor: string): string {
 
 /** Каноничная строка референса-layout для якоря @CompN. */
 export function layoutLine(anchor: string): string {
+  // «never render …» — запрет материализовать layout-референс в собственный кадр:
+  // видеомодель вставляла его широким мастер-планом ПОВЕРХ заявленной нарезки
+  // (инцидент 2026-07-18: 6 катов вместо 5, лишний wide между SHOT 04 и 05)
   return (
     `Use ${anchor} ONLY to establish the room layout and where characters and objects are ` +
     `positioned (spatial relationships). Do NOT copy ${anchor}'s camera angle or visible framing — ` +
-    `the shots use new camera positions.`
+    `the shots use new camera positions. Never render ${anchor}'s view as a shot of its own.`
   );
 }
 

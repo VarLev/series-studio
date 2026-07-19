@@ -9,7 +9,7 @@ import GalleryContent from "./GalleryContent";
 export const dynamic = "force-dynamic";
 
 /**
- * M5 — галерея эпизода: ВСЕ видео-победители (у шота их может быть несколько) + zip.
+ * M5 — галерея эпизода: ВСЕ готовые видео шотов; утверждённые (winner) помечены.
  * Полная страница — только по прямому URL/перезагрузке; при навигации с экрана
  * эпизода этот маршрут перехватывается правым слайдером (@drawer/(.)gallery).
  */
@@ -28,7 +28,7 @@ export default async function GalleryPage(ctx: { params: Promise<{ id: string }>
       <ScreenHeader
         backHref={`/episodes/${id}`}
         eyebrow={`${t("Серия", "Episode")} ${epN}`}
-        title={t("Галерея победителей", "Winners gallery")}
+        title={t("Галерея", "Gallery")}
       />
       <GalleryContent episodeId={id} />
     </main>

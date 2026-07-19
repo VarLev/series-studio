@@ -97,39 +97,63 @@ if ($notifyEnabled) {
     Write-Host "[telegram] disabled: TELEGRAM_BOT_TOKEN is empty in .env.local. Tunnel runs as usual." -ForegroundColor DarkGray
 }
 
-# --- Запуск cloudflared с перехватом вывода ---
-# cloudflared пишет логи (и баннер с адресом) в stderr. Редиректим только его и
-# читаем построчно синхронно; stdout не трогаем (он пуст) — так нет риска дедлока.
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName               = $Cloudflared
-$psi.Arguments              = "tunnel --url $Target"
-$psi.UseShellExecute        = $false
-$psi.RedirectStandardError  = $true
-$psi.StandardErrorEncoding  = [Text.Encoding]::UTF8
-
-$proc = New-Object System.Diagnostics.Process
-$proc.StartInfo = $psi
-[void]$proc.Start()
-
+# --- Запуск cloudflared с перехватом вывода и авто-повтором ---
+# cloudflared пишет логи (и баннер с адресом) в stderr. Читаем его построчно,
+# ловим адрес. trycloudflare — бесплатный сервис без гарантии аптайма: иногда его
+# backend отдаёт 500 (error 1101, «error unmarshaling QuickTunnel response») на
+# запрос быстрого туннеля. Это НЕ проблема сервера/скрипта — их сбой. Если адрес
+# так и не пойман, а процесс завершился, ждём и пробуем снова.
 $urlRegex = 'https://[a-z0-9-]+\.trycloudflare\.com'
+$maxAttempts = 6
 $lastSent = $null
 
-while (-not $proc.StandardError.EndOfStream) {
-    $line = $proc.StandardError.ReadLine()
-    Write-Host $line                       # оставляем вывод cloudflared видимым в окне
-    if ($notifyEnabled -and $chatId -and ($line -match $urlRegex)) {
-        $url = $matches[0]
-        if ($url -ne $lastSent) {           # новый адрес (в т.ч. после переподключения)
-            try {
-                Send-Telegram $token $chatId "Series Studio доступен:`n$url"
-                $lastSent = $url
-                Write-Host "[telegram] address sent to chat $chatId" -ForegroundColor Green
-            } catch {
-                Write-Host "[telegram] send failed: $($_.Exception.Message)" -ForegroundColor Red
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = $Cloudflared
+    $psi.Arguments              = "tunnel --url $Target"
+    $psi.UseShellExecute        = $false
+    $psi.RedirectStandardError  = $true
+    $psi.StandardErrorEncoding  = [Text.Encoding]::UTF8
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+
+    $gotUrl = $false
+    while (-not $proc.StandardError.EndOfStream) {
+        $line = $proc.StandardError.ReadLine()
+        Write-Host $line                   # оставляем вывод cloudflared видимым в окне
+        if ($line -match $urlRegex) {
+            $gotUrl = $true
+            if ($notifyEnabled -and $chatId) {
+                $url = $matches[0]
+                if ($url -ne $lastSent) {   # новый адрес (в т.ч. после переподключения)
+                    try {
+                        Send-Telegram $token $chatId "Series Studio доступен:`n$url"
+                        $lastSent = $url
+                        Write-Host "[telegram] address sent to chat $chatId" -ForegroundColor Green
+                    } catch {
+                        Write-Host "[telegram] send failed: $($_.Exception.Message)" -ForegroundColor Red
+                    }
+                }
             }
         }
     }
-}
+    $proc.WaitForExit()
 
-$proc.WaitForExit()
-exit $proc.ExitCode
+    # адрес был выдан → туннель отработал (закрыт пользователем или разрывом связи):
+    # выходим с кодом cloudflared, повтор не нужен
+    if ($gotUrl) { exit $proc.ExitCode }
+
+    # адрес не пойман → сбой запуска (обычно 500 от trycloudflare). Повторяем с паузой.
+    if ($attempt -lt $maxAttempts) {
+        $wait = 5 * $attempt
+        Write-Host ""
+        Write-Host "[tunnel] trycloudflare не выдал адрес — сбой их сервиса (попытка $attempt из $maxAttempts). Повтор через $wait с..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $wait
+    } else {
+        Write-Host ""
+        Write-Host "[tunnel] trycloudflare недоступен после $maxAttempts попыток. Сервер работает — запустите туннель позже." -ForegroundColor Red
+        exit 1
+    }
+}
