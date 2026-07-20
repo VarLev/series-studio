@@ -1339,7 +1339,7 @@ export default function GroupShotsEditor({
                     className="inline-flex items-center gap-1 rounded bg-[rgba(139,95,176,.18)] px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={rt.url} alt="" className="h-4 w-[11px] rounded-[2px] object-cover" />
+                    <img src={rt.url} alt="" draggable={false} className="h-4 w-[11px] rounded-[2px] object-cover" />
                     {rt.anchor && <span className="leading-none">{rt.anchor}</span>}
                     <button
                       onPointerDown={(e) => e.stopPropagation()}

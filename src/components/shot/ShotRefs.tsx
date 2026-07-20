@@ -120,37 +120,43 @@ export default function ShotRefs({
   const suppressClick = useRef(false);
   useEffect(() => () => { if (dragArm.current?.timer) clearTimeout(dragArm.current.timer); }, []);
 
+  // армирование drag: по long-press (тач) либо сразу по движению зажатой мыши
+  function armRefDrag() {
+    if (!dragArm.current || dragActive.current) return;
+    if (dragArm.current.timer) clearTimeout(dragArm.current.timer);
+    dragActive.current = true;
+    suppressClick.current = true;
+    try { dragArm.current.el.setPointerCapture(dragArm.current.pointerId); } catch {}
+    // снять выделение, которое браузер мог начать за время долгого нажатия
+    if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges();
+    setRefDrag({ id: dragArm.current.id, url: dragArm.current.url, x: dragArm.current.x, y: dragArm.current.y });
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
+  }
   function onRefPointerDown(e: React.PointerEvent<HTMLDivElement>, r: ShotRef) {
     suppressClick.current = false;
     if (r.role === "start_frame") return; // глобальный первый кадр — за шотом не закрепляется
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const el = e.currentTarget;
     dragArm.current = { id: r.id, url: r.url, x: e.clientX, y: e.clientY, pointerId: e.pointerId, el };
-    dragArm.current.timer = setTimeout(() => {
-      if (!dragArm.current) return;
-      dragActive.current = true;
-      suppressClick.current = true;
-      try { el.setPointerCapture(dragArm.current.pointerId); } catch {}
-      // снять выделение, которое браузер мог начать за время долгого нажатия
-      if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges();
-      setRefDrag({ id: dragArm.current.id, url: dragArm.current.url, x: dragArm.current.x, y: dragArm.current.y });
-      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
-    }, 300);
+    dragArm.current.timer = setTimeout(armRefDrag, 300);
   }
   function onRefPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragActive.current && dragArm.current) {
+      const moved = Math.hypot(e.clientX - dragArm.current.x, e.clientY - dragArm.current.y);
+      if (e.pointerType === "mouse") {
+        // мышь: движение с зажатой кнопкой = намерение перетащить (жеста скролла
+        // у мыши нет) — армим сразу, не заставляя выдерживать 300мс на месте
+        if (moved > 6) armRefDrag();
+      } else if (moved > 10) {
+        // палец поехал до срабатывания long-press — это скролл strip'а или тап
+        if (dragArm.current.timer) clearTimeout(dragArm.current.timer);
+        dragArm.current = null;
+      }
+    }
     if (dragActive.current) {
       const x = e.clientX;
       const y = e.clientY;
       setRefDrag((d) => (d ? { ...d, x, y } : d));
-      return;
-    }
-    // палец поехал до срабатывания long-press — это скролл strip'а или тап, не drag
-    if (dragArm.current) {
-      const moved = Math.hypot(e.clientX - dragArm.current.x, e.clientY - dragArm.current.y);
-      if (moved > 10) {
-        if (dragArm.current.timer) clearTimeout(dragArm.current.timer);
-        dragArm.current = null;
-      }
     }
   }
   function onRefPointerUp(e: React.PointerEvent<HTMLDivElement>) {
@@ -218,10 +224,18 @@ export default function ShotRefs({
             onPointerMove={onRefPointerMove}
             onPointerUp={onRefPointerUp}
             onPointerCancel={onRefPointerCancel}
+            // НАТИВНЫЙ drag картинки перехватывал жест: браузер начинал тащить
+            // «иконку изображения», pointer-события обрывались и наш drag умирал
+            onDragStart={(e) => e.preventDefault()}
+            // long-press на мобиле не должен открывать контекстное меню/превью картинки
+            onContextMenu={(e) => { if (dragActive.current || dragArm.current) e.preventDefault(); }}
             style={{
               touchAction: refDrag ? "none" : "pan-x",
               opacity: refDrag?.id === r.id ? 0.45 : 1,
               cursor: r.role === "start_frame" ? undefined : "grab",
+              userSelect: "none",
+              WebkitUserSelect: "none",
+              WebkitTouchCallout: "none",
             }}
           >
             <div className="relative aspect-[9/16] overflow-hidden rounded-md border-[1.5px] bg-ink-600"
@@ -243,8 +257,9 @@ export default function ShotRefs({
                 aria-label={t("Открыть детали референса", "Open reference details")}
                 className="absolute inset-0 h-full w-full"
               >
+                {/* draggable=false — иначе нативный drag <img> перебивает наш pointer-drag */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={r.url} alt={r.caption} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                <img src={r.url} alt={r.caption} draggable={false} loading="lazy" decoding="async" className="h-full w-full object-cover" />
               </button>
               {/* бейдж роли — только индикатор; тап по миниатюре открывает единый
                   слайдер (детали + смена роли). pointer-events-none — клик проходит
@@ -555,7 +570,7 @@ export default function ShotRefs({
           style={{ left: refDrag.x, top: refDrag.y, transform: "translate(-50%, -120%)" }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={refDrag.url} alt="" className="h-16 w-9 object-cover" />
+          <img src={refDrag.url} alt="" draggable={false} className="h-16 w-9 object-cover" />
         </div>
       )}
     </>
