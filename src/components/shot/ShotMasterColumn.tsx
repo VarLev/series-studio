@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useSelectedLayoutSegment } from "next/navigation";
 import { SHOT_STATUS } from "@/lib/statuses";
+import LongPressMenu from "@/components/LongPressMenu";
+import { deleteShot } from "@/lib/actions/deletes";
 import { useT } from "@/components/I18nProvider";
 import type { NavShot } from "@/lib/shotChrome";
 
@@ -29,9 +31,20 @@ export default function ShotMasterColumn({
           const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
           const active = s.id === shotId;
           const sLabel = s.isInsert ? "✦" : String(s.displayNo).padStart(2, "0");
+          const groupTitle = s.isInsert
+            ? t("Вставная группа", "Insert group")
+            : `${t("Группа", "Group")} ${sLabel}`;
           return (
-            <Link
+            // долгое зажатие / правый клик по элементу → меню с «Удалить группу»
+            <LongPressMenu
               key={s.id}
+              title={s.title ? `${groupTitle} · ${s.title}` : groupTitle}
+              deleteLabel={t("Удалить группу", "Delete group")}
+              confirmLabel={t("Точно удалить эту группу и все её данные?", "Really delete this group and all its data?")}
+              doneToast={t("Группа удалена", "Group deleted")}
+              action={() => deleteShot(s.id)}
+            >
+            <Link
               href={`/episodes/${episodeId}/shots/${s.id}`}
               className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
                 s.isInsert ? "border-dashed" : ""
@@ -77,6 +90,7 @@ export default function ShotMasterColumn({
                 style={{ background: st.color }}
               />
             </Link>
+            </LongPressMenu>
           );
         })}
       </div>

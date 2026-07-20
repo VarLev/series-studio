@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { SHOT_STATUS } from "@/lib/statuses";
+import LongPressMenu from "@/components/LongPressMenu";
+import { deleteShot } from "@/lib/actions/deletes";
 import { useT } from "@/components/I18nProvider";
 import LazyVideoThumb from "@/components/LazyVideoThumb";
 
@@ -41,11 +43,23 @@ export default function FilmStrip({
         const st = SHOT_STATUS[s.status] ?? SHOT_STATUS.draft;
         const current = s.id === currentShotId;
         const label = s.isInsert ? "✦" : String(s.displayNo).padStart(2, "0");
+        const groupTitle = s.isInsert
+          ? t("Вставная группа", "Insert group")
+          : `${t("Группа", "Group")} ${label}`;
         return (
-          <Link
+          // долгое зажатие / правый клик по миниатюре → меню с «Удалить группу»
+          <LongPressMenu
             key={s.id}
-            href={`/episodes/${episodeId}/shots/${s.id}`}
+            title={groupTitle}
+            deleteLabel={t("Удалить группу", "Delete group")}
+            confirmLabel={t("Точно удалить эту группу и все её данные?", "Really delete this group and all its data?")}
+            doneToast={t("Группа удалена", "Group deleted")}
+            action={() => deleteShot(s.id)}
             className="w-[38px] shrink-0"
+          >
+          <Link
+            href={`/episodes/${episodeId}/shots/${s.id}`}
+            className="block"
             title={`${s.isInsert ? t("Вставка", "Insert") : t("Группа", "Group")} ${label} · ${t(st.ru, st.en)}`}
           >
             <span
@@ -88,6 +102,7 @@ export default function FilmStrip({
               {label}
             </span>
           </Link>
+          </LongPressMenu>
         );
       })}
     </div>
