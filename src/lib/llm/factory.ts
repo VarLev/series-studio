@@ -835,25 +835,40 @@ export async function llmShotPrompt(
     }
     return `"${!singleBeat && orders.length ? base + beatPinSuffix(orders, r.role) : base}"`;
   });
-  // человекочитаемая карта «шот → его референсы» — дублирует суффиксы строк выше,
-  // чтобы модель положила каждый @CompN в НУЖНЫЙ SHOT-блок (в режиме всей группы)
+  // карта «шот → его референсы»: закреплённый @CompN упоминается ВТОРОЙ раз —
+  // inline в строке Framing своего SHOT-блока («follow @CompN's composition») —
+  // так привязку кадра к шоту формулируют гайды Seedance 2.0, модель понимает её
+  // надёжнее, чем только пометку «for SHOT N» в директиве сверху
   const pinnedByBeat = [...beatOrdersByRefId.entries()]
     .flatMap(([rid, orders]) => orders.map((o) => ({ o, anchor: anchorByRefId.get(rid)! })))
     .sort((a, b) => a.o - b.o);
-  const pinnedNote =
-    !singleBeat && pinnedByBeat.length
+  const ownAnchors = singleBeat
+    ? pinnedByBeat.filter((p) => p.o === singleBeat.order).map((p) => p.anchor)
+    : [];
+  const pinnedNote = singleBeat
+    ? ownAnchors.length
+      ? "\nЗАКРЕПЛЁННЫЙ ЗА ЭТИМ ШОТОМ РЕФЕРЕНС: " +
+        ownAnchors.join(", ") +
+        " — раскадровочный кадр этого видео. В строке Framing единственного SHOT-блока сошлись на него " +
+        `явно — "follow ${ownAnchors[0]}'s composition, camera angle and framing" (для layout-референса — ` +
+        `"follow ${ownAnchors[0]}'s room layout and positions", ракурс шота остаётся свой) — и опиши кадр по нему.`
+      : ""
+    : pinnedByBeat.length
       ? "\nЗАКРЕПЛЁННЫЕ ЗА ШОТАМИ РЕФЕРЕНСЫ: " +
         pinnedByBeat.map((p) => `шот ${p.o} → ${p.anchor}`).join("; ") +
-        ". Такой референс — раскадровочный кадр ИМЕННО своего шота: опиши по нему Framing и камеру " +
-        "соответствующего SHOT-блока (для layout-референса — только геометрию и расстановку, ракурс " +
-        "шота остаётся свой); в других шотах его НЕ упоминай и его вид НЕ копируй."
+        ". Такой референс — раскадровочный кадр ИМЕННО своего шота. В его SHOT-блоке сошлись на референс " +
+        'ПРЯМО в строке Framing — начни её с "follow @CompN\'s composition, camera angle and framing" ' +
+        '(для layout-референса — "follow @CompN\'s room layout and positions", ракурс шота остаётся свой) — ' +
+        "и опиши кадр по референсу. В другие SHOT-блоки его НЕ вписывай и его вид туда НЕ копируй."
       : "";
   const compositionBlock = gateBlock(
     "dyn_shot_refs",
     off,
     attachedRefs.length
       ? "РЕФЕРЕНСЫ ШОТА (приложение заменит якоря @CompN на реальные слоты картинок при отправке): " +
-        "для КАЖДОГО добавь в начале промпта РОВНО ОДНУ строку ниже — дословно — и больше нигде его не упоминай:\n" +
+        "для КАЖДОГО добавь в начале промпта РОВНО ОДНУ строку ниже — дословно. Групповой (не " +
+        "закреплённый за шотом) референс больше нигде в тексте не упоминай; закреплённый — упомяни ЕЩЁ " +
+        "ровно один раз, inline в Framing своего SHOT-блока (см. ЗАКРЕПЛЁННЫЕ… ниже):\n" +
         compLines.join("\n") +
         pinnedNote +
         (hasLayoutRef
@@ -1087,7 +1102,7 @@ export async function llmShotPrompt(
             (b.action ? ` Действие: ${b.action}.` : "") +
             (b.dialogue ? ` Реплика: «${b.dialogue}»` : "") +
             (pinned.length
-              ? ` Референс кадра: ${pinned.join(", ")} (используй как заданный вид/ракурс этого шота).`
+              ? ` Референс кадра: ${pinned.join(", ")} — сошлись на него в Framing этого шота (follow …'s composition).`
               : "")
           );
         })

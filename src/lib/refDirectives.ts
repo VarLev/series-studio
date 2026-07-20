@@ -13,9 +13,10 @@
  * (factory.ts), и в авто-синхронизации — чтобы после ручной смены типа строки
  * выглядели ровно так же, как сгенерировала бы модель.
  *
- * Опознавание строк-директив — по якорям @Start / @Image1 / @CompN, которые по
- * договорённости встречаются ТОЛЬКО в этих строках (в остальном тексте промпта
- * их нет). Идентити-строки персонажей (@ElementName) под это НЕ попадают.
+ * Опознавание строк-директив — по началу строки «Use @якорь…» / «Ignore @якорь…»
+ * (REF_DIRECTIVE_RE). Сам якорь @CompN может встречаться и в теле промпта —
+ * inline-упоминание в Framing закреплённого за шотом референса; такие строки
+ * синк не трогает. Идентити-строки персонажей (@ElementName) под это НЕ попадают.
  */
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb, prompts, references, shots } from "@/lib/db";
@@ -92,9 +93,14 @@ export function referenceDirectiveLines(refs: DirectiveRef[], family: PromptFami
   return lines;
 }
 
-// якоря управляемых нами строк-директив (только референсы шота; @ElementName
-// персонажей и локаций сюда НЕ попадают)
-const REF_ANCHOR_RE = /@(?:Comp\d+|Start|Image1)\b/i;
+// управляемые нами строки-директивы: НАЧИНАЮТСЯ с "Use @якорь…" / "Ignore @якорь…"
+// (@ElementName персонажей и локаций сюда НЕ попадают). Сам якорь @CompN теперь
+// легально встречается и В ТЕЛЕ промпта — inline-упоминание в Framing закреплённого
+// шота («follow @Comp2's composition», так привязку к шоту понимает Seedance) —
+// такие строки синк директивами НЕ считает и НЕ трогает. Осознанный компромисс:
+// после перенумерации (открепили другой референс) inline-@CompN может устареть;
+// пользователь в этом случае перегенерирует промпт целиком (его текущий workflow).
+const REF_DIRECTIVE_RE = /^\s*(?:use|ignore)\s+@(?:Comp\d+|Start|Image1)\b/i;
 
 // вольные упоминания стартового кадра БЕЗ якоря, которые модель раскидывает по телу
 // промпта (напр. «Match starting frame composition exactly …», «continues from the
@@ -102,9 +108,9 @@ const REF_ANCHOR_RE = /@(?:Comp\d+|Start|Image1)\b/i;
 // который в видео-промпте появляется только когда подразумевается стартовый кадр.
 const START_FRAME_MENTION_RE = /\bstart(?:ing)?[ -]?frame\b/i;
 
-/** Есть ли в тексте строки-директивы референса (по якорям). */
+/** Есть ли в тексте строки-директивы референса. */
 export function hasReferenceDirectives(text: string): boolean {
-  return text.split(/\r?\n/).some((l) => REF_ANCHOR_RE.test(l));
+  return text.split(/\r?\n/).some((l) => REF_DIRECTIVE_RE.test(l));
 }
 
 /**
@@ -148,15 +154,16 @@ export function applyReferenceDirectives(
   const desired = referenceDirectiveLines(refs, family);
   const hasStart = refs.some((r) => r.role === "start_frame");
   const lines = text.split(/\r?\n/);
-  const firstAnchorIdx = lines.findIndex((l) => REF_ANCHOR_RE.test(l));
+  const firstAnchorIdx = lines.findIndex((l) => REF_DIRECTIVE_RE.test(l));
   const hadAnchor = firstAnchorIdx >= 0;
 
-  // 1) реконсиляция строк-директив по якорю → result
+  // 1) реконсиляция строк-директив → result (inline-упоминания @CompN в теле
+  // промпта под REF_DIRECTIVE_RE не подпадают и остаются нетронутыми)
   let result: string;
   if (!hadAnchor && desired.length === 0) {
     result = text;
   } else {
-    const kept = lines.filter((l) => !REF_ANCHOR_RE.test(l));
+    const kept = lines.filter((l) => !REF_DIRECTIVE_RE.test(l));
     if (desired.length === 0) {
       // референсов не осталось — просто вырезаем строки-директивы
       result = kept.join("\n");
@@ -164,7 +171,7 @@ export function applyReferenceDirectives(
       // вставляем на позицию, где были старые директивы (сохраняем возможный заголовок
       // над ними); при первом добавлении — в самое начало
       const insertAt = hadAnchor
-        ? lines.slice(0, firstAnchorIdx).filter((l) => !REF_ANCHOR_RE.test(l)).length
+        ? lines.slice(0, firstAnchorIdx).filter((l) => !REF_DIRECTIVE_RE.test(l)).length
         : 0;
       result = [...kept.slice(0, insertAt), ...desired, ...kept.slice(insertAt)].join("\n");
     }
