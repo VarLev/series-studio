@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Sheet from "@/components/Sheet";
 import UploadButton from "@/components/UploadButton";
 import NanoBananaSheet from "@/components/refs/NanoBananaSheet";
@@ -10,6 +10,7 @@ import {
   detachShotReference,
   setShotReferenceRole,
   analyzeShotReference,
+  pinReferenceToBeat,
 } from "@/lib/actions/shots";
 import { parseRefAnalysis } from "@/lib/refAnalysis";
 import { useT } from "@/components/I18nProvider";
@@ -98,6 +99,104 @@ export default function ShotRefs({
 
   const detailParsed = detailFor ? parseRefAnalysis(analysisOf(detailFor)) : null;
 
+  // ---- Drag-закрепление миниатюры за КОНКРЕТНЫМ шотом группы (beats[].ref_ids) ----
+  // Паттерн — как у карточек шотов в GroupShotsEditor: Pointer Events + long-press
+  // 300мс + document.elementFromPoint по data-beat-order (атрибут на карточках).
+  // Стартовый кадр глобален (первый кадр всего видео группы) — не перетаскивается.
+  const [refDrag, setRefDrag] = useState<{ id: string; url: string; x: number; y: number } | null>(
+    null,
+  );
+  const dragArm = useRef<{
+    timer?: ReturnType<typeof setTimeout>;
+    id: string;
+    url: string;
+    x: number;
+    y: number;
+    pointerId: number;
+    el: HTMLElement;
+  } | null>(null);
+  const dragActive = useRef(false);
+  // после long-press-дропа браузер дошлёт click по миниатюре — гасим openDetail
+  const suppressClick = useRef(false);
+  useEffect(() => () => { if (dragArm.current?.timer) clearTimeout(dragArm.current.timer); }, []);
+
+  function onRefPointerDown(e: React.PointerEvent<HTMLDivElement>, r: ShotRef) {
+    suppressClick.current = false;
+    if (r.role === "start_frame") return; // глобальный первый кадр — за шотом не закрепляется
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const el = e.currentTarget;
+    dragArm.current = { id: r.id, url: r.url, x: e.clientX, y: e.clientY, pointerId: e.pointerId, el };
+    dragArm.current.timer = setTimeout(() => {
+      if (!dragArm.current) return;
+      dragActive.current = true;
+      suppressClick.current = true;
+      try { el.setPointerCapture(dragArm.current.pointerId); } catch {}
+      // снять выделение, которое браузер мог начать за время долгого нажатия
+      if (typeof window !== "undefined") window.getSelection?.()?.removeAllRanges();
+      setRefDrag({ id: dragArm.current.id, url: dragArm.current.url, x: dragArm.current.x, y: dragArm.current.y });
+      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(12);
+    }, 300);
+  }
+  function onRefPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragActive.current) {
+      const x = e.clientX;
+      const y = e.clientY;
+      setRefDrag((d) => (d ? { ...d, x, y } : d));
+      return;
+    }
+    // палец поехал до срабатывания long-press — это скролл strip'а или тап, не drag
+    if (dragArm.current) {
+      const moved = Math.hypot(e.clientX - dragArm.current.x, e.clientY - dragArm.current.y);
+      if (moved > 10) {
+        if (dragArm.current.timer) clearTimeout(dragArm.current.timer);
+        dragArm.current = null;
+      }
+    }
+  }
+  function onRefPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragArm.current?.timer) clearTimeout(dragArm.current.timer);
+    if (dragActive.current) {
+      // жест не должен ронять экран (паттерн endDrag в GroupShotsEditor): ошибки — в toast
+      try {
+        const refId = dragArm.current?.id;
+        const card = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)
+          ?.closest<HTMLElement>("[data-beat-order]");
+        const order = card ? Number(card.dataset.beatOrder) : NaN;
+        if (refId && card && Number.isFinite(order)) {
+          startTransition(async () => {
+            // reject внутри транзиции уронил бы страницу в error boundary — ловим сами
+            try {
+              await pinReferenceToBeat(shotId, order, refId);
+              toast(t(`Референс закреплён за шотом ${order}`, `Reference pinned to shot ${order}`));
+            } catch (err) {
+              console.error("pin reference failed:", err);
+              toast(
+                t(
+                  "Не удалось закрепить (сеть?) — попробуйте ещё раз",
+                  "Pin failed (network?) — try again",
+                ),
+              );
+            }
+          });
+        }
+      } catch (err) {
+        console.error("ref pin dnd failed:", err);
+        toast(`DnD: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try { dragArm.current?.el.releasePointerCapture(e.pointerId); } catch {}
+      dragActive.current = false;
+      setRefDrag(null);
+    }
+    dragArm.current = null;
+  }
+  function onRefPointerCancel(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragArm.current?.timer) clearTimeout(dragArm.current.timer);
+    try { dragArm.current?.el.releasePointerCapture(e.pointerId); } catch {}
+    dragActive.current = false;
+    setRefDrag(null);
+    dragArm.current = null;
+  }
+
   function attach(refId: string) {
     startTransition(async () => {
       await attachReferenceToShot(shotId, refId, "composition");
@@ -110,7 +209,21 @@ export default function ShotRefs({
     <>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {refs.map((r) => (
-          <div key={r.id} className="w-[58px] shrink-0">
+          <div
+            key={r.id}
+            className="w-[58px] shrink-0"
+            // long-press → перетаскивание на карточку шота группы (закрепление);
+            // до арма разрешён горизонтальный скролл strip'а (pan-x), после — none
+            onPointerDown={(e) => onRefPointerDown(e, r)}
+            onPointerMove={onRefPointerMove}
+            onPointerUp={onRefPointerUp}
+            onPointerCancel={onRefPointerCancel}
+            style={{
+              touchAction: refDrag ? "none" : "pan-x",
+              opacity: refDrag?.id === r.id ? 0.45 : 1,
+              cursor: r.role === "start_frame" ? undefined : "grab",
+            }}
+          >
             <div className="relative aspect-[9/16] overflow-hidden rounded-md border-[1.5px] bg-ink-600"
               style={{
                 borderColor: r.role === "start_frame" ? "rgba(192,138,62,.55)" : "var(--border-default)",
@@ -119,7 +232,14 @@ export default function ShotRefs({
               {/* тап по миниатюре → слайдер с подробной инфой (анализ референса) */}
               <button
                 type="button"
-                onClick={() => openDetail(r)}
+                onClick={() => {
+                  // click после long-press-дропа — не «тап», детали не открываем
+                  if (suppressClick.current) {
+                    suppressClick.current = false;
+                    return;
+                  }
+                  openDetail(r);
+                }}
                 aria-label={t("Открыть детали референса", "Open reference details")}
                 className="absolute inset-0 h-full w-full"
               >
@@ -427,6 +547,17 @@ export default function ShotRefs({
         prefillPrompt={promptText}
         models={imageModels}
       />
+
+      {/* ghost миниатюры под пальцем — дроп на карточку шота закрепляет референс */}
+      {refDrag && (
+        <div
+          className="pointer-events-none fixed z-[80] overflow-hidden rounded-md border border-[var(--violet-400)] shadow-lg"
+          style={{ left: refDrag.x, top: refDrag.y, transform: "translate(-50%, -120%)" }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={refDrag.url} alt="" className="h-16 w-9 object-cover" />
+        </div>
+      )}
     </>
   );
 }

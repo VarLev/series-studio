@@ -18,7 +18,7 @@
  * их нет). Идентити-строки персонажей (@ElementName) под это НЕ попадают.
  */
 import { asc, desc, eq } from "drizzle-orm";
-import { getDb, prompts, references } from "@/lib/db";
+import { getDb, prompts, references, shots } from "@/lib/db";
 import { promptFamily, type PromptFamily } from "@/lib/llm/models";
 
 /** Якорь стартового кадра в тексте промпта конкретного трека. */
@@ -48,8 +48,27 @@ export function layoutLine(anchor: string): string {
   );
 }
 
+/**
+ * Хвост «закреплён за шотом» для референса, привязанного к конкретному шоту
+ * группы (beats[].ref_ids, drag-and-drop миниатюры): референс — заданный
+ * вид/ракурс ИМЕННО своего шота и действует только в его SHOT-блоке. Единый
+ * текст для промпт-фабрики (factory.ts) и авто-синка ниже.
+ */
+export function beatPinSuffix(orders: number[]): string {
+  const list = [...orders]
+    .sort((a, b) => a - b)
+    .map((o) => `SHOT ${String(o).padStart(2, "0")}`)
+    .join(" and ");
+  return (
+    ` This reference is pinned to ${list} — it defines that shot's exact view/angle; ` +
+    `apply it ONLY within that shot and never in the other shots.`
+  );
+}
+
 export interface DirectiveRef {
   role: "start_frame" | "composition" | "layout" | string | null;
+  /** order'ы шотов группы, за которыми референс закреплён (beats[].ref_ids); пусто → групповой */
+  beatOrders?: number[];
 }
 
 /**
@@ -63,7 +82,8 @@ export function referenceDirectiveLines(refs: DirectiveRef[], family: PromptFami
   const attached = refs.filter((r) => r.role !== "start_frame");
   attached.forEach((r, i) => {
     const anchor = `@Comp${i + 1}`;
-    lines.push(r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor));
+    const base = r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor);
+    lines.push(r.beatOrders?.length ? base + beatPinSuffix(r.beatOrders) : base);
   });
   return lines;
 }
@@ -161,10 +181,35 @@ export function applyReferenceDirectives(
 export async function reconcileShotPromptRefs(shotId: string): Promise<void> {
   const db = await getDb();
   const refRows = await db
-    .select({ role: references.role, createdAt: references.createdAt })
+    .select({ id: references.id, role: references.role, createdAt: references.createdAt })
     .from(references)
     .where(eq(references.shotId, shotId))
     .orderBy(asc(references.createdAt));
+
+  // beat-привязки (beats[].ref_ids): строка закреплённого референса получает тот же
+  // суффикс «pinned to SHOT N», что пишет промпт-фабрика — синк не затирает привязку
+  const [shotRow] = await db
+    .select({ beatsJson: shots.beatsJson })
+    .from(shots)
+    .where(eq(shots.id, shotId));
+  const ordersByRefId = new Map<string, number[]>();
+  try {
+    const beats = JSON.parse(shotRow?.beatsJson || "[]") as Array<{
+      order: number;
+      ref_ids?: string[];
+    }>;
+    if (Array.isArray(beats)) {
+      for (const b of beats) {
+        for (const rid of b.ref_ids ?? []) {
+          ordersByRefId.set(rid, [...(ordersByRefId.get(rid) ?? []), b.order]);
+        }
+      }
+    }
+  } catch {}
+  const refs: DirectiveRef[] = refRows.map((r) => ({
+    role: r.role,
+    beatOrders: ordersByRefId.get(r.id),
+  }));
 
   const promptRows = await db
     .select()
@@ -178,7 +223,7 @@ export async function reconcileShotPromptRefs(shotId: string): Promise<void> {
     const fam = promptFamily(p.targetModel);
     if (seen.has(fam)) continue;
     seen.add(fam);
-    const next = applyReferenceDirectives(p.text, refRows, fam);
+    const next = applyReferenceDirectives(p.text, refs, fam);
     if (next !== p.text) {
       await db.update(prompts).set({ text: next }).where(eq(prompts.id, p.id));
     }

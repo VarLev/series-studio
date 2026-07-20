@@ -525,6 +525,12 @@ export default async function ShotPage(ctx: {
                 timeWeather={chainTimeWeather(rows, shotId)}
                 emotionalTone={shot.emotionalTone}
                 techniqueLibrary={techniqueLibrary}
+                refThumbs={shotRefs.map((r) => ({
+                  id: r.id,
+                  url: r.url,
+                  role: r.role,
+                  anchor: r.anchor,
+                }))}
                 topSlot={entitiesRefs}
               />
             </div>

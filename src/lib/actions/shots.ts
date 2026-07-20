@@ -224,6 +224,65 @@ export async function updateGroupBeats(shotId: string, rawBeats: GroupShot[]): P
 }
 
 /**
+ * Закрепить референс группы за КОНКРЕТНЫМ шотом (drag-and-drop миниатюры на
+ * карточку шота): refId дописывается в ref_ids объекта beat. Привязка живёт
+ * внутри шота (как technique_id) — переживает ренормализацию order; order
+ * цели резолвится здесь, в момент дропа, когда он стабилен. Запись — через
+ * updateGroupBeats: тот же нормализующий путь, что и остальные правки шотов.
+ */
+export async function pinReferenceToBeat(
+  shotId: string,
+  beatOrder: number,
+  refId: string,
+): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  // закрепить можно только референс, реально прикреплённый к ЭТОЙ группе
+  const [ref] = await db.select().from(references).where(eq(references.id, refId));
+  if (!ref || ref.shotId !== shotId) return;
+  let beats: GroupShot[] = [];
+  try {
+    const parsed = JSON.parse(shot.beatsJson || "[]");
+    if (Array.isArray(parsed)) beats = parsed as GroupShot[];
+  } catch {}
+  const target = beats.find((b) => b.order === beatOrder);
+  if (!target || (target.ref_ids ?? []).includes(refId)) return;
+  const next = beats.map((b) =>
+    b.order === beatOrder ? { ...b, ref_ids: [...(b.ref_ids ?? []), refId] } : b,
+  );
+  await updateGroupBeats(shotId, next);
+  // строки-директивы @CompN в актуальных промптах получают суффикс «pinned to SHOT N»
+  await reconcileShotPromptRefs(shotId);
+}
+
+/** Открепить референс от шота группы (✕ на бейдже) — зеркало pinReferenceToBeat. */
+export async function unpinReferenceFromBeat(
+  shotId: string,
+  beatOrder: number,
+  refId: string,
+): Promise<void> {
+  await requireAuth();
+  const db = await getDb();
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) return;
+  let beats: GroupShot[] = [];
+  try {
+    const parsed = JSON.parse(shot.beatsJson || "[]");
+    if (Array.isArray(parsed)) beats = parsed as GroupShot[];
+  } catch {}
+  const target = beats.find((b) => b.order === beatOrder);
+  if (!target || !(target.ref_ids ?? []).includes(refId)) return;
+  const next = beats.map((b) =>
+    b.order === beatOrder ? { ...b, ref_ids: (b.ref_ids ?? []).filter((id) => id !== refId) } : b,
+  );
+  await updateGroupBeats(shotId, next);
+  // суффикс «pinned to SHOT N» уходит из строк-директив актуальных промптов
+  await reconcileShotPromptRefs(shotId);
+}
+
+/**
  * Замечание к группе → Claude переписывает её шоты (llmReviseGroup) →
  * группа обновляется, сквозные таймкоды эпизода пересчитываются.
  */
@@ -1137,9 +1196,25 @@ export async function detachShotReference(referenceId: string): Promise<void> {
   const { maybeDeleteBlob, invalidateProviderCaches } = await import("@/lib/cascade");
   await maybeDeleteBlob(ref.storagePath);
   await invalidateProviderCaches({ refIds: [referenceId] });
+  const [shot] = await db.select().from(shots).where(eq(shots.id, ref.shotId));
+  // вычистить закрепления этого референса из шотов группы (beats[].ref_ids):
+  // висячий id безвреден (везде игнорируется), но копить его нечисто. Пишем
+  // beats_json точечно — тайминг/actionMd от снятия привязки не меняются
+  if (shot) {
+    try {
+      const beats = JSON.parse(shot.beatsJson || "[]") as GroupShot[];
+      if (Array.isArray(beats) && beats.some((b) => (b.ref_ids ?? []).includes(referenceId))) {
+        const next = beats.map((b) =>
+          (b.ref_ids ?? []).includes(referenceId)
+            ? { ...b, ref_ids: (b.ref_ids ?? []).filter((id) => id !== referenceId) }
+            : b,
+        );
+        await db.update(shots).set({ beatsJson: JSON.stringify(next) }).where(eq(shots.id, shot.id));
+      }
+    } catch {}
+  }
   // удалили референс → его строки-директивы уходят из промптов сами (без модели)
   await reconcileShotPromptRefs(ref.shotId);
-  const [shot] = await db.select().from(shots).where(eq(shots.id, ref.shotId));
   if (shot) revalidatePath(shotPath(shot.episodeId, ref.shotId));
 }
 

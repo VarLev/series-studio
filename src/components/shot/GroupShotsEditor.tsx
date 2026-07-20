@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   updateGroupBeats,
+  unpinReferenceFromBeat,
   reviseGroup,
   groupBeatsStamp,
   updateGroupLocation,
@@ -31,6 +32,15 @@ export interface TechniqueOption {
   category: string;
   camera: string;
   tags: string;
+}
+
+/** Миниатюра референса группы — для бейджей закреплённых за шотами (beats[].ref_ids). */
+export interface RefThumb {
+  id: string;
+  url: string;
+  role: string;
+  /** якорь в промпте (@Comp1..N); у start-frame пуст в этом контексте */
+  anchor: string;
 }
 
 const fieldCls =
@@ -176,6 +186,7 @@ export default function GroupShotsEditor({
   timeWeather = "",
   emotionalTone = "",
   techniqueLibrary = [],
+  refThumbs = [],
   topSlot,
 }: {
   shotId: string;
@@ -190,6 +201,8 @@ export default function GroupShotsEditor({
   emotionalTone?: string;
   /** библиотека приёмов для ручного закрепления за шотом (пикер) */
   techniqueLibrary?: TechniqueOption[];
+  /** миниатюры референсов группы — бейджи закреплённых за шотами (beats[].ref_ids) */
+  refThumbs?: RefThumb[];
   /** секции, встающие сразу после эмоционального тона (Сущности + Референсы) */
   topSlot?: React.ReactNode;
 }) {
@@ -236,6 +249,8 @@ export default function GroupShotsEditor({
   const [pickBeat, setPickBeat] = useState<number | null>(null);
   const [pickQuery, setPickQuery] = useState("");
   const techById = new Map(techniqueLibrary.map((tq) => [tq.id, tq]));
+  // миниатюры референсов по id — резолв beats[].ref_ids в бейджи; висячие id не рендерятся
+  const refThumbById = new Map(refThumbs.map((r) => [r.id, r]));
 
   // локация связки: правка на любой группе обновляет все группы сцены
   const [loc, setLoc] = useState(location);
@@ -542,7 +557,7 @@ export default function GroupShotsEditor({
   }
 
   function newBeat(draft: boolean): GroupShot {
-    return { order: 0, time: "", framing: "", camera: "", action: "", dialogue: "", technique_id: "", draft, locked: false };
+    return { order: 0, time: "", framing: "", camera: "", action: "", dialogue: "", technique_id: "", ref_ids: [], draft, locked: false };
   }
 
   function addBeat() {
@@ -620,6 +635,33 @@ export default function GroupShotsEditor({
         toast(t("Приём снят с шота", "Technique removed"));
       } catch (err) {
         console.error("remove technique failed:", err);
+        setDirty(true); // осталось локально — подхватит авто-повтор
+        toast(
+          t(
+            "Не сохранилось (сеть?) — повторю автоматически",
+            "Save failed (network?) — retrying automatically",
+          ),
+        );
+      }
+    });
+  }
+
+  // открепить референс от шота (✕ на бейдже-миниатюре): серверный экшен чистит
+  // ref_ids И синхронизирует строки-директивы промпта; локальный стейт обновляем
+  // сразу. Тайминг не меняется — как removeTechnique, без ренормализации.
+  function unpinRefFromBeat(i: number, refId: string) {
+    if (!(beats[i]?.ref_ids ?? []).includes(refId)) return;
+    const order = beats[i].order;
+    const next = beats.map((b, idx) =>
+      idx === i ? { ...b, ref_ids: (b.ref_ids ?? []).filter((id) => id !== refId) } : b,
+    );
+    setBeats(next);
+    startSave(async () => {
+      try {
+        await unpinReferenceFromBeat(shotId, order, refId);
+        toast(t("Референс откреплён от шота", "Reference unpinned from the shot"));
+      } catch (err) {
+        console.error("unpin ref failed:", err);
         setDirty(true); // осталось локально — подхватит авто-повтор
         toast(
           t(
@@ -1200,6 +1242,7 @@ export default function GroupShotsEditor({
           <div
             key={i}
             data-beat-idx={i}
+            data-beat-order={b.order}
             onPointerDown={(e) => onCardPointerDown(e, b.order, isEditing)}
             onPointerMove={onCardPointerMove}
             onPointerUp={onCardPointerUp}
@@ -1280,6 +1323,38 @@ export default function GroupShotsEditor({
                   </button>
                 )
               )}
+              {/* закреплённые за шотом референсы (drag-and-drop миниатюры из «Референсы
+                  шота»): мини-превью + якорь + ✕; висячие id (референс откреплён от
+                  группы) не рендерятся — сравни с бейджем приёма выше */}
+              {(b.ref_ids ?? []).map((rid) => {
+                const rt = refThumbById.get(rid);
+                if (!rt) return null;
+                return (
+                  <span
+                    key={rid}
+                    title={t(
+                      `Референс ${rt.anchor || rt.role} закреплён за этим шотом — задаёт его вид/ракурс. ✕ — открепить`,
+                      `Reference ${rt.anchor || rt.role} pinned to this shot — sets its view/angle. ✕ to unpin`,
+                    )}
+                    className="inline-flex items-center gap-1 rounded bg-[rgba(139,95,176,.18)] px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={rt.url} alt="" className="h-4 w-[11px] rounded-[2px] object-cover" />
+                    {rt.anchor && <span className="leading-none">{rt.anchor}</span>}
+                    <button
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        unpinRefFromBeat(i, rid);
+                      }}
+                      title={t("Открепить референс от шота", "Unpin the reference from this shot")}
+                      className="flex h-3.5 w-3.5 items-center justify-center rounded-full leading-none text-violet-100 hover:bg-[rgba(139,95,176,.45)] hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                );
+              })}
               {inRework && (
                 <span className="rounded bg-[rgba(139,95,176,.18)] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-violet-200">
                   {t("в реворке", "in rework")}

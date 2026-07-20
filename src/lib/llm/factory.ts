@@ -24,7 +24,7 @@ import {
 } from "@/lib/beats";
 import { getShotAnchorTexts } from "@/lib/anchors";
 import { refAnalysisText } from "@/lib/refAnalysis";
-import { startFrameLine, compositionLine, layoutLine } from "@/lib/refDirectives";
+import { startFrameLine, compositionLine, layoutLine, beatPinSuffix } from "@/lib/refDirectives";
 import { KNOWLEDGE_EXCERPT_CHARS } from "@/lib/knowledgeTags";
 import { listEnabledTechniques, techniqueIndex, getEnabledTechniquesByIds } from "@/lib/director";
 import { systemRuleText, gateBlock, type RuleSite } from "./rulesRegistry";
@@ -775,6 +775,24 @@ export async function llmShotPrompt(
         `@Start, @Image1 или "starting frame" вообще, даже если шаблон выше показывает такую строку в примере.`,
   );
 
+  // структура шотов группы из раскадровки v2: тайминг/план/камера/действие/реплика.
+  // Разбирается ДО секции референсов: закреплённые за шотами референсы
+  // (beats[].ref_ids) адресуют свои @CompN-строки конкретному SHOT-блоку
+  let allBeats: GroupShot[] = [];
+  try {
+    const parsed = JSON.parse(shot.beatsJson || "[]");
+    if (Array.isArray(parsed)) allBeats = parsed as GroupShot[];
+  } catch {}
+  // в промпт группы идут ТОЛЬКО основные шоты (Main Shots) — черновики (draft)
+  // хранят запасные варианты сцены и в Seedance-промпт не попадают
+  const mainBeats = allBeats.filter((b) => !b.draft);
+  // режим одного шота: промпт только для одного бита группы (дешёвый переген
+  // неудачного шота вместо всей группы). По order ищем среди ВСЕХ шотов —
+  // отдельное видео одного чернового шота тоже легально
+  const singleBeat =
+    singleBeatOrder != null ? allBeats.find((b) => b.order === singleBeatOrder) : undefined;
+  const beats = singleBeat ? [singleBeat] : mainBeats;
+
   // ---------- референсы шота: роль определяет строку-инструкцию ----------
   // приложение прикрепляет их к задаче и заменяет якоря @CompN на слоты картинок.
   // Порядок @Comp1..N — по createdAt (совпадает с page.tsx и generation.ts).
@@ -786,10 +804,45 @@ export async function llmShotPrompt(
     .filter((r) => r.role !== "start_frame")
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const hasLayoutRef = attachedRefs.some((r) => r.role === "layout");
+  // закреплённые за шотами референсы (beats[].ref_ids, drag-and-drop миниатюры):
+  // такой референс — вид/ракурс КОНКРЕТНОГО шота, его @CompN-строка действует
+  // только в его SHOT-блоке. Нумерация @Comp1..N остаётся глобальной по createdAt
+  // (порядок картинок в generation.ts не меняется); висячие id игнорируются
+  const anchorByRefId = new Map(attachedRefs.map((r, i) => [r.id, `@Comp${i + 1}`]));
+  const beatOrdersByRefId = new Map<string, number[]>();
+  for (const b of allBeats) {
+    for (const rid of b.ref_ids ?? []) {
+      if (!anchorByRefId.has(rid)) continue; // открепили от группы / start-frame
+      beatOrdersByRefId.set(rid, [...(beatOrdersByRefId.get(rid) ?? []), b.order]);
+    }
+  }
   const compLines = attachedRefs.map((r, i) => {
     const anchor = `@Comp${i + 1}`;
-    return `"${r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor)}"`;
+    const orders = beatOrdersByRefId.get(r.id) ?? [];
+    // режим одного шота: референс, закреплённый за ДРУГИМ шотом, в этом видео не
+    // участвует, но картинка всё равно приложится к задаче (порядок generation.ts
+    // не меняем) — поэтому строка-директива прямо велит его игнорировать
+    if (singleBeat && orders.length && !orders.includes(singleBeat.order)) {
+      return `"Ignore ${anchor} — it belongs to a different shot of the group and must not influence this video."`;
+    }
+    const base = r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor);
+    if (singleBeat && orders.includes(singleBeat.order)) {
+      return `"${base} This reference is pinned to this very shot — it defines the shot's exact view/angle; follow it."`;
+    }
+    return `"${!singleBeat && orders.length ? base + beatPinSuffix(orders) : base}"`;
   });
+  // человекочитаемая карта «шот → его референсы» — дублирует суффиксы строк выше,
+  // чтобы модель положила каждый @CompN в НУЖНЫЙ SHOT-блок (в режиме всей группы)
+  const pinnedByBeat = [...beatOrdersByRefId.entries()]
+    .flatMap(([rid, orders]) => orders.map((o) => ({ o, anchor: anchorByRefId.get(rid)! })))
+    .sort((a, b) => a.o - b.o);
+  const pinnedNote =
+    !singleBeat && pinnedByBeat.length
+      ? "\nЗАКРЕПЛЁННЫЕ ЗА ШОТАМИ РЕФЕРЕНСЫ: " +
+        pinnedByBeat.map((p) => `шот ${p.o} → ${p.anchor}`).join("; ") +
+        ". Такой референс — заданный вид/ракурс ИМЕННО своего шота: опиши по нему Framing и камеру " +
+        "соответствующего SHOT-блока; в других шотах его НЕ упоминай и его вид НЕ копируй."
+      : "";
   const compositionBlock = gateBlock(
     "dyn_shot_refs",
     off,
@@ -797,6 +850,7 @@ export async function llmShotPrompt(
       ? "РЕФЕРЕНСЫ ШОТА (приложение заменит якоря @CompN на реальные слоты картинок при отправке): " +
         "для КАЖДОГО добавь в начале промпта РОВНО ОДНУ строку ниже — дословно — и больше нигде его не упоминай:\n" +
         compLines.join("\n") +
+        pinnedNote +
         (hasLayoutRef
           ? "\nLayout-референс задаёт ТОЛЬКО геометрию помещения и взаимное положение персонажей/объектов: " +
             "зафиксируй их расстановку в GLOBAL CONTINUITY по сцене, но НЕ повторяй его ракурс и кадрирование — " +
@@ -811,7 +865,15 @@ export async function llmShotPrompt(
   const refContentLines = attachedRefs
     .map((r, i) => {
       const a = refAnalysisText(r.analysis);
-      return a ? `@Comp${i + 1} (${r.role === "layout" ? "layout" : "composition"}) — ${a}` : "";
+      const orders = beatOrdersByRefId.get(r.id) ?? [];
+      const pin = orders.length
+        ? singleBeat
+          ? orders.includes(singleBeat.order)
+            ? " · вид ЭТОГО шота"
+            : " · чужой шот, в этом видео не участвует"
+          : ` · закреплён за шотом ${[...orders].sort((x, y) => x - y).join(", ")}`
+        : "";
+      return a ? `@Comp${i + 1} (${r.role === "layout" ? "layout" : "composition"}${pin}) — ${a}` : "";
     })
     .filter(Boolean);
   const refContentBlock = gateBlock(
@@ -992,21 +1054,7 @@ export async function llmShotPrompt(
       : "",
   );
 
-  // структура шотов группы из раскадровки v2: тайминг/план/камера/действие/реплика
-  let allBeats: GroupShot[] = [];
-  try {
-    const parsed = JSON.parse(shot.beatsJson || "[]");
-    if (Array.isArray(parsed)) allBeats = parsed as GroupShot[];
-  } catch {}
-  // в промпт группы идут ТОЛЬКО основные шоты (Main Shots) — черновики (draft)
-  // хранят запасные варианты сцены и в Seedance-промпт не попадают
-  const mainBeats = allBeats.filter((b) => !b.draft);
-  // режим одного шота: промпт только для одного бита группы (дешёвый переген
-  // неудачного шота вместо всей группы). По order ищем среди ВСЕХ шотов —
-  // отдельное видео одного чернового шота тоже легально
-  const singleBeat =
-    singleBeatOrder != null ? allBeats.find((b) => b.order === singleBeatOrder) : undefined;
-  const beats = singleBeat ? [singleBeat] : mainBeats;
+  // режим одного шота (сам singleBeat найден выше, до секции референсов)
   const singleDur = singleBeat
     ? (() => {
         const r = singleBeat.time ? parseTimeRange(singleBeat.time) : null;
@@ -1022,14 +1070,22 @@ export async function llmShotPrompt(
   const beatsBlock = beats.length
     ? "Шоты группы по раскадровке (соблюдай их тайминг и порядок в SHOT-блоках промпта):\n" +
       beats
-        .map(
-          (b) =>
+        .map((b) => {
+          // закреплённые за этим шотом референсы (beats[].ref_ids → живые @CompN)
+          const pinned = (b.ref_ids ?? [])
+            .map((rid) => anchorByRefId.get(rid))
+            .filter((a): a is string => Boolean(a));
+          return (
             `Шот ${b.order}${b.time ? ` (${b.time})` : ""}:` +
             (b.framing ? ` План/ракурс: ${b.framing}.` : "") +
             (b.camera ? ` Камера видит: ${b.camera}.` : "") +
             (b.action ? ` Действие: ${b.action}.` : "") +
-            (b.dialogue ? ` Реплика: «${b.dialogue}»` : ""),
-        )
+            (b.dialogue ? ` Реплика: «${b.dialogue}»` : "") +
+            (pinned.length
+              ? ` Референс кадра: ${pinned.join(", ")} (используй как заданный вид/ракурс этого шота).`
+              : "")
+          );
+        })
         .join("\n")
     : "";
   // Режиссёрские приёмы больше НЕ подбираются здесь (лишний вызов на каждый шот
