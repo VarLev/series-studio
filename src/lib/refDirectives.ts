@@ -50,19 +50,23 @@ export function layoutLine(anchor: string): string {
 
 /**
  * Хвост «закреплён за шотом» для референса, привязанного к конкретному шоту
- * группы (beats[].ref_ids, drag-and-drop миниатюры): референс — заданный
- * вид/ракурс ИМЕННО своего шота и действует только в его SHOT-блоке. Единый
- * текст для промпт-фабрики (factory.ts) и авто-синка ниже.
+ * группы (beats[].ref_ids, drag-and-drop миниатюры). Единый текст для
+ * промпт-фабрики (factory.ts) и авто-синка ниже. Формулировка зависит от РОЛИ:
+ *  - composition → раскадровочный кадр шота («storyboard frame» — так привязку
+ *    к шоту формулируют гайды Seedance 2.0): точный вид/ракурс именно этого шота;
+ *  - layout → только геометрия пространства ЭТОГО шота; запрет копировать ракурс
+ *    из самой layout-строки сохраняется — иначе суффикс противоречил бы ей.
  */
-export function beatPinSuffix(orders: number[]): string {
+export function beatPinSuffix(orders: number[], role?: string | null): string {
   const list = [...orders]
     .sort((a, b) => a - b)
     .map((o) => `SHOT ${String(o).padStart(2, "0")}`)
     .join(" and ");
-  return (
-    ` This reference is pinned to ${list} — it defines that shot's exact view/angle; ` +
-    `apply it ONLY within that shot and never in the other shots.`
-  );
+  return role === "layout"
+    ? ` This layout reference applies ONLY to ${list}: use its room geometry and character/object ` +
+        `positions for that shot alone (still do NOT copy its camera angle), and ignore it in the other shots.`
+    : ` This reference is the storyboard frame for ${list} — match its composition, camera angle ` +
+        `and framing exactly in that shot, and ONLY in that shot; never apply it to the other shots.`;
 }
 
 export interface DirectiveRef {
@@ -83,7 +87,7 @@ export function referenceDirectiveLines(refs: DirectiveRef[], family: PromptFami
   attached.forEach((r, i) => {
     const anchor = `@Comp${i + 1}`;
     const base = r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor);
-    lines.push(r.beatOrders?.length ? base + beatPinSuffix(r.beatOrders) : base);
+    lines.push(r.beatOrders?.length ? base + beatPinSuffix(r.beatOrders, r.role) : base);
   });
   return lines;
 }

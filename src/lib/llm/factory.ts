@@ -827,9 +827,13 @@ export async function llmShotPrompt(
     }
     const base = r.role === "layout" ? layoutLine(anchor) : compositionLine(anchor);
     if (singleBeat && orders.includes(singleBeat.order)) {
-      return `"${base} This reference is pinned to this very shot — it defines the shot's exact view/angle; follow it."`;
+      // роль меняет силу привязки: composition — раскадровочный кадр этого видео,
+      // layout — только его пространство (ракурс остаётся свой, как в базовой строке)
+      return r.role === "layout"
+        ? `"${base} It is pinned to this very shot — apply its spatial layout to this video (camera angle still your own)."`
+        : `"${base} This is the storyboard frame for this very shot — match its composition, camera angle and framing exactly."`;
     }
-    return `"${!singleBeat && orders.length ? base + beatPinSuffix(orders) : base}"`;
+    return `"${!singleBeat && orders.length ? base + beatPinSuffix(orders, r.role) : base}"`;
   });
   // человекочитаемая карта «шот → его референсы» — дублирует суффиксы строк выше,
   // чтобы модель положила каждый @CompN в НУЖНЫЙ SHOT-блок (в режиме всей группы)
@@ -840,8 +844,9 @@ export async function llmShotPrompt(
     !singleBeat && pinnedByBeat.length
       ? "\nЗАКРЕПЛЁННЫЕ ЗА ШОТАМИ РЕФЕРЕНСЫ: " +
         pinnedByBeat.map((p) => `шот ${p.o} → ${p.anchor}`).join("; ") +
-        ". Такой референс — заданный вид/ракурс ИМЕННО своего шота: опиши по нему Framing и камеру " +
-        "соответствующего SHOT-блока; в других шотах его НЕ упоминай и его вид НЕ копируй."
+        ". Такой референс — раскадровочный кадр ИМЕННО своего шота: опиши по нему Framing и камеру " +
+        "соответствующего SHOT-блока (для layout-референса — только геометрию и расстановку, ракурс " +
+        "шота остаётся свой); в других шотах его НЕ упоминай и его вид НЕ копируй."
       : "";
   const compositionBlock = gateBlock(
     "dyn_shot_refs",
