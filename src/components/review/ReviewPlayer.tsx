@@ -353,13 +353,15 @@ export default function ReviewPlayer({
         className="flex items-center gap-2 border-b border-[#1b1b1b] bg-[#0b0b0b] px-2.5 py-2"
         style={{ paddingTop: "max(8px, env(safe-area-inset-top))" }}
       >
-        <Link
-          href={shotHref}
+        {/* назад: в галерее (onClose задан) закрывает оверлей и возвращает в
+            слайдер-галерею; на отдельной странице ревью — уходит к шоту */}
+        <button
+          onClick={close}
           aria-label="Назад"
           className="flex h-10 w-10 items-center justify-center rounded-md text-[#e6e6e6] hover:bg-[#181818]"
         >
           ←
-        </Link>
+        </button>
         <div className="min-w-0 flex-1">
           <div className="text-[9.5px] font-semibold uppercase tracking-[0.24em] text-[#6f6f6f]">
             {t("Ревью", "Review")} · {shotLabel} · {idx + 1} {t("из", "of")} {candidates.length}

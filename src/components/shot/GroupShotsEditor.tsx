@@ -542,7 +542,7 @@ export default function GroupShotsEditor({
   }
 
   function newBeat(draft: boolean): GroupShot {
-    return { order: 0, time: "", framing: "", camera: "", action: "", dialogue: "", technique_id: "", draft };
+    return { order: 0, time: "", framing: "", camera: "", action: "", dialogue: "", technique_id: "", draft, locked: false };
   }
 
   function addBeat() {
@@ -580,6 +580,32 @@ export default function GroupShotsEditor({
     setBeats(renormalize(remaining));
     setEditing(new Set());
     setDirty(true);
+  }
+
+  // замок шота (🔒): защищает шот от Enhance — вернётся дословно, без разбиения и
+  // переписывания. Тайминг не меняется, ренормализация не нужна; сразу сохраняем
+  function toggleLock(i: number) {
+    const next = beats.map((b, idx) => (idx === i ? { ...b, locked: !b.locked } : b));
+    setBeats(next);
+    startSave(async () => {
+      try {
+        await updateGroupBeats(shotId, next);
+        toast(
+          next[i].locked
+            ? t("Шот заблокирован — Enhance вернёт его без изменений", "Shot locked — Enhance returns it unchanged")
+            : t("Замок снят", "Shot unlocked"),
+        );
+      } catch (err) {
+        console.error("toggle lock failed:", err);
+        setDirty(true); // осталось локально — подхватит авто-повтор
+        toast(
+          t(
+            "Не сохранилось (сеть?) — повторю автоматически",
+            "Save failed (network?) — retrying automatically",
+          ),
+        );
+      }
+    });
   }
 
   // снять закреплённый приём с шота (не нравится подбор Enhance): чистим
@@ -1260,6 +1286,34 @@ export default function GroupShotsEditor({
                 </span>
               )}
               <span className="flex-1" />
+              {/* замок 🔒: только у основных шотов (черновики Enhance и так не трогает) */}
+              {!b.draft && (
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleLock(i);
+                  }}
+                  title={
+                    b.locked
+                      ? t(
+                          "Шот защищён от Enhance: вернётся дословно, без разбиения и переписывания. Нажмите, чтобы снять замок",
+                          "Protected from Enhance: returned verbatim, never split or rewritten. Click to unlock",
+                        )
+                      : t(
+                          "Защитить шот от Enhance: вернётся дословно, без разбиения и переписывания",
+                          "Protect this shot from Enhance: returned verbatim, never split or rewritten",
+                        )
+                  }
+                  className={`flex h-7 min-w-7 items-center justify-center rounded-md border px-1.5 text-[10px] ${
+                    b.locked
+                      ? "border-[var(--violet-400)] bg-[rgba(139,95,176,.18)] text-violet-200"
+                      : "border-[var(--border-subtle)] text-t400 hover:border-[var(--border-strong)] hover:text-t100"
+                  }`}
+                >
+                  {b.locked ? "🔒" : "🔓"}
+                </button>
+              )}
               {/* иконка активной модели: клик = промпт ТОЛЬКО этого шота (новая версия) */}
               <button
                 onClick={(e) => {

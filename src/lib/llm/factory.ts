@@ -510,12 +510,24 @@ export async function llmEnhanceGroup(input: {
       "\n\n"
     : "";
   const fmtBeat = (b: GroupShot): string =>
-    `Шот ${b.order} (${b.time}): План/ракурс: ${b.framing}. Камера: ${b.camera}. ` +
+    `Шот ${b.order} (${b.time})${b.locked ? " [🔒 LOCKED]" : ""}: План/ракурс: ${b.framing}. ` +
+    `Камера: ${b.camera}. ` +
     `Действие: ${b.action}.${b.dialogue ? ` Реплика: «${b.dialogue}»` : ""}` +
     `${b.technique_id && !techOff ? ` [закреплён приём: ${b.technique_id}]` : ""}`;
   // Enhance работает ТОЛЬКО с основными шотами (Main); черновики (Draft) сюда не
   // приходят и не трогаются вовсе (замечание заказчика)
   const mainNow = input.beats.filter((b) => !b.draft);
+  const hasLocked = mainNow.some((b) => b.locked);
+  // замок (🔒): такие шоты неприкосновенны — модель обязана вернуть их дословно.
+  // НЕ гейтим тумблером /rules: серверная страховка restoreLockedShots всё равно
+  // восстановит оригинал, и промпт не должен ей противоречить
+  const lockedBlock = hasLocked
+    ? "ЗАБЛОКИРОВАННЫЕ ШОТЫ [🔒 LOCKED] — неприкосновенны: пользователь зафиксировал их вручную. " +
+      "Каждый такой шот верни ДОСЛОВНО одним шотом на его месте: те же framing/camera/action/dialogue, " +
+      "тот же закреплённый приём, та же длительность — и добавь ему \"locked\": true. Заблокированный шот " +
+      "НЕЛЬЗЯ разбивать, объединять с соседними, переформулировать или менять его тайминг; улучшай только " +
+      "остальные шоты и подстраивай их время вокруг заблокированных.\n"
+    : "";
   const current = `ТЕКУЩИЕ шоты группы (Main):\n${mainNow.map(fmtBeat).join("\n") || "(пусто)"}`;
   return runJson(
     {
@@ -543,6 +555,7 @@ export async function llmEnhanceGroup(input: {
         "\n" +
         carriedBlock +
         anchorsBlock +
+        lockedBlock +
         techIndexBlock +
         "Верни ТОЛЬКО JSON без пояснений (ВСЕ шоты — основные, draft:false):\n" +
         '{"title":"название группы","duration_sec":14,"location":"локация","time_weather":"время суток и погода",' +
@@ -551,6 +564,7 @@ export async function llmEnhanceGroup(input: {
         '"shots":[{"order":1,"time":"00:00–00:05","framing":"план и ракурс","camera":"что видит камера",' +
         '"action":"действие и эмоция","dialogue":"реплики в формате [Имя]: -фраза; манера речи — [Имя](эмоция): -фраза, эмоция по-английски (whisper/shouting/mocking); каждая реплика с новой строки; либо пустая строка",' +
         (techOff ? "" : '"technique_id":"b19 или пусто",') +
+        (hasLocked ? '"locked":false,' : "") +
         '"draft":false}]}\n' +
         "Все шоты в массиве shots — основные (draft:false). НЕ создавай ключей shots_draft/draft_shots/drafts " +
         "и НЕ помечай шоты draft:true.\n" +

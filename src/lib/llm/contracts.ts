@@ -18,6 +18,10 @@ export const groupShotSchema = z.object({
   // НЕ входит в длительность группы, лимит 15 сек и Seedance-промпт. default
   // false → все сохранённые до этой фичи шоты автоматически основные (main)
   draft: z.boolean().default(false),
+  // 🔒 замок пользователя: Enhance обязан вернуть такой шот ДОСЛОВНО — не разбивая,
+  // не объединяя и не переформулируя (серверная страховка — restoreLockedShots).
+  // default false → все шоты, сохранённые до этой фичи, разблокированы
+  locked: z.boolean().default(false),
 });
 export type GroupShot = z.infer<typeof groupShotSchema>;
 
@@ -109,7 +113,8 @@ export type InsertGroups = z.infer<typeof insertGroupsSchema>;
  * шот, закрепляет приём (technique_id), уточняет локацию/погоду/тон и возвращает
  * список персонажей, кто РЕАЛЬНО в кадре. Все возвращённые шоты — основные
  * (draft:false); черновики пользователя Enhance не трогает — они берутся
- * нетронутыми из текущей группы.
+ * нетронутыми из текущей группы. Шоты с locked:true возвращаются ДОСЛОВНО
+ * (не разбиваются/не переписываются) — серверная страховка restoreLockedShots.
  */
 export const enhanceGroupSchema = z.object({
   title: z.string().default(""),

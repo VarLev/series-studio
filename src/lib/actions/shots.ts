@@ -29,6 +29,7 @@ import { listEnabledTechniques } from "@/lib/director";
 import { getDisabledRuleIds } from "@/lib/rules";
 import { stripAt } from "@/lib/entityName";
 import { groupShotSchema, type GroupShot } from "@/lib/llm/contracts";
+import { restoreLockedShots } from "@/lib/lockedShots";
 import { ensureGroupOrigin, type GroupOriginSnapshot } from "@/lib/groupOrigin";
 import { z } from "zod";
 
@@ -372,7 +373,9 @@ async function doReviseGroup(
  * камеру, дозаполняет поля, при нехватке времени разбивает шот, закрепляет приёмы,
  * уточняет локацию/погоду/тон и синхронизирует персонажей в кадре. Черновики (Draft)
  * не читаются и не трогаются — сохраняются как есть.
- * ВСЕГДА Opus + CLI (подписка) — это задано в llmEnhanceGroup, не настройкой.
+ * Модель — глобальная модель промптов (settings.llm_model); канал — CLI (forceCli
+ * в llmEnhanceGroup: Claude через Claude Code CLI, GPT — через Codex CLI). Шоты с
+ * замком (🔒 locked) возвращаются дословно — серверная страховка restoreLockedShots.
  */
 export async function enhanceGroup(
   shotId: string,
@@ -468,8 +471,11 @@ export async function enhanceGroup(
           ? s.technique_id
           : "",
     }));
+    // страховка замка (🔒): восстанавливаем заблокированные пользователем шоты
+    // поверх ответа модели — дословно, схлопывая разрезанные и возвращая выброшенные
+    const finalMain = restoreLockedShots(mainCurrent, cleanMain);
     // объединяем улучшенные основные с НЕТРОНУТЫМИ черновиками пользователя
-    const cleanShots = [...cleanMain, ...draftCurrent];
+    const cleanShots = [...finalMain, ...draftCurrent];
 
     const { beats, durationSec } = normalizeBeats(cleanShots, res.duration_sec);
     const finalTitle = res.title.trim() || shot.title;
@@ -505,7 +511,7 @@ export async function enhanceGroup(
     await syncLocationEntities(
       shotId,
       res.location.trim() || shot.location,
-      cleanMain.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
+      finalMain.map((s) => `${s.framing} ${s.camera} ${s.action}`).join(" "),
     );
 
     // якоря: Enhance предлагает новые ТОЛЬКО когда своих ещё не было — создаём их в

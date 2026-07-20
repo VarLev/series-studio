@@ -12,7 +12,7 @@ export default async function GalleryDrawer(ctx: { params: Promise<{ id: string 
   const t = await getT();
   return (
     <SideDrawer title={t("Галерея", "Gallery")}>
-      <GalleryContent episodeId={id} />
+      <GalleryContent episodeId={id} inDrawer />
     </SideDrawer>
   );
 }

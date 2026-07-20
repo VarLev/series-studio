@@ -5,6 +5,8 @@
  * (getShotReviewData) и открывает ТОТ ЖЕ ReviewPlayer оверлеем — с метками,
  * покадровыми шагами, «Взять кадр», «Победитель». «Назад»/Escape закрывают
  * оверлей (onClose) и возвращают в галерею, не уводя на отдельную страницу.
+ * В слайдере (inDrawer) оверлей — absolute, поэтому живёт ВНУТРИ панели слайдера,
+ * а не растягивается на весь экран; на полной странице — fixed во всё окно.
  */
 import { useState, useTransition } from "react";
 import { getShotReviewData, type ShotReviewData } from "@/lib/actions/review";
@@ -25,8 +27,11 @@ export type GalleryItem = {
 
 export default function GalleryClient({
   items,
+  inDrawer = false,
 }: {
   items: GalleryItem[];
+  /** в слайдере оверлей плеера держим внутри панели (absolute), а не поверх всего окна (fixed) */
+  inDrawer?: boolean;
 }) {
   const t = useT();
   const [data, setData] = useState<ShotReviewData | null>(null);
@@ -116,7 +121,7 @@ export default function GalleryClient({
       </div>
 
       {data && (
-        <div className="fixed inset-0 z-50 bg-[#050505]">
+        <div className={`${inDrawer ? "absolute" : "fixed"} inset-0 z-50 bg-[#050505]`}>
           <ReviewPlayer {...data} initialId={initialId} onClose={() => setData(null)} />
         </div>
       )}

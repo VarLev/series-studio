@@ -12,7 +12,14 @@ import GalleryClient, { type GalleryItem } from "@/components/episode/GalleryCli
  * и плеер-оверлей живут в GalleryClient (клиент): клик открывает ReviewPlayer
  * поверх галереи, «назад» возвращает в неё.
  */
-export default async function GalleryContent({ episodeId }: { episodeId: string }) {
+export default async function GalleryContent({
+  episodeId,
+  inDrawer = false,
+}: {
+  episodeId: string;
+  /** галерея открыта в правом слайдере → плеер-оверлей держим внутри его панели */
+  inDrawer?: boolean;
+}) {
   const db = await getDb();
   const shotRows = await db
     .select()
@@ -32,14 +39,8 @@ export default async function GalleryContent({ episodeId }: { episodeId: string 
           ),
         )
     : [];
-  // порядок: по шоту; внутри шота утверждённый (winner) сверху, затем по времени
-  videos.sort((a, b) => {
-    const ao = shotById.get(a.shotId!)?.orderIndex ?? 0;
-    const bo = shotById.get(b.shotId!)?.orderIndex ?? 0;
-    if (ao !== bo) return ao - bo;
-    if (a.winner !== b.winner) return a.winner ? -1 : 1;
-    return a.createdAt.getTime() - b.createdAt.getTime();
-  });
+  // порядок: сначала новые, затем старые — по времени создания (убывание)
+  videos.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
   const items: GalleryItem[] = await Promise.all(
     videos
@@ -72,7 +73,7 @@ export default async function GalleryContent({ episodeId }: { episodeId: string 
           )}
         </EmptyState>
       )}
-      {items.length > 0 && <GalleryClient items={items} />}
+      {items.length > 0 && <GalleryClient items={items} inDrawer={inDrawer} />}
       {/* zip собирает финальную сборку — только утверждённые (winner) */}
       {hasWinner && (
         <a
