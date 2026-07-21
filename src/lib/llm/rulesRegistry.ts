@@ -434,6 +434,32 @@ export const SYSTEM_RULES: SystemRule[] = [
     },
     usedIn: [...SHOT_PROMPT_SITES, "revise_prompt"],
   },
+  {
+    id: "prompt_safe_wording",
+    title: "Лексика без NSFW-триггеров",
+    description:
+      "Контент-фильтр провайдера читает слова, а не смысл: запрет «успокаивающих» оговорок (nonsexual, no nudity, clearly adult) и эротизирующей лексики (инцидент 2026-07-20: невинная сцена сна отклонена фильтром из-за формулировок).",
+    text:
+      "БЕЗОПАСНАЯ ЛЕКСИКА (обязательно): контент-фильтр видеопровайдера реагирует на СЛОВА промпта, " +
+      "а не на смысл сцены — промпт с полностью невинным действием отклоняется из-за одних формулировок.\n" +
+      "- НИКОГДА не пиши «успокаивающие» мета-оговорки о пристойности сцены: nonsexual, no sexual " +
+      "content, no explicit nudity, tasteful, keep characters clearly adult и подобные. Отрицание " +
+      "содержит то же слово-триггер и само валит промпт; фраза про «взрослость» персонажей сигналит " +
+      "фильтру, будто в сцене есть повод сомневаться. Невинность сцены читается из описанных " +
+      "действий — не декларируй её.\n" +
+      "- Лексику секса, наготы и эротики не употребляй НИГДЕ — ни в описаниях, ни в Strict rules, " +
+      "ни в negative_prompt: sexual, nudity, naked, undressed, erotic, sensual, seductive, arousal " +
+      "и однокоренные. Нерелевантную тему просто не упоминай вовсе — даже чтобы запретить.\n" +
+      "- Физическую близость описывай конкретными видимыми фактами в нейтральных словах: вместо " +
+      '"intimate embrace, bodies pressed together, vulnerability" — "@Jacob\'s arm rests over ' +
+      '@Simon\'s shoulder; both lie still, asleep". Слова intimate, vulnerable, flesh, caress ' +
+      "заменяй нейтральными (close, quiet, calm, gentle).\n" +
+      "- Нижнее бельё и раздетость сам НЕ выдумывай: для сцены сна без заданного наряда пиши " +
+      "нейтральную одежду сна (plain dark sleepwear), а не бельё. Заданный WARDROBE LOCK копируй " +
+      "как есть, но в SHOT-блоках одежду и степень укрытости не пересказывай — опиши, что видно " +
+      '("covered by the blanket up to the chest"), без слов про тело под ним.',
+    usedIn: [...SHOT_PROMPT_SITES, "revise_prompt"],
+  },
   // ---------- ревизия промпта ----------
   {
     id: "revise_prompt_hygiene",

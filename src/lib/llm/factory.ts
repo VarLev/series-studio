@@ -1186,7 +1186,12 @@ export async function llmShotPrompt(
         "собственные (персонажи, локации, бренды) — латиницей по-английски; для сущностей библии " +
         "используй их element_name. Реплики в DIALOGUE LOCK — на английском (переведи, если в " +
         "исходнике они на другом языке).\n" +
-        [R("prompt_character_names"), R("prompt_identity_refs"), R("prompt_dialogue_delivery")]
+        [
+          R("prompt_character_names"),
+          R("prompt_identity_refs"),
+          R("prompt_dialogue_delivery"),
+          R("prompt_safe_wording"),
+        ]
           .filter(Boolean)
           .join("\n") +
         "\n" +
@@ -1287,7 +1292,7 @@ export async function llmRevisePrompt(
       // база знаний в кэшируемом префиксе — как в llmShotPrompt
       cacheableSystemPrefix: `${reviseTemplate}\n\n${rules}${knowledge ? `\n\n${knowledge}` : ""}`,
       system:
-        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${R("prompt_dialogue_delivery")}\n\n${reviseStyleBlock}\n\n${reviseCarriedBlock}\n\n` +
+        `${reviseStartBlock}\n\n${R("shot_view_rules")}\n\n${R("prompt_dialogue_delivery")}\n\n${R("prompt_safe_wording")}\n\n${reviseStyleBlock}\n\n${reviseCarriedBlock}\n\n` +
         `Улучши промпт для модели ${prev.targetModel} с учётом замечания, следуя шаблону выше и ` +
         "сохранив работающие части. " +
         (R("revise_prompt_hygiene") ? `${R("revise_prompt_hygiene")}\n` : "") +

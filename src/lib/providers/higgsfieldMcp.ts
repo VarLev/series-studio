@@ -190,13 +190,18 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
       }
     }
     if (medias.length) params.medias = medias;
+    return { jobId: await this.dispatchGenerateVideo(params) };
+  }
 
+  /**
+   * generate_video → job id. Сервер может вместо сабмита вернуть рекомендацию
+   * пресета (инцидент 2026-07-11: её UUID парсился как job id → зомби-задачи) —
+   * отклоняем пресет и повторяем ОДИН раз, только если сабмита точно не было.
+   */
+  private async dispatchGenerateVideo(params: Record<string, unknown>): Promise<string> {
     let res = await callMcpTool("generate_video", { params });
     if (res.isError) throw new Error(`Higgsfield MCP: ${res.text.slice(0, 300)}`);
     let jobId = parseSubmittedJobId(res.text);
-    // Сервер может вместо сабмита вернуть рекомендацию пресета (инцидент
-    // 2026-07-11: её UUID парсился как job id → зомби-задачи). Отклоняем
-    // пресет и повторяем ОДИН раз — только если сабмита точно не было.
     if (!jobId && !/submit/i.test(res.text) && /preset/i.test(res.text)) {
       const presetId = res.text.match(UUID_RE)?.[0];
       if (presetId) {
@@ -214,7 +219,31 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     // (строгий формат «Submitted N job»), поэтому сбой проверки НЕ фатален:
     // бросать здесь = потерять учёт оплаченной задачи (инцидент 2026-07-12).
     await callMcpTool("job_status", { jobId }, { retry: true }).catch(() => {});
-    return { jobId };
+    return jobId;
+  }
+
+  /**
+   * Правка готового видео: исходный ролик уходит ролью video_references
+   * (заявлена у gemini_omni/seedance_2_0 в models_explore). Промпт приходит
+   * готовым — обвязку собирает вызывающий (videoEdit.ts) и логирует её в Console.
+   */
+  async submitVideoEdit(job: {
+    model: string;
+    prompt: string;
+    videoMediaId: string;
+    durationSec: number;
+    aspectRatio: string;
+    resolution?: string;
+  }): Promise<SubmittedJob> {
+    const params: Record<string, unknown> = {
+      model: job.model,
+      prompt: job.prompt,
+      duration: job.durationSec,
+      aspect_ratio: job.aspectRatio,
+      ...(job.resolution ? { resolution: job.resolution } : {}),
+      medias: [{ value: job.videoMediaId, role: "video_references" }],
+    };
+    return { jobId: await this.dispatchGenerateVideo(params) };
   }
 
   /** media_id (UUID) отдаём как есть; https-URL импортируем в хранилище Higgsfield. */
@@ -246,9 +275,11 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
     return { status: "queued", resultUrls: [] };
   }
 
-  /** Локальный файл → media_upload (presigned PUT) → media_confirm → {media_id, https-URL}. */
+  /** Локальный файл (картинка или видео) → media_upload (presigned PUT) →
+   *  media_confirm → {media_id, https-URL}. */
   async uploadMedia(data: Buffer, contentType: string): Promise<{ id: string; url: string }> {
-    const ext = contentType.includes("png") ? "png" : "jpg";
+    const ext = contentType.includes("png") ? "png" : contentType.includes("mp4") ? "mp4" : "jpg";
+    const mediaType = contentType.startsWith("video/") ? "video" : "image";
     const res = await callMcpTool(
       "media_upload",
       { method: "upload_url", filename: `ref.${ext}`, content_type: contentType },
@@ -265,7 +296,7 @@ export class HiggsfieldMcpProvider implements GenerationProvider {
       body: new Uint8Array(data),
     });
     if (!put.ok) throw new Error(`media upload PUT: ${put.status}`);
-    const confirm = await callMcpTool("media_confirm", { type: "image", media_id: mediaId }, { retry: true });
+    const confirm = await callMcpTool("media_confirm", { type: mediaType, media_id: mediaId }, { retry: true });
     if (confirm.isError) throw new Error(`media_confirm: ${confirm.text.slice(0, 200)}`);
     // presigned PUT URL без query = постоянный https-адрес медиа (нужен Elements)
     return { id: mediaId, url: uploadUrl.split("?")[0] };

@@ -11,6 +11,7 @@ import {
   listPromptVersions,
   cancelPromptGen,
 } from "@/lib/actions/prompts";
+import { startGeneration } from "@/lib/actions/generate";
 import {
   LLM_MODELS,
   PROMPT_FAMILIES,
@@ -46,7 +47,13 @@ export interface UsedTechnique {
   negative: string;
 }
 
-type ResumeMarker = { families: PromptFamily[]; baseline: number; startedAt: number };
+type ResumeMarker = {
+  families: PromptFamily[];
+  baseline: number;
+  startedAt: number;
+  /** отметка «сразу отправить в Seedance» — переживает перезагрузку во время генерации */
+  autoSend: boolean;
+};
 
 /**
  * Маркер незавершённой генерации промпта из localStorage; протухший (старше 4 мин,
@@ -56,13 +63,23 @@ function readResumeMarker(key: string): ResumeMarker | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const m = JSON.parse(raw) as { families?: PromptFamily[]; baseline?: number; startedAt?: number };
+    const m = JSON.parse(raw) as {
+      families?: PromptFamily[];
+      baseline?: number;
+      startedAt?: number;
+      autoSend?: boolean;
+    };
     if (!m?.startedAt || !m.families?.length) return null;
     if (Date.now() - m.startedAt > 240_000) {
       localStorage.removeItem(key);
       return null;
     }
-    return { families: m.families, baseline: m.baseline ?? 0, startedAt: m.startedAt };
+    return {
+      families: m.families,
+      baseline: m.baseline ?? 0,
+      startedAt: m.startedAt,
+      autoSend: Boolean(m.autoSend),
+    };
   } catch {
     return null;
   }
@@ -79,6 +96,8 @@ export default function PromptBlock({
   usedTechniquesByFamily = { seedance: [], kling: [] },
   useCli = false,
   useCliGpt = false,
+  seedanceModelId,
+  groupDurationSec,
 }: {
   shotId: string;
   episodeId: string;
@@ -96,6 +115,10 @@ export default function PromptBlock({
   useCli?: boolean;
   /** llm_use_cli_gpt на /costs — GPT-вызовы идут через подписку ChatGPT (Codex CLI) */
   useCliGpt?: boolean;
+  /** видеомодель Seedance для авто-отправки промпта (чекбокс «сразу в Seedance») */
+  seedanceModelId: string;
+  /** длительность группы — уходит как длина видео при авто-отправке */
+  groupDurationSec: number;
 }) {
   const router = useRouter();
   const t = useT();
@@ -110,6 +133,14 @@ export default function PromptBlock({
   const { family, setFamily, openByFamily, setOpen } = usePromptTrack();
   // что создавать кнопкой: один трек или оба
   const [createChoice, setCreateChoice] = useState<PromptFamily | "both">("seedance");
+  // «сразу отправить в Seedance»: когда долгий промпт будет готов, он автоматически
+  // уйдёт на генерацию видео (Seedance · 480p · 9:16 · High · длина группы) — чтобы
+  // не возвращаться и не нажимать «генерировать» вручную (замечание заказчика).
+  const [autoSendSeedance, setAutoSendSeedance] = useState(false);
+  // решение читается в finishOk (закрытие таймера-поллера) и переживает перезагрузку
+  // через маркер — держим в ref, чтобы не зависеть от устаревшего замыкания
+  const autoSendRef = useRef(false);
+  const genFamiliesRef = useRef<PromptFamily[]>([]);
   // выбор LLM-модели для промпт-фабрики (какая ИИ пишет промпт). По умолчанию —
   // глобальная модель промптов (settings.llm_model) как есть, включая GPT
   // (GPT идёт через Codex CLI). Можно переключить прямо здесь.
@@ -201,6 +232,47 @@ export default function PromptBlock({
     } catch {}
   }
 
+  // чекбокс можно поставить и во время генерации: держим ref в актуальном состоянии
+  // и, если задача уже идёт, дописываем решение в маркер (переживёт перезагрузку)
+  function setAutoSend(v: boolean) {
+    setAutoSendSeedance(v);
+    autoSendRef.current = v;
+    try {
+      const raw = localStorage.getItem(genKey);
+      if (raw) localStorage.setItem(genKey, JSON.stringify({ ...JSON.parse(raw), autoSend: v }));
+    } catch {}
+  }
+
+  // Авто-отправка готового промпта в Seedance с фиксированными параметрами
+  // (замечание заказчика): 480p · 9:16 · High, длина видео — из группы шотов.
+  // confirmed:true — пользователь заранее согласился чекбоксом; одиночная 480p-
+  // задача заведомо дешёвая, поэтому предохранитель по кредитам её не держит.
+  async function autoSendToSeedance() {
+    try {
+      const res = await startGeneration({
+        shotId,
+        modelIds: [seedanceModelId],
+        durationSec: Math.min(15, Math.max(4, groupDurationSec)),
+        aspectRatio: "9:16",
+        quality: "480p",
+        bitrate: "high",
+        confirmed: true,
+      });
+      if (res.ok) {
+        toast(
+          t(
+            "Промпт готов — задача Seedance поставлена в очередь",
+            "Prompt ready — Seedance job queued",
+          ),
+        );
+      } else if ("error" in res) {
+        toast(t(`Seedance: ${res.error}`, `Seedance: ${res.error}`));
+      }
+    } catch {
+      toast(t("Не удалось отправить в Seedance", "Failed to send to Seedance"));
+    }
+  }
+
   function finishOk() {
     if (doneRef.current) return;
     doneRef.current = true;
@@ -215,6 +287,11 @@ export default function PromptBlock({
     if (timers.current.tick) clearInterval(timers.current.tick);
     if (timers.current.poll) clearInterval(timers.current.poll);
     setGenerating(false);
+    // «сразу в Seedance»: промпт создан → тут же ставим видео-задачу. Только если в
+    // этой генерации был трек Seedance (иначе свежего Seedance-промпта нет).
+    if (autoSendRef.current && genFamiliesRef.current.includes("seedance")) {
+      void autoSendToSeedance();
+    }
     // Через туннель одиночный router.refresh() иногда теряется (RSC-ответ дропается),
     // и свежий промпт не появляется до ручного обновления. Повторяем несколько раз —
     // как только обновлённое дерево доедет, промпт отрисуется сам.
@@ -279,12 +356,18 @@ export default function PromptBlock({
     setError("");
     setElapsed(0);
     const families = createFamilies;
+    // фиксируем намерение авто-отправки на момент старта (чекбокс скрыт для kling-only)
+    genFamiliesRef.current = families;
+    autoSendRef.current = autoSendSeedance;
     // версия-ориентир: успех = появилось столько новых версий, сколько треков создаём
     const baseline = versions[0]?.version ?? 0;
     const startedAt = Date.now();
     const epoch = crypto.randomUUID();
     try {
-      localStorage.setItem(genKey, JSON.stringify({ families, baseline, startedAt }));
+      localStorage.setItem(
+        genKey,
+        JSON.stringify({ families, baseline, startedAt, autoSend: autoSendSeedance }),
+      );
     } catch {}
     setGenerating(true);
     startWatch(families.length, baseline, startedAt);
@@ -318,6 +401,11 @@ export default function PromptBlock({
     if (!m) return cleanupTimers;
     setGenerating(true);
     setElapsed(Math.floor((Date.now() - m.startedAt) / 1000));
+    // восстанавливаем намерение авто-отправки — иначе перезагрузка во время
+    // генерации потеряла бы галочку, и промпт не ушёл бы в Seedance
+    setAutoSendSeedance(m.autoSend);
+    autoSendRef.current = m.autoSend;
+    genFamiliesRef.current = m.families;
     startWatch(m.families.length, m.baseline, m.startedAt);
     return cleanupTimers;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -564,6 +652,30 @@ export default function PromptBlock({
               "Haiku is fastest (~10–20 s), Opus is smarter but slower (up to 1–2 min).",
             )}
           </div>
+          {/* Авто-отправка: когда долгий промпт будет готов, сразу уйдёт видео-задача
+              Seedance — можно не возвращаться и не жать «генерировать» вручную. Только
+              для трека Seedance (для kling-only свежего Seedance-промпта нет). */}
+          {createFamilies.includes("seedance") && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border border-[var(--border-subtle)] bg-ink-800 px-2.5 py-2">
+              <input
+                type="checkbox"
+                checked={autoSendSeedance}
+                onChange={(e) => setAutoSend(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--violet-400)]"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[11px] font-semibold text-t100">
+                  {t("Сразу отправить в Seedance", "Send to Seedance right away")}
+                </span>
+                <span className="block text-[9.5px] leading-snug text-t400">
+                  {t(
+                    `Когда промпт будет готов, он автоматически уйдёт на генерацию видео: Seedance · 480p · 9:16 · High · ${Math.min(15, Math.max(4, groupDurationSec))} с.`,
+                    `When the prompt is ready it's auto-submitted to video: Seedance · 480p · 9:16 · High · ${Math.min(15, Math.max(4, groupDurationSec))} s.`,
+                  )}
+                </span>
+              </span>
+            </label>
+          )}
           <button
             onClick={onGenerate}
             title={generating ? t("Идёт генерация — нажмите, чтобы отменить", "Generating — click to cancel") : undefined}

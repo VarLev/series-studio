@@ -41,7 +41,7 @@ function ffmpegStderr(bin: string, args: string[]): Promise<string> {
   });
 }
 
-async function ffmpegBinary(): Promise<string | null> {
+export async function ffmpegBinary(): Promise<string | null> {
   try {
     return (await import("ffmpeg-static")).default;
   } catch {

@@ -289,6 +289,12 @@ export default async function ShotPage(ctx: {
   const settings = await getAllSettings();
   const catalog = await getCatalog("video");
   const defaultModelIds = settings.target_models.split(",").map((m) => m.trim()).filter(Boolean);
+  // модель для авто-отправки промпта в Seedance (чекбокс в блоке «Промпт»): берём
+  // Seedance-модель из дефолтного набора генерации, иначе первую Seedance каталога
+  const seedanceModelId =
+    defaultModelIds.find((id) => /seedance/i.test(id) && catalog.some((m) => m.id === id)) ??
+    catalog.find((m) => /seedance/i.test(m.id))?.id ??
+    "seedance_2_0";
 
   const grpN = shot.isInsert ? "✦" : String(displayNoById.get(shotId) ?? 0).padStart(2, "0");
   const hasStartFrame = shotRefs.some((r) => r.role === "start_frame");
@@ -558,6 +564,8 @@ export default async function ShotPage(ctx: {
               usedTechniquesByFamily={usedTechniquesByFamily}
               useCli={settings.llm_use_cli === "1"}
               useCliGpt={settings.llm_use_cli_gpt === "1"}
+              seedanceModelId={seedanceModelId}
+              groupDurationSec={shot.durationSec}
             />
           </PromptDrawer>
 

@@ -96,6 +96,89 @@ export async function startGeneration(
 }
 
 /**
+ * Правка готового видео-дубля: исходник уходит видео-референсом в Seedance
+ * (Higgsfield MCP) + инструкция, что изменить; результат — новый дубль
+ * того же шота. Быстрая постановка как в startGeneration: queued-строка
+ * мгновенно, сеть в фоне. Стоимость уточняется бесплатным get_cost там же.
+ */
+export async function startVideoEdit(input: {
+  generationId: string;
+  instruction: string;
+  /** фрагмент таймлайна «от/до» в секундах; обе границы пусты = весь ролик */
+  fromSec?: number | null;
+  toSec?: number | null;
+}): Promise<Result> {
+  await requireAuth();
+  try {
+    const instruction = input.instruction.trim();
+    if (!instruction) return { ok: false, error: "Опишите, что изменить в видео" };
+    const fromSec = typeof input.fromSec === "number" && input.fromSec >= 0 ? input.fromSec : null;
+    const toSec = typeof input.toSec === "number" && input.toSec > 0 ? input.toSec : null;
+    if (fromSec != null && toSec != null && toSec <= fromSec) {
+      return { ok: false, error: "Фрагмент пуст: конец должен быть позже начала" };
+    }
+    // правка идёт только через Higgsfield MCP — без связи задачу не ставим
+    const { isConnected } = await import("@/lib/higgsfieldMcp");
+    if (!(await isConnected())) {
+      return {
+        ok: false,
+        error:
+          "Нет связи с Higgsfield (MCP). Подключите его в «Настройки → Higgsfield» и повторите — правка не запущена.",
+      };
+    }
+    const { submitVideoEditJob } = await import("@/lib/videoEdit");
+    await submitVideoEditJob({ sourceGenerationId: input.generationId, instruction, fromSec, toSec });
+    const db = await getDb();
+    const [src] = await db.select().from(generations).where(eq(generations.id, input.generationId));
+    if (src?.shotId) {
+      revalidatePath(`/episodes/${src.episodeId}/shots/${src.shotId}`);
+      revalidatePath("/queue");
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Не удалось поставить правку" };
+  }
+}
+
+/**
+ * Файл дубля для скачивания: весь ролик или диапазон «от/до», в оригинальном
+ * качестве или 720p-апскейлом. Готовится ffmpeg-ом на сервере при первом
+ * запросе, дальше отдаётся кеш (results/{shotId}/{genId}.<вариант>.mp4).
+ * Возвращает URL готового файла — клиент запускает скачивание сам.
+ */
+export async function prepareVideoDownload(input: {
+  generationId: string;
+  quality: "480p" | "720p"; // 480p = оригинальное качество без перекодирования
+  fromSec?: number | null;
+  toSec?: number | null;
+}): Promise<Result<{ url: string }>> {
+  await requireAuth();
+  try {
+    const db = await getDb();
+    const [gen] = await db.select().from(generations).where(eq(generations.id, input.generationId));
+    if (!gen || gen.kind !== "video" || !gen.resultStoragePath) {
+      return { ok: false, error: "Видео не найдено" };
+    }
+    const fromSec = typeof input.fromSec === "number" && input.fromSec >= 0 ? input.fromSec : null;
+    const toSec = typeof input.toSec === "number" && input.toSec > 0 ? input.toSec : null;
+    if (fromSec != null && toSec != null && toSec <= fromSec) {
+      return { ok: false, error: "Фрагмент пуст: конец должен быть позже начала" };
+    }
+    const { ensure720pFile, ensureClipFile } = await import("@/lib/videoEdit");
+    let key = gen.resultStoragePath;
+    if (fromSec != null || toSec != null) {
+      key = await ensureClipFile(key, fromSec ?? 0, toSec, input.quality === "720p");
+    } else if (input.quality === "720p") {
+      key = await ensure720pFile(key);
+    }
+    const { getFileUrl } = await import("@/lib/storage");
+    return { ok: true, data: { url: await getFileUrl(key) } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Не удалось подготовить файл" };
+  }
+}
+
+/**
  * Точная стоимость по каждой модели ДО запуска (Higgsfield get_cost — задача
  * не создаётся, кредиты не списываются). exact=false — сетевой фолбэк-формула.
  */

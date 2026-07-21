@@ -16,7 +16,7 @@ import type { BeatMarker } from "@/lib/beatMarkers";
 import { toast } from "@/components/Toaster";
 import { toggleWinner } from "@/lib/actions/generations";
 import { revisePrompt } from "@/lib/actions/prompts";
-import { startGeneration } from "@/lib/actions/generate";
+import { prepareVideoDownload, startGeneration, startVideoEdit } from "@/lib/actions/generate";
 import { useT } from "@/components/I18nProvider";
 
 const FPS = 24;
@@ -102,9 +102,21 @@ export default function ReviewPlayer({
   const [grabTarget, setGrabTarget] = useState<string>(""); // "series" | "next-shot" | entityId
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [editOpen, setEditOpen] = useState(false); // «Править» → видео-правка (Seedance)
+  const [editText, setEditText] = useState("");
+  // фрагмент «от/до» для правки: метки ⟦/⟧ по позиции плейхеда (hotkeys I/O).
+  // Порядок постановки неважен — границы нормализуются min/max при показе и отправке
+  const [fragIn, setFragIn] = useState<number | null>(null);
+  const [fragOut, setFragOut] = useState<number | null>(null);
+  const [dlOpen, setDlOpen] = useState(false); // «Скачать» → выбор ролик/фрагмент × 480p/720p
+  const [dlBusy, setDlBusy] = useState<string | null>(null); // ключ кнопки, чей файл готовится
   const [beat, setBeat] = useState<BeatMarker | null>(null); // маркер, чья инфа открыта
   const [pending, startTransition] = useTransition();
   const dragging = useRef(false);
+  // зеркало time для обработчиков меток: после перемотки бегунком currentTime
+  // видео может отдавать устаревшее значение (сик асинхронный, особенно iOS),
+  // а state — ровно та позиция, которую пользователь видит на ползунке
+  const timeRef = useRef(0);
 
   const shotHref = `/episodes/${episodeId}/shots/${shotId}`;
   const close = useCallback(() => {
@@ -119,12 +131,18 @@ export default function ReviewPlayer({
     setPlaying(false);
     setTime(0);
     setDuration(0);
+    setFragIn(null); // фрагмент принадлежит конкретному кандидату
+    setFragOut(null);
   }
 
   const eachVideo = useCallback((fn: (v: HTMLVideoElement) => void) => {
     if (videoRef.current) fn(videoRef.current);
     if (videoBRef.current) fn(videoBRef.current);
   }, []);
+
+  useEffect(() => {
+    timeRef.current = time;
+  }, [time]);
 
   const handleTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     const v = e.currentTarget;
@@ -185,6 +203,15 @@ export default function ReviewPlayer({
     [candidates.length],
   );
 
+  // позиция для метки: на паузе — то, что показывает ползунок (timeRef);
+  // при воспроизведении — точный currentTime элемента (state отстаёт на timeupdate)
+  const markAt = useCallback(() => {
+    const v = videoRef.current;
+    return v && !v.paused ? v.currentTime : timeRef.current;
+  }, []);
+  const markFragIn = useCallback(() => setFragIn(markAt()), [markAt]);
+  const markFragOut = useCallback(() => setFragOut(markAt()), [markAt]);
+
   // тумблер: победителей может быть несколько, повторное нажатие снимает ★
   const pickWinner = useCallback(() => {
     if (!current) return;
@@ -202,10 +229,12 @@ export default function ReviewPlayer({
   // hotkeys (spec §5, e.code — независимо от раскладки)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (grabOpen || noteOpen || beat) {
+      if (grabOpen || noteOpen || editOpen || dlOpen || beat) {
         if (e.code === "Escape") {
           setGrabOpen(false);
           setNoteOpen(false);
+          setEditOpen(false);
+          setDlOpen(false);
           setBeat(null);
         }
         return;
@@ -225,6 +254,12 @@ export default function ReviewPlayer({
         case "Enter":
           pickWinner();
           break;
+        case "KeyI":
+          markFragIn();
+          break;
+        case "KeyO":
+          markFragOut();
+          break;
         case "Escape":
           close();
           break;
@@ -232,7 +267,7 @@ export default function ReviewPlayer({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [grabOpen, noteOpen, beat, togglePlay, step, pickWinner, close]);
+  }, [grabOpen, noteOpen, editOpen, dlOpen, beat, togglePlay, step, pickWinner, markFragIn, markFragOut, close]);
 
   function grabFrame() {
     const v = videoRef.current;
@@ -314,6 +349,70 @@ export default function ReviewPlayer({
     });
   }
 
+  function submitEdit() {
+    if (!editText.trim() || !current) return;
+    // границы в порядке воспроизведения; открытый край (одна метка) — null,
+    // сервер сам подставит начало/конец ролика
+    const fromSec = fragIn != null && fragOut != null ? Math.min(fragIn, fragOut) : fragIn;
+    const toSec = fragIn != null && fragOut != null ? Math.max(fragIn, fragOut) : fragOut;
+    startTransition(async () => {
+      const res = await startVideoEdit({
+        generationId: current.id,
+        instruction: editText.trim(),
+        fromSec,
+        toSec,
+      });
+      if (!res.ok) {
+        toast("error" in res ? res.error : t("Не удалось поставить правку", "Failed to queue the edit"));
+        return;
+      }
+      toast(
+        t(
+          "Правка отправлена — новый дубль появится в этом шоте",
+          "Edit sent — the new take will appear in this shot",
+        ),
+      );
+      setEditOpen(false);
+      setEditText("");
+      setFragIn(null);
+      setFragOut(null);
+      router.refresh();
+    });
+  }
+
+  // программное скачивание: невидимый <a download> — и для картинок,
+  // и для подготовленной на сервере 720p-версии
+  function triggerDownload(url: string) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // скачивание с серверной подготовкой: весь ролик или выделенный фрагмент,
+  // оригинал или 720p-апскейл; busy-ключ подсвечивает конкретную кнопку
+  async function downloadPrepared(quality: "480p" | "720p", clip: boolean) {
+    if (!current || dlBusy) return;
+    const fromSec = clip ? (fragIn != null && fragOut != null ? Math.min(fragIn, fragOut) : fragIn) : null;
+    const toSec = clip ? (fragIn != null && fragOut != null ? Math.max(fragIn, fragOut) : fragOut) : null;
+    setDlBusy(`${clip ? "clip" : "full"}-${quality}`);
+    try {
+      const res = await prepareVideoDownload({ generationId: current.id, quality, fromSec, toSec });
+      if (!res.ok) {
+        toast("error" in res ? res.error : t("Не удалось подготовить файл", "Failed to prepare the file"));
+        return;
+      }
+      if (res.data?.url) {
+        triggerDownload(res.data.url);
+        setDlOpen(false);
+      }
+    } finally {
+      setDlBusy(null);
+    }
+  }
+
   // перетаскивание разделителя «Сравнить»
   function onSplitPointer(e: React.PointerEvent<HTMLDivElement>) {
     if (!dragging.current) return;
@@ -335,6 +434,10 @@ export default function ReviewPlayer({
   // шкала транспорта: реальная длина файла, если известна; иначе длительность
   // группы (некоторые MP4 не сообщают duration — см. handleDuration)
   const scale = (duration > 0 ? duration : shotDurationSec) || 0;
+  // границы фрагмента в порядке воспроизведения: одна метка = до конца/от начала
+  const hasFrag = fragIn != null || fragOut != null;
+  const fragFrom = fragIn != null && fragOut != null ? Math.min(fragIn, fragOut) : (fragIn ?? 0);
+  const fragTo = fragIn != null && fragOut != null ? Math.max(fragIn, fragOut) : (fragOut ?? scale);
   // Маркеры ставим по АБСОЛЮТНЫМ секундам — той же шкале, что бегунок и таймкод:
   // если модель отдала файл короче плана, хвост маркеров просто не показываем, а
   // не растягиваем раскадровку под факт (растяжка врала бы о времени шота).
@@ -584,6 +687,24 @@ export default function ReviewPlayer({
                 })}
               </div>
             )}
+            {/* выделенный фрагмент правки — фиолетовая полоса в геометрии бегунка */}
+            {hasFrag && scale > 0 && (
+              <div className="relative h-1">
+                {(() => {
+                  const f1 = Math.min(1, Math.max(0, fragFrom / scale));
+                  const f2 = Math.min(1, Math.max(f1, fragTo / scale));
+                  return (
+                    <span
+                      className="absolute top-0 block h-1 rounded-full bg-violet-500"
+                      style={{
+                        left: `calc(${THUMB_PX / 2}px + ${f1} * (100% - ${THUMB_PX}px))`,
+                        width: `calc(${f2 - f1} * (100% - ${THUMB_PX}px))`,
+                      }}
+                    />
+                  );
+                })()}
+              </div>
+            )}
             <input
               type="range"
               min={0}
@@ -620,6 +741,37 @@ export default function ReviewPlayer({
             >
               ›
             </button>
+            {/* границы фрагмента правки: ⟦ = от плейхеда, ⟧ = до плейхеда (I/O) */}
+            <button
+              onClick={markFragIn}
+              aria-label={t("Начало фрагмента (I)", "Fragment start (I)")}
+              title={t("Начало фрагмента (I)", "Fragment start (I)")}
+              className="flex h-9 w-9 items-center justify-center rounded-md font-mono text-[14px] hover:bg-[#181818]"
+              style={{ color: fragIn != null ? "var(--violet-300)" : "#8a8a8a" }}
+            >
+              ⟦
+            </button>
+            <button
+              onClick={markFragOut}
+              aria-label={t("Конец фрагмента (O)", "Fragment end (O)")}
+              title={t("Конец фрагмента (O)", "Fragment end (O)")}
+              className="flex h-9 w-9 items-center justify-center rounded-md font-mono text-[14px] hover:bg-[#181818]"
+              style={{ color: fragOut != null ? "var(--violet-300)" : "#8a8a8a" }}
+            >
+              ⟧
+            </button>
+            {hasFrag && (
+              <button
+                onClick={() => {
+                  setFragIn(null);
+                  setFragOut(null);
+                }}
+                title={t("Сбросить фрагмент", "Clear fragment")}
+                className="flex h-9 items-center gap-1 rounded-md px-1.5 font-mono text-[10px] text-[var(--violet-300)] hover:bg-[#181818]"
+              >
+                {timecode(fragFrom)}–{timecode(fragTo)} ✕
+              </button>
+            )}
             <span className="ml-auto font-mono text-[10px] text-[#8a8a8a]">
               {timecode(time)} · {scale.toFixed(0)}
               {t("с", "s")}
@@ -628,7 +780,7 @@ export default function ReviewPlayer({
         </div>
       )}
 
-      {/* нижняя панель: [Замечание] [Взять кадр] [Победитель] */}
+      {/* нижняя панель: [Замечание] [Править] [Взять кадр] [Скачать] [Победитель] */}
       <div
         className="flex gap-2 border-t border-[#1b1b1b] bg-[#0b0b0b] px-3 py-1.5"
         style={{ paddingBottom: "max(8px, env(safe-area-inset-bottom))" }}
@@ -641,19 +793,25 @@ export default function ReviewPlayer({
           <span>👎</span>{t("Замечание", "Note")}
         </button>
         <button
+          onClick={() => setEditOpen(true)}
+          disabled={!current.isVideo}
+          className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
+        >
+          <span>🪄</span>{t("Править", "Edit")}
+        </button>
+        <button
           onClick={grabFrame}
           disabled={!current.isVideo}
           className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c] disabled:opacity-40"
         >
           <span>📷</span>{t("Взять кадр", "Grab frame")}
         </button>
-        <a
-          href={current.url}
-          download
+        <button
+          onClick={() => (current.isVideo ? setDlOpen(true) : triggerDownload(current.url))}
           className="flex min-h-[38px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border border-[#2a2a2a] bg-[#141414] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#e6e6e6] hover:bg-[#1c1c1c]"
         >
           <span>⬇</span>{t("Скачать", "Download")}
-        </a>
+        </button>
         <button
           onClick={pickWinner}
           disabled={pending}
@@ -725,11 +883,14 @@ export default function ReviewPlayer({
         title={t(`Кадр ${timecode(grabTime)} — сохранить как…`, `Frame ${timecode(grabTime)} — save as…`)}
       >
         {grabDataUrl && (
+          // Превью — только для просмотра: ограничиваем высоту, иначе вертикальный
+          // кадр (9:16) во всю ширину выталкивал варианты и кнопку «Сохранить» за
+          // пределы шторки, и до них приходилось доскроливать (замечание заказчика).
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={grabDataUrl}
             alt="Кадр"
-            className="mb-3 w-full rounded-lg border border-[var(--border-subtle)]"
+            className="mx-auto mb-3 max-h-[38dvh] w-auto max-w-full rounded-lg border border-[var(--border-subtle)] object-contain"
           />
         )}
         <div className="flex flex-col gap-1.5">
@@ -817,6 +978,114 @@ export default function ReviewPlayer({
           >
             {t("Только создать версию", "Just create the version")}
           </button>
+        </div>
+      </Sheet>
+
+      {/* Шторка «Править»: видео-правка исходного дубля (Seedance video_references) */}
+      <Sheet
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={t("Правка видео", "Video edit")}
+      >
+        <textarea
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          rows={3}
+          autoFocus
+          placeholder={t(
+            "Что изменить в этом дубле? Например: «сделай джинсы синими», «убери лишнего человека справа».",
+            "What should change in this take? E.g. “make the jeans blue”, “remove the extra person on the right”.",
+          )}
+          className="w-full resize-none rounded-lg border border-[var(--border-subtle)] bg-ink-800 px-3 py-2.5 text-[13px] text-t200 outline-none focus:border-[var(--border-strong)]"
+        />
+        <p className="mt-2 text-[11px] font-semibold leading-snug text-t200">
+          {hasFrag
+            ? t(
+                `Правится фрагмент ${timecode(fragFrom)}–${timecode(fragTo)}${
+                  fragTo - fragFrom < 4 ? " · окно расширится до 4 с (минимум модели)" : ""
+                }`,
+                `Editing the fragment ${timecode(fragFrom)}–${timecode(fragTo)}${
+                  fragTo - fragFrom < 4 ? " · the window expands to the model's 4 s minimum" : ""
+                }`,
+              )
+            : t(
+                "Правится весь ролик. Чтобы править только часть — выделите фрагмент метками ⟦ ⟧ на таймлайне (клавиши I/O).",
+                "The whole take is edited. To edit only a part, mark a fragment with ⟦ ⟧ on the timeline (I/O keys).",
+              )}
+        </p>
+        <p className="mt-2 text-[11px] leading-snug text-t400">
+          {t(
+            "Видео уйдёт референсом в Seedance (Higgsfield), модель воспроизведёт его с вашей правкой. Результат появится новым дублем этого шота (≈1 кр за секунду, кредиты подписки Higgsfield).",
+            "The video is sent as a reference to Seedance (Higgsfield); the model recreates it with your change. The result arrives as a new take of this shot (≈1 cr per second, Higgsfield subscription credits).",
+          )}
+        </p>
+        <button
+          onClick={submitEdit}
+          disabled={pending || !editText.trim()}
+          className="mt-3.5 min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
+          style={{ boxShadow: "var(--glow-violet-sm)" }}
+        >
+          {pending ? t("Отправка…", "Submitting…") : t("Отправить правку", "Send the edit")}
+        </button>
+      </Sheet>
+
+      {/* Шторка «Скачать»: весь ролик / выделенный фрагмент × оригинал / 720p */}
+      <Sheet open={dlOpen} onClose={() => setDlOpen(false)} title={t("Скачать видео", "Download video")}>
+        <div className="flex flex-col gap-2">
+          {hasFrag && (
+            <>
+              <div className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-t400">
+                {t(
+                  `Фрагмент ${timecode(fragFrom)}–${timecode(fragTo)}`,
+                  `Fragment ${timecode(fragFrom)}–${timecode(fragTo)}`,
+                )}
+              </div>
+              <button
+                onClick={() => downloadPrepared("480p", true)}
+                disabled={dlBusy != null}
+                className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
+                style={{ boxShadow: "var(--glow-violet-sm)" }}
+              >
+                {dlBusy === "clip-480p"
+                  ? t("Готовлю фрагмент…", "Preparing the fragment…")
+                  : t("Фрагмент — оригинал (480p)", "Fragment — original (480p)")}
+              </button>
+              <button
+                onClick={() => downloadPrepared("720p", true)}
+                disabled={dlBusy != null}
+                className="min-h-12 w-full rounded-lg bg-violet-500 text-[11px] font-semibold uppercase tracking-[0.12em] text-white hover:bg-violet-400 disabled:opacity-50"
+                style={{ boxShadow: "var(--glow-violet-sm)" }}
+              >
+                {dlBusy === "clip-720p"
+                  ? t("Готовлю фрагмент…", "Preparing the fragment…")
+                  : t("Фрагмент — 720p", "Fragment — 720p")}
+              </button>
+              <div className="mt-1 text-[9.5px] font-semibold uppercase tracking-[0.16em] text-t400">
+                {t("Весь ролик", "Whole take")}
+              </div>
+            </>
+          )}
+          <a
+            href={current.url}
+            download
+            onClick={() => setDlOpen(false)}
+            className="flex min-h-12 w-full items-center justify-center rounded-lg border border-[var(--border-default)] text-[11px] font-semibold uppercase tracking-[0.12em] text-t200 hover:bg-ink-500"
+          >
+            {t("Оригинал (480p)", "Original (480p)")}
+          </a>
+          <button
+            onClick={() => downloadPrepared("720p", false)}
+            disabled={dlBusy != null}
+            className="min-h-12 w-full rounded-lg border border-[var(--border-default)] text-[11px] font-semibold uppercase tracking-[0.12em] text-t200 hover:bg-ink-500 disabled:opacity-50"
+          >
+            {dlBusy === "full-720p" ? t("Готовлю 720p…", "Preparing 720p…") : t("720p — апскейл", "720p — upscaled")}
+          </button>
+          <p className="text-[11px] leading-snug text-t400">
+            {t(
+              "Фрагмент и 720p готовятся на сервере при первом скачивании (несколько секунд) и запоминаются — повторное скачивание мгновенное.",
+              "Fragments and 720p versions are prepared on the server on first download (a few seconds) and cached — repeat downloads are instant.",
+            )}
+          </p>
         </div>
       </Sheet>
     </main>
